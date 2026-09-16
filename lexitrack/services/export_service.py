@@ -45,4 +45,4 @@ def _subtitle(count: int) -> str:
 
     noun = "word" if count == 1 else "words"
     stamp = datetime.now().strftime("%d %B %Y")
-    return f"{count} {noun} you marked as unknown · exported {stamp}"
+    return f"{count:,} {noun} you marked as unknown · exported {stamp}"

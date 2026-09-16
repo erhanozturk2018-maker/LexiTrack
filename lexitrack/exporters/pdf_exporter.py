@@ -110,7 +110,7 @@ def _build(
 
 def _default_subtitle(count: int) -> str:
     word = "word" if count == 1 else "words"
-    return f"{count} {word} · generated {datetime.now().strftime('%d %B %Y')}"
+    return f"{count:,} {word} · generated {datetime.now().strftime('%d %B %Y')}"
 
 
 def _styles() -> dict[str, ParagraphStyle]:
