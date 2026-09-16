@@ -7,6 +7,7 @@ allows a document to be re-imported without disturbing review progress.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime
 
 from ..core.errors import StorageError
@@ -53,18 +54,68 @@ class StateRepository:
             reviewed_at=_parse(row["reviewed_at"]),
         )
 
-    def progress(self) -> Progress:
-        """Return the counters shown on the review screen."""
-        row = self._db.connection.execute(
-            """
-            SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(st.status = 'known'), 0)   AS known,
-                COALESCE(SUM(st.status = 'unknown'), 0) AS unknown
-            FROM words w
-            LEFT JOIN user_word_state st ON st.word_id = w.id
-            """
-        ).fetchone()
+    def set_status_many(self, word_ids: Sequence[int], status: ReviewStatus) -> int:
+        """Set ``status`` on many words in one transaction. Returns the count changed.
+
+        Words that already have ``status`` are left alone, including their
+        ``reviewed_at`` — re-marking a known word as known is not a new review.
+        """
+        ids = list(dict.fromkeys(word_ids))
+        if not ids:
+            return 0
+        stamp = (
+            None
+            if status is ReviewStatus.NOT_REVIEWED
+            else datetime.now().isoformat(timespec="seconds")
+        )
+        changed = 0
+        try:
+            with self._db.transaction() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start : start + 500]
+                    placeholders = ",".join("?" * len(chunk))
+                    # Words imported before a state row existed still count.
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO user_word_state (word_id, status) "
+                        f"SELECT id, 'not_reviewed' FROM words WHERE id IN ({placeholders})",
+                        chunk,
+                    )
+                    cursor = conn.execute(
+                        f"UPDATE user_word_state SET status = ?, reviewed_at = ? "
+                        f"WHERE word_id IN ({placeholders}) AND status != ?",
+                        [status.value, stamp, *chunk, status.value],
+                    )
+                    changed += cursor.rowcount
+        except sqlite3.Error as exc:
+            raise StorageError("Those changes could not be saved.") from exc
+        return changed
+
+    def progress(self, list_id: int | None = None) -> Progress:
+        """Return review counters for one list, or for the whole vocabulary."""
+        if list_id is None:
+            row = self._db.connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(st.status = 'known'), 0)   AS known,
+                    COALESCE(SUM(st.status = 'unknown'), 0) AS unknown
+                FROM words w
+                LEFT JOIN user_word_state st ON st.word_id = w.id
+                """
+            ).fetchone()
+        else:
+            row = self._db.connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(st.status = 'known'), 0)   AS known,
+                    COALESCE(SUM(st.status = 'unknown'), 0) AS unknown
+                FROM list_words lw
+                LEFT JOIN user_word_state st ON st.word_id = lw.word_id
+                WHERE lw.list_id = ?
+                """,
+                (list_id,),
+            ).fetchone()
         return Progress(
             total=int(row["total"]),
             known=int(row["known"]),

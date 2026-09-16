@@ -28,6 +28,9 @@ class WordEntry:
         metadata: Parser-specific extras. Never interpreted by the vocabulary
             engine — it exists so a parser can keep information without
             leaking its own vocabulary into the rest of the application.
+        language: Language code (``"en"``, ``"de"``) when the parser knows it.
+            ``None`` means "not stated by the document"; the import service
+            then takes the language from the target list.
     """
 
     word: str
@@ -38,6 +41,7 @@ class WordEntry:
     definition: str | None = None
     example: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    language: str | None = None
 
     def __post_init__(self) -> None:
         if not self.word or not self.word.strip():
@@ -62,6 +66,7 @@ class WordEntry:
             definition=self.definition or other.definition,
             example=self.example or other.example,
             metadata=merged_metadata,
+            language=self.language or other.language,
         )
 
 

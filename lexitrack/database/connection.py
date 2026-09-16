@@ -1,8 +1,9 @@
-"""SQLite connection management and first-run schema creation.
+"""SQLite connection management, first-run schema creation and upgrades.
 
 A clean clone has no database file. The first time a connection is requested
-the file and schema are created automatically, so nothing has to be set up by
-hand before the application can start.
+the file and schema are created automatically. An existing file from an older
+LexiTrack is upgraded in place by :mod:`.migrations`, after a backup copy has
+been taken, so a user never has to recreate their vocabulary.
 """
 
 from __future__ import annotations
@@ -15,10 +16,10 @@ from pathlib import Path
 
 from ..core import paths
 from ..core.errors import StorageError
+from .migrations import SCHEMA_VERSION, migrate, read_version
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
 _SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 
 
@@ -37,6 +38,9 @@ class Database:
             path = paths.database_path()
         self.path = Path(path)
         self._connection: sqlite3.Connection | None = None
+        self._transaction_depth = 0
+        #: Set when opening this database upgraded it; the path of the backup.
+        self.migration_backup: Path | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -85,33 +89,62 @@ class Database:
     # -- schema ------------------------------------------------------------
 
     def _create_schema(self) -> None:
+        """Create a new database, or upgrade an existing one to the current schema.
+
+        ``schema.sql`` is only ever run against an empty database. Running it
+        against an older one would skip tables that already exist and then fail
+        on indexes that refer to columns those tables do not have yet.
+        """
         assert self._connection is not None
         try:
-            self._connection.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
-            current = self._connection.execute(
-                "SELECT version FROM schema_version"
-            ).fetchone()
-            if current is None:
+            version = read_version(self._connection)
+        except sqlite3.Error as exc:
+            log.exception("Could not read schema version of %s", self.path)
+            raise StorageError(
+                "The vocabulary database could not be read. It may be damaged."
+            ) from exc
+
+        if version is None:
+            try:
+                self._connection.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
                 self._connection.execute(
                     "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
                 )
-                log.info("Initialised vocabulary database at %s", self.path)
-        except (sqlite3.Error, OSError) as exc:
-            log.exception("Schema creation failed for %s", self.path)
-            raise StorageError("The vocabulary database could not be initialised.") from exc
+            except (sqlite3.Error, OSError) as exc:
+                log.exception("Schema creation failed for %s", self.path)
+                raise StorageError(
+                    "The vocabulary database could not be initialised."
+                ) from exc
+            log.info("Initialised vocabulary database at %s", self.path)
+            return
+
+        if version != SCHEMA_VERSION:
+            self.migration_backup = migrate(self._connection, self.path, version)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Run a block of statements as a single atomic transaction."""
+        """Run a block of statements as a single atomic transaction.
+
+        Transactions nest: an inner ``transaction()`` joins the outer one, so a
+        service can combine several repository calls into one atomic unit
+        without the repositories needing to know about each other.
+        """
         connection = self.connect()
-        try:
-            connection.execute("BEGIN")
-        except sqlite3.Error as exc:  # pragma: no cover - defensive
-            raise StorageError() from exc
+        outermost = self._transaction_depth == 0
+        if outermost:
+            try:
+                connection.execute("BEGIN")
+            except sqlite3.Error as exc:  # pragma: no cover - defensive
+                raise StorageError() from exc
+        self._transaction_depth += 1
         try:
             yield connection
-        except Exception:
-            connection.execute("ROLLBACK")
+        except BaseException:
+            self._transaction_depth -= 1
+            if outermost:
+                connection.execute("ROLLBACK")
             raise
         else:
-            connection.execute("COMMIT")
+            self._transaction_depth -= 1
+            if outermost:
+                connection.execute("COMMIT")

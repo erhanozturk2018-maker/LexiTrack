@@ -3,7 +3,11 @@
 This is *runtime* deduplication: a ``set`` of normalized words gives O(1)
 membership checks while a document is being processed. It is not storage — the
 set disappears when the import finishes. Cross-session identity is the
-database's job (a ``UNIQUE`` constraint on ``words.normalized_word``).
+database's job (a ``UNIQUE`` constraint on ``words(language, normalized_word)``).
+
+Identity here matches identity there: ``(language, normalized_word)``. Two
+entries with the same spelling in different languages — English "gift" and
+German "Gift" in one mixed file — are different words and both survive.
 """
 
 from __future__ import annotations
@@ -19,12 +23,12 @@ def deduplicate(entries: Iterable[WordEntry]) -> list[WordEntry]:
     The first occurrence sets the display form and position; later occurrences
     are merged into it so metadata found further down the document is not lost.
     """
-    by_identity: dict[str, WordEntry] = {}
-    order: list[str] = []
-    seen_words: set[str] = set()
+    by_identity: dict[tuple[str | None, str], WordEntry] = {}
+    order: list[tuple[str | None, str]] = []
+    seen_words: set[tuple[str | None, str]] = set()
 
     for entry in entries:
-        key = entry.normalized_word
+        key = (entry.language, entry.normalized_word)
         if key in seen_words:
             by_identity[key] = by_identity[key].merged_with(entry)
             continue
@@ -41,9 +45,10 @@ def iter_unique(entries: Iterable[WordEntry]) -> Iterator[WordEntry]:
     Useful for very large documents where holding every entry in memory is
     wasteful and the extra metadata from repeats is not needed.
     """
-    seen_words: set[str] = set()
+    seen_words: set[tuple[str | None, str]] = set()
     for entry in entries:
-        if entry.normalized_word in seen_words:
+        key = (entry.language, entry.normalized_word)
+        if key in seen_words:
             continue
-        seen_words.add(entry.normalized_word)
+        seen_words.add(key)
         yield entry

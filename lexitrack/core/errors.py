@@ -64,6 +64,30 @@ class StorageError(LexiTrackError):
     default_message = "The vocabulary database could not be accessed."
 
 
+class InvalidFileError(DocumentError):
+    """A structured file (JSON) was readable but did not have the expected shape."""
+
+    default_message = "This file is not in a format LexiTrack can import."
+
+
+class ListError(LexiTrackError):
+    """A list operation was not allowed."""
+
+    default_message = "The list could not be changed."
+
+
+class ListNotFoundError(ListError):
+    default_message = "That list no longer exists."
+
+
+class DuplicateListError(ListError):
+    default_message = "A list with that name already exists."
+
+
+class LanguageMismatchError(ListError):
+    default_message = "Those words are in a different language from the list."
+
+
 class ExportError(LexiTrackError):
     """An export could not be produced."""
 
