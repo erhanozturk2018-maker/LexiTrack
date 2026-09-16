@@ -19,7 +19,7 @@ import pytest
 pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtCore import QSettings, Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QStyle  # noqa: E402
 
 from lexitrack.models.user_word_state import Progress, ReviewStatus  # noqa: E402
 from lexitrack.models.vocabulary_list import VocabularyList  # noqa: E402
@@ -758,3 +758,28 @@ def test_adding_selected_words_to_another_list(
 
     assert loaded.get_progress(other.id).total == 2
     assert "Added 2 words" in no_blocking_dialogs[-1]
+
+
+def test_order_numbers_are_never_cut_off(qtbot, theme) -> None:
+    """Regression: a fixed 56px column showed "1,013" but elided "1,020" to "1,0…"."""
+    theme.apply(ThemeName.LIGHT)
+    widget = VocabularyTable()
+    qtbot.addWidget(widget)
+    widget.set_words([
+        word(id=i, word=f"w{i}", normalized_word=f"w{i}") for i in range(1, 4954)
+    ])
+    widget.resize(1200, 600)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    from lexitrack.ui.components.vocabulary_table import order_cell_margin
+
+    metrics = widget.view.fontMetrics()
+    frame = widget.view.style().pixelMetric(
+        QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget.view
+    ) + 1
+    # What the cell really has for text: stylesheet padding and style margin.
+    available = widget.view.columnWidth(Column.ORDER) - 2 * 10 - 2 * frame
+    assert order_cell_margin(widget.view) >= 2 * 10 + 2 * frame
+    for label in ("1,020", "4,953", "8,888"):
+        assert metrics.horizontalAdvance(label) <= available, label

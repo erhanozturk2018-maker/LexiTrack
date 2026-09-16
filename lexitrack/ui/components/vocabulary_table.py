@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QStyle,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -399,7 +400,20 @@ class VocabularyTable(QWidget):
 
     def set_words(self, words: Sequence[StoredWord]) -> None:
         self.model.set_words(words)
+        self._fit_order_column()
         self._update_counts()
+
+    def _fit_order_column(self) -> None:
+        """Size the # column to its widest number.
+
+        A fixed width fits "1,013" but not "1,020": digits differ in width, and
+        Qt elides what does not fit ("1,0…"). Measuring the largest number with
+        a wide digit in every place keeps every row readable.
+        """
+        count = max(self.model.rowCount(), 1)
+        widest = f"{int('8' * len(str(count))):,}"
+        needed = self.view.fontMetrics().horizontalAdvance(widest) + order_cell_margin(self.view)
+        self.view.setColumnWidth(Column.ORDER, max(needed, 56))
 
     def refresh_words(self, words: Sequence[StoredWord]) -> None:
         """Update rows in place, keeping selection and scroll position."""
@@ -474,6 +488,18 @@ class VocabularyTable(QWidget):
         ids = self.selected_ids()
         if ids and self._allow_remove:
             self.remove_requested.emit(ids)
+
+
+def order_cell_margin(view: QTableView) -> int:
+    """Horizontal space a cell takes from its text.
+
+    The stylesheet pads cells by 10px each side, and the style adds its own
+    focus-frame margin on top. Leaving the latter out is what made "1,020"
+    look as if it fitted when it did not. A little extra leaves room for the
+    header's sort arrow.
+    """
+    frame = view.style().pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, view) + 1
+    return 2 * 10 + 2 * frame + 12
 
 
 class _KeyboardTableView(QTableView):
