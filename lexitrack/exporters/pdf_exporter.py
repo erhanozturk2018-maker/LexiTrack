@@ -179,7 +179,8 @@ def _styles() -> dict[str, ParagraphStyle]:
 def _word_table(
     words: Sequence[StoredWord], styles: dict[str, ParagraphStyle], width: float
 ) -> Table:
-    header = [Paragraph(name, styles["header"]) for name in ("WORD", "PART OF SPEECH", "CEFR", "DEFINITION")]
+    column_names = ("WORD", "PART OF SPEECH", "CEFR", "DEFINITION")
+    header = [Paragraph(name, styles["header"]) for name in column_names]
     rows: list[list[object]] = [header]
 
     for word in words:

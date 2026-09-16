@@ -87,7 +87,14 @@ class WordRepository:
                     else:
                         existing_words += 1
 
-                    cursor = conn.execute(
+                    # SQLite reports rowcount 1 for the UPDATE branch of an
+                    # upsert too, so the link has to be checked beforehand for
+                    # the count to mean what it says.
+                    already_linked = conn.execute(
+                        "SELECT 1 FROM word_sources WHERE word_id = ? AND source_id = ?",
+                        (word_id, source_id),
+                    ).fetchone()
+                    conn.execute(
                         _UPSERT_WORD_SOURCE,
                         (
                             word_id,
@@ -99,7 +106,7 @@ class WordRepository:
                             json.dumps(entry.metadata) if entry.metadata else None,
                         ),
                     )
-                    if cursor.rowcount == 1:
+                    if already_linked is None:
                         new_links += 1
         except sqlite3.Error as exc:
             raise StorageError("The imported words could not be saved.") from exc

@@ -21,8 +21,8 @@ from ..core.errors import DocumentError, EmptyDocumentError, ImageOnlyDocumentEr
 
 log = logging.getLogger(__name__)
 
-#: Below this many characters per page the PDF is treated as scanned images.
-_MIN_CHARS_PER_PAGE = 20
+#: How many leading pages are inspected when deciding whether a PDF has text.
+_VALIDATION_PAGE_SAMPLE = 10
 #: Vertical tolerance, in points, for deciding two spans share a line.
 _LINE_TOLERANCE = 3.0
 
@@ -126,9 +126,18 @@ class Document:
         if self.page_count == 0:
             raise EmptyDocumentError(f"{self.path.name} contains no pages.")
 
-        sample = min(self.page_count, 5)
-        characters = sum(len(self.page_text(i).strip()) for i in range(sample))
-        if characters < _MIN_CHARS_PER_PAGE * sample:
+        # A scan is distinguished by having *no* extractable text, not by
+        # having little of it. Rejecting sparse documents instead would refuse
+        # a perfectly good one-page word list. A scan carrying nothing but
+        # page numbers still gets through here, and is then reported by the
+        # import service as producing no words — which is equally clear and
+        # avoids guessing at a threshold.
+        sample = min(self.page_count, _VALIDATION_PAGE_SAMPLE)
+        has_text = any(
+            any(character.isalpha() for character in self.page_text(index))
+            for index in range(sample)
+        )
+        if not has_text:
             raise ImageOnlyDocumentError(
                 f"No text could be extracted from {self.path.name}. It looks like a "
                 "scanned document, and LexiTrack does not support OCR yet."
