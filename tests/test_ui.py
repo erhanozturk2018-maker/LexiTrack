@@ -631,3 +631,129 @@ def test_the_chosen_theme_is_remembered(qapp, theme) -> None:
     assert DARK.background in qapp.styleSheet()
     theme.apply(ThemeName.LIGHT)
     assert ThemeManager().current is ThemeName.LIGHT
+
+
+# -- flows that open native dialogs ----------------------------------------
+
+
+@pytest.fixture
+def no_blocking_dialogs(monkeypatch):
+    """Answer message boxes instead of blocking, and record what they said."""
+    from PySide6.QtWidgets import QMessageBox
+
+    shown: list[str] = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(self.text()) or 0)
+    monkeypatch.setattr(
+        QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2]))
+    )
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2]))
+    )
+    return shown
+
+
+def test_export_dialog_writes_the_chosen_scope_and_format(
+    qapp, loaded, tmp_path, monkeypatch, no_blocking_dialogs
+) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from lexitrack.services.export_service import ExportFormat
+    from lexitrack.ui.export_dialog import ExportDialog, ExportScope
+
+    list_id = loaded.lists()[0].id
+    words = loaded.list_words(list_id)
+    loaded.set_status([words[0].id], ReviewStatus.UNKNOWN)
+    target = tmp_path / "out.json"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), ""))
+    )
+
+    everything = ExportScope(
+        "All words", lambda: loaded.export_content_for_list(list_id), ExportFormat.JSON
+    )
+    unknown = ExportScope(
+        "Unknown", lambda: loaded.export_content_for_unknown(list_id), ExportFormat.PDF
+    )
+    dialog = ExportDialog(loaded, [everything, unknown])
+    assert dialog.selected_format() is ExportFormat.JSON
+    dialog._scope_group.button(1).setChecked(True)
+    assert dialog.selected_format() is ExportFormat.PDF
+    dialog._format_buttons[ExportFormat.JSON].setChecked(True)
+    dialog._export()
+
+    assert dialog.written == target
+    assert json.loads(target.read_text(encoding="utf-8"))["words"] == [words[0].word]
+
+
+def test_export_dialog_refuses_an_empty_scope(qapp, loaded) -> None:
+    from lexitrack.ui.export_dialog import ExportDialog, ExportScope
+
+    scope = ExportScope("Unknown", lambda: loaded.export_content_for_unknown())
+    dialog = ExportDialog(loaded, [scope])
+    dialog._export()
+    assert dialog.written is None
+    assert not dialog.error.isHidden()
+
+
+def test_deleting_a_list_asks_first_and_says_what_is_lost(
+    window, loaded, monkeypatch
+) -> None:
+    import lexitrack.ui.list_actions as list_actions
+
+    asked: list[str] = []
+    monkeypatch.setattr(
+        list_actions, "confirm", lambda _p, _t, text, _a: asked.append(text) or True
+    )
+    list_id = loaded.lists()[0].id
+
+    assert window.actions.delete_list(list_id)
+
+    assert "5 words are only in this list" in asked[0]
+    assert loaded.lists() == []
+    assert window.current_page == HOME
+
+
+def test_declining_the_delete_keeps_the_list(window, loaded, monkeypatch) -> None:
+    import lexitrack.ui.list_actions as list_actions
+
+    monkeypatch.setattr(list_actions, "confirm", lambda *a: False)
+    assert not window.actions.delete_list(loaded.lists()[0].id)
+    assert len(loaded.lists()) == 1
+
+
+def test_word_dialog_changes_status_explicitly(qapp, loaded) -> None:
+    from lexitrack.ui.dialogs import WordDialog
+
+    target = loaded.list_words(loaded.lists()[0].id)[0]
+    dialog = WordDialog(loaded, target)
+    assert not dialog._buttons[ReviewStatus.NOT_REVIEWED].isEnabled()
+
+    dialog._buttons[ReviewStatus.UNKNOWN].click()
+
+    assert loaded.get_word(target.id).status is ReviewStatus.UNKNOWN
+    assert dialog.badge.text().endswith("Unknown")
+
+
+def test_adding_selected_words_to_another_list(
+    window, loaded, monkeypatch, no_blocking_dialogs
+) -> None:
+    import lexitrack.ui.review_page as review_page
+
+    other = loaded.create_list("My Difficult Words")
+
+    class Chooser:
+        def __init__(self, *args, **kwargs):
+            self.chosen = loaded.get_list(other.id)
+
+        def exec(self):
+            return True
+
+    monkeypatch.setattr(review_page, "ChooseListDialog", Chooser)
+    window.open_review(loaded.lists()[1].id, ModeSwitch.LIST)
+    ids = [w.id for w in window.review.table.model.words[:2]]
+    window.review.table.select_ids(ids)
+
+    window.review.table.add_to_list_requested.emit(ids)
+
+    assert loaded.get_progress(other.id).total == 2
+    assert "Added 2 words" in no_blocking_dialogs[-1]
