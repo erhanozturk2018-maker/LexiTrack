@@ -35,10 +35,11 @@ vocabulary lives in a local SQLite file.
 - **Languages.** Lists and words have a language, so English "gift" and German
   "Gift" are different words with separate progress.
 - **Flashcard mode.** One large word, two equal answer buttons, keyboard-first.
-- **Multi-step Backspace.** Step back through every answer in a session.
-  Going back never changes an answer; pressing K, U or R does.
+- **Free movement.** ← and → step back and forward through every answer in a
+  session. Moving never changes an answer; pressing K, U or R does.
 - **List mode.** A searchable, sortable, filterable table of a list, with bulk
-  Known / Unknown / Reset, add to another list, and remove.
+  Known / Unknown / Reset, and one-step Copy to / Move to another list with
+  Undo.
 - **Unknown Words manager.** Every word you did not know, across all lists,
   with the lists each belongs to.
 - **Import PDF and JSON**, several files at once, into new or existing lists,
@@ -115,7 +116,8 @@ small "Source" line on the card.
 
 ![Flashcards, stepped back to an earlier answer](docs/screenshots/flashcard.png)
 
-Press **Backspace** to step back through your answers. The card shows the
+Press **←** (or Backspace) to step back through your answers and **→** to
+come forward again. The card shows the
 earlier word with its current status and says so; nothing changes unless you
 answer again or press R.
 
@@ -127,9 +129,14 @@ a word never marks it — only an action does.
 
 ![List mode with a selection](docs/screenshots/list-mode.png)
 
-**More** adds the selection to another list, removes it from this one, or
-exports it. **Add Words…** types words in by hand. **List Actions** in the
-header edits, exports or deletes the list.
+**Copy to** and **Move to** send the selection to another list in one step —
+the menu lists every list that can take the words, plus New List. Copying
+keeps the words here too; moving takes them out of this list, never out of
+your vocabulary. The result appears briefly at the bottom with **Undo**. The
+**Also In** column shows which other lists each word is in. Right-click a row
+for every action, or press **C** / **M** to pick a list from the keyboard.
+**Add Words…** types words in by hand; **List Actions** in the header edits,
+exports or deletes the list.
 
 ### Unknown Words
 
@@ -157,17 +164,24 @@ again.
 
 | Where | Key | Action |
 | --- | --- | --- |
-| Flashcards | `K` or `←` | I Know |
-| | `U` or `→` | I Don't Know |
+| Flashcards | `K` | I Know |
+| | `U` | I Don't Know |
+| | `←` or `Backspace` | Previous word (status unchanged) |
+| | `→` | Next word, after going back (status unchanged) |
 | | `Enter` / `Space` | Repeat your last answer; on an earlier word, move forward without changing it |
-| | `Backspace` | Step back to the previous word (status unchanged) |
 | | `R` | Reset the word on screen to Not Reviewed |
 | Tables | `K` / `U` / `R` | Mark the selection Known / Unknown / Not Reviewed |
 | | `Ctrl+A`, `Shift`+arrows | Select |
 | | `Enter` | Word details |
+| | `C` / `M` | Copy / move the selection to another list |
+| | Right-click, `Menu` key | Every action for the selection |
 | | `Delete` | Remove the selection from this list (asks first) |
+| | `Ctrl+Z` | Undo a copy or move while its message shows |
 | | `Ctrl+F` | Search |
-| Everywhere | `Alt+H` / `Alt+R` / `Alt+U` | Home / Review / Unknown Words |
+| Home | Arrow keys, `Enter` | Move between lists, open one |
+| Everywhere | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
+| | `Alt+H` / `Alt+R` / `Alt+U` | Home / Review / Unknown Words |
+| | `Ctrl+L` | Switch list |
 | | `Ctrl+1` / `Ctrl+2` | Flashcard / List mode |
 | | `Ctrl+O` · `Ctrl+N` · `Ctrl+E` | Import · New list · Export |
 | | `Ctrl+T` | Light / dark |
@@ -237,7 +251,7 @@ lexitrack/
 examples/            JSON word lists to try
 tools/               screenshot and design-mockup generators
 docs/                architecture, decisions, status, log, TODO, formats, design
-tests/               308 tests
+tests/               323 tests
 data/                your database and exports (created at runtime, not committed)
 pdfs/                put your PDFs here (not committed)
 ```
@@ -249,7 +263,7 @@ pytest
 ruff check lexitrack tests tools
 ```
 
-308 tests. Tests that need the real Oxford PDFs skip when `pdfs/` does not
+323 tests. Tests that need the real Oxford PDFs skip when `pdfs/` does not
 contain them; the rest of the suite still runs.
 
 ## Adding a parser

@@ -28,7 +28,8 @@ Existing version 0.1 databases upgrade automatically.
 | Home, navigation, context-aware export | Done |
 | Three design directions explored | Done — A chosen and implemented |
 | Light and dark themes for every new component | Done |
-| Tests | 308 passing |
+| Arrow-key navigation, one-step copy/move with Undo | Done |
+| Tests | 323 passing |
 | Documentation | Updated |
 
 ---
@@ -68,9 +69,16 @@ Existing version 0.1 databases upgrade automatically.
 - Flashcard card shows provenance as "Source: …", a status badge and a history
   banner when looking back.
 - List mode: search, status filter, sorting, multi-select, bulk Known /
-  Unknown / Reset, add to another list, remove from list, export selection,
+  Unknown / Reset, copy or move to another list, remove from list, export selection,
   word details. K / U / R on the selection.
 - Switching mode keeps the list and the session history.
+- ← / → move back and forward through the session; only K, U and R change
+  status.
+- Copy to / Move to a list in one step from the selection bar, the right-click
+  menu, or C / M with a keyboard picker; result toast with Undo; Also In
+  column.
+- Home cards navigable with arrow keys; Ctrl+Tab between pages; Ctrl+L to
+  switch list.
 
 ### Interface
 
@@ -79,8 +87,8 @@ Existing version 0.1 databases upgrade automatically.
 - Review: list switcher in the context strip, List Actions menu, mode switch,
   per-list stats bar.
 - Unknown Words: every unknown word with the lists it belongs to, list filter,
-  bulk Known / Reset, add to list, export.
-- Dialogs: import, export, new/edit list, add words, choose list, word details.
+  bulk Known / Reset, copy to a list, export.
+- Dialogs: import, export, new/edit list, add words, word details; a type-to-filter list picker.
 - Status always shown as symbol plus word. Two-tone progress bars.
 - Current list and mode remembered between runs; app opens into Review when a
   list is part-way through.
@@ -114,6 +122,8 @@ Deliberate; see [DECISIONS.md](DECISIONS.md).
   definition and example cannot. First item in [TODO.md](TODO.md).
 - **Review history is per session.** Backspace does not reach answers from a
   previous run of the app.
+- **Undoing a move returns words to the end of the source list**, not their
+  original position.
 - **Learning status is shared across lists.** A word cannot be known in one
   list and unknown in another.
 - **Deleting a list deletes words that are only in it**, with their status;
@@ -139,7 +149,7 @@ pytest
 ruff check lexitrack tests tools
 ```
 
-**308 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
+**323 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
 when the files are absent.
 
 | File | Tests | Covers |
@@ -155,7 +165,7 @@ when the files are absent.
 | `test_import_workflow.py` | 20 | Preview, targets, multi-list, re-import, language resolution, atomic rollback |
 | `test_review_session.py` | 18 | Multi-step Backspace, forward, explicit changes, reset, Enter |
 | `test_vocabulary_service.py` | 29 | 0.1 behaviour: import, review, resume, re-import, export |
-| `test_ui.py` | 56 | Flashcard keys, table search/filter/sort/selection, pages, persistence, dialogs, import dialog, themes |
+| `test_ui.py` | 71 | Flashcard keys, table search/filter/sort/selection, pages, persistence, dialogs, import dialog, themes |
 
 ### What has genuinely been verified
 

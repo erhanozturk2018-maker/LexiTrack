@@ -267,7 +267,8 @@ class ReviewSession:
 | --- | --- | --- |
 | Answer (K/U) on the live word | set Known/Unknown | append to history, stay live |
 | Answer on an earlier word | set Known/Unknown (explicit) | cursor + 1 |
-| Backspace | **none** | cursor − 1 |
+| ← or Backspace | **none** | cursor − 1 |
+| → on an earlier word | **none** | cursor + 1 |
 | Enter on the live word | repeat last answer | as answer |
 | Enter on an earlier word | **none** | cursor + 1 |
 | R | set Not Reviewed (explicit) | stay |
@@ -343,10 +344,10 @@ and on Home otherwise.
 - **`VocabularyTable`** — a `QAbstractTableModel` of `StoredWord` behind a
   `QSortFilterProxyModel` for search (word and definition), status filter and
   sorting (CEFR by level order, status by what needs attention first). Row
-  selection with a selection bar: Known, Unknown, Reset, and More (add to list,
-  remove from list, export selection). K / U / R act on the selection, Enter
-  opens word details, Delete removes from the list after confirmation.
-  Displaying a row never changes status.
+  selection with a selection bar: Known, Unknown, Reset, Copy to ▾, Move to ▾,
+  Remove, Export. The same actions are on a right-click menu. K / U / R set
+  status, C / M open the list picker, Enter opens word details, Delete removes
+  after confirmation. Displaying a row never changes status.
 - **`StatusDelegate` / `StatusBadge`** — status as symbol plus word
   (✓ Known, ? Unknown, – Not reviewed), never colour alone.
 - **`ListCard`, `SegmentedProgress`, `StatTile`, `ModeSwitch`.**
@@ -354,11 +355,31 @@ and on Home otherwise.
 `ListActions` holds the list operations Home and Review share, so both use the
 same dialogs, confirmations and error handling.
 
+`word_transfer.py` holds copying and moving words between lists, shared by
+Review and Unknown Words:
+
+- `compatible_lists` offers only lists that can hold every selected word
+  (unspecified language, or the words' one language).
+- `ListPicker` is a type-to-filter popup driven by arrows and Enter, used for
+  C, M and Ctrl+L.
+- `WordTransfer.copy` / `move` compose the existing service calls. Move adds
+  to the target before removing from the source, so no word is ever orphaned
+  and deleted. Results show in a `Toast` with Undo (also Ctrl+Z), which
+  removes only the words the action newly added. Undoing a move returns the
+  words to the end of the source list, since list positions are not
+  restored.
+
+### Keyboard model
+
+Arrows move; letters act. In flashcards ← and → navigate the session history
+and never answer. On Home the arrows move focus across the card grid (Up from
+the top row returns to Continue). Ctrl+Tab cycles pages; Ctrl+L switches list.
+
 ### Dialogs
 
 `ImportDialog` (choose → read → preview per file → import → result),
 `ExportDialog` (scope + format), `ListDialog` (create/edit), `AddWordDialog`
-(stays open for the next word), `ChooseListDialog`, `WordDialog`
+(stays open for the next word), `WordDialog`
 (details + explicit status buttons). Validation errors are shown inline and
 keep the user's input.
 
