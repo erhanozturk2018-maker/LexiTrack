@@ -1,98 +1,102 @@
 # Project Status
 
 **Last updated:** 16 September 2026
-**Version:** 0.1.0
+**Version:** 0.2.0 · schema version 2
 
 ---
 
 ## Current Phase
 
-**Phase 12 — Documentation and GitHub readiness.** All twelve planned phases
-are implemented and verified. The application is complete and usable for real
-vocabulary study.
+**Version 0.2 complete.** LexiTrack has moved from "one PDF, one word at a
+time" to a vocabulary manager with lists, JSON import and export, flashcard and
+list review modes, multi-step review navigation and an Unknown Words manager.
+Existing version 0.1 databases upgrade automatically.
 
 ## Overall Progress
 
-| Phase | Status |
+| Area | Status |
 | --- | --- |
-| 1. Project structure, packaging, models | Done |
-| 2. SQLite and repositories | Done |
-| 3. Normalization and deduplication | Done |
-| 4. Generic PDF parser | Done |
-| 5. Oxford parser | Done, validated against both real PDFs |
-| 6. Vocabulary service | Done |
-| 7. PySide6 UI | Done, launched and driven |
-| 8. Light/Dark themes and UX polish | Done |
-| 9. PDF/CSV exporters | Done, output inspected |
-| 10. Tests | Done — 162 passing |
-| 11. Integration and polish | Done |
-| 12. Documentation and GitHub readiness | Done |
+| Lists and many-to-many membership | Done |
+| Language-aware word identity | Done |
+| Schema versioning and v1 → v2 migration | Done, verified on a copy of a real v1 database |
+| JSON parser and exporter | Done, round-trip tested |
+| Prepare → preview → commit import, multiple files and lists | Done |
+| Review session with multi-step Backspace | Done |
+| Flashcard and List modes | Done |
+| Unknown Words manager | Done |
+| Manual list creation and word entry | Done |
+| Home, navigation, context-aware export | Done |
+| Three design directions explored | Done — A chosen and implemented |
+| Light and dark themes for every new component | Done |
+| Tests | 308 passing |
+| Documentation | Updated |
 
 ---
 
 ## Completed
 
-### Core
-
-- `lexitrack/` package with one-directional layering: `ui → services →
-  repositories → database`.
-- PEP 621 packaging in `pyproject.toml` with a `dev` extra and a `lexitrack`
-  console entry point. No `requirements.txt`.
-- Runtime path resolution with no hard-coded machine paths; overridable via
-  `LEXITRACK_DATA_DIR`.
-- Rotating file log plus stderr, with a user-facing exception hierarchy —
-  tracebacks go to the log, sentences go to dialogs.
-
 ### Data
 
-- SQLite schema created automatically on first connection. A clean clone needs
-  no setup.
-- Four tables: `sources`, `words`, `word_sources`, `user_word_state`.
-- Vocabulary identity is one row per normalized word; `word_sources` records
-  every document a word came from.
-- Repositories are the only code that issues SQL.
+- Schema version 2: `lists`, `list_words` (with position), `language` on
+  `words`, `UNIQUE(language, normalized_word)`.
+- Migration from version 1 with automatic backup, preserved ids, per-step
+  transactions, foreign-key and row-count verification, and refusal of newer
+  databases. Each old source becomes a list; Oxford words become English.
+- Invariants: vocabulary is the union of the lists; a list with a language only
+  holds that language; imports never overwrite metadata or status.
+- Learning status remains word-level and shared across lists.
 
-### Parsing
+### Import and export
 
-- `Document` wraps PyMuPDF and validates before any parser runs: missing file,
-  non-PDF, corrupt, password-protected, no pages, image-only.
-- Layout-aware line extraction with column detection (built, available, not
-  currently needed by either parser).
-- `OxfordParser` — handles both real published lists including sense
-  disambiguators, wrapped entries, homograph numbering and multi-form entries.
-- `GenericTextParser` — fallback for any text-based PDF.
-- `ParserRegistry` — priority-ordered detection plus manual override.
+- `JsonDocument` + `JsonParser`; `open_document` picks PDF or JSON by
+  extension or content. Parsers declare which document types they read.
+- Structural JSON errors reported with location; unusable items skipped with a
+  warning.
+- Import preview: format, total, new, already existing, merged repeats,
+  warnings, target lists, language. Language clashes block Import with a
+  reason.
+- Each file commits in one transaction; failure part-way writes nothing.
+- Exports by scope — list, unknown in list, all unknown, selection — to PDF,
+  CSV or JSON. JSON exports import back identically.
 
-### Application
+### Review
 
-- `VocabularyService` exposes 18 public operations, including `import_document`,
-  `get_next_word`, `mark_known`, `mark_unknown`, `undo`, `get_progress`,
-  `export_unknown_pdf` and `export_unknown_csv`.
-- Import runs on a worker thread with progress and cancellation; nothing is
-  written until parsing finishes.
-- Review position is derived from the database, never stored.
+- `ReviewSession`: Backspace steps back through every answer without changing
+  status; Enter moves forward on earlier words and repeats the last answer on
+  the live word; R resets explicitly; answering an earlier word changes it
+  explicitly.
+- Flashcard card shows provenance as "Source: …", a status badge and a history
+  banner when looking back.
+- List mode: search, status filter, sorting, multi-select, bulk Known /
+  Unknown / Reset, add to another list, remove from list, export selection,
+  word details. K / U / R on the selection.
+- Switching mode keeps the list and the session history.
 
 ### Interface
 
-- Three screens in a stack (welcome, review, completed), switched by a single
-  `refresh()` that re-reads the database.
-- Keyboard: `K`/`←` known, `U`/`→` unknown, `Enter` repeat, `Backspace` undo,
-  `Ctrl+T` theme, `Ctrl+O` import. Mouse path fully usable.
-- Light and dark palettes, designed separately, generated into one stylesheet,
-  remembered via `QSettings`.
-- Menus for import, both exports, undo, reset progress, data folder and about.
+- Tabs: Home · Review · Unknown Words (Alt+H / Alt+R / Alt+U).
+- Home: continue learning, overview totals, list cards with context menus.
+- Review: list switcher in the context strip, List Actions menu, mode switch,
+  per-list stats bar.
+- Unknown Words: every unknown word with the lists it belongs to, list filter,
+  bulk Known / Reset, add to list, export.
+- Dialogs: import, export, new/edit list, add words, choose list, word details.
+- Status always shown as symbol plus word. Two-tone progress bars.
+- Current list and mode remembered between runs; app opens into Review when a
+  list is part-way through.
+- One-time notice after a database upgrade naming the backup file.
 
-### Output
+### Removed
 
-- CSV export (UTF-8 BOM for Excel) and PDF export (ReportLab, repeating header,
-  banded rows, page numbers, `—` for missing values).
-- Both driven by `StoredWord` and independent of any parser.
+Code no feature used: PDF layout-aware line extraction and column detection,
+the old top progress bar, several unused helpers and palette tokens. A theme
+bug that made tests write to the real LexiTrack settings is fixed.
 
 ---
 
 ## In Progress
 
-Nothing. The last change committed was the documentation set.
+Nothing.
 
 ---
 
@@ -100,32 +104,25 @@ Nothing. The last change committed was the documentation set.
 
 None open.
 
-Two issues were found and fixed during UI verification, recorded here because
-they are the kind that recur:
-
-1. `QLabel` inherited the window background and painted visible chips behind
-   text on other surfaces. Fixed with a global `QLabel { background: transparent; }`.
-2. A word-wrapped `QLabel` was clipped because Qt sizes it as if the text had
-   unlimited width, and an alignment flag stops the layout consulting
-   `heightForWidth`. Fixed by `WrappedLabel`, which pins the width and
-   recomputes its height on text, font and style changes.
-
 ---
 
 ## Known Limitations
 
-These are deliberate, not defects. Each is explained in [DECISIONS.md](DECISIONS.md).
+Deliberate; see [DECISIONS.md](DECISIONS.md).
 
-- **No OCR.** Scans are detected and reported, never silently imported empty.
-- **No lemmatization.** `run`, `running` and `ran` are three items.
-- **No spaced repetition.** A word is reviewed once; no scheduling or history.
-- **Exports cover unknown words only.**
-- **Senses are merged.** `bank (money)` and `bank (river)` are one word. The
-  senses are stored but not shown during review.
-- **Neither Oxford PDF contains definitions or examples**, so those columns are
-  empty for that source. A property of the documents, not the parser.
-- **Windows only, in practice.** Nothing is Windows-specific, but it has not
-  been run elsewhere.
+- **Word details cannot be edited after adding.** Status can; POS, level,
+  definition and example cannot. First item in [TODO.md](TODO.md).
+- **Review history is per session.** Backspace does not reach answers from a
+  previous run of the app.
+- **Learning status is shared across lists.** A word cannot be known in one
+  list and unknown in another.
+- **Deleting a list deletes words that are only in it**, with their status;
+  the confirmation states how many.
+- **No lemmatization, no language-specific normalization.** `run`/`running`
+  are separate; German `Straße` and `Strasse` are one identity.
+- **No OCR, no spaced repetition.**
+- **Neither Oxford PDF contains definitions or examples.**
+- **Windows only, in practice.**
 
 ---
 
@@ -139,75 +136,67 @@ None.
 
 ```bash
 pytest
+ruff check lexitrack tests tools
 ```
 
-**162 passing** in about four seconds. `ruff check lexitrack tests` is clean.
+**308 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
+when the files are absent.
 
-On a clean clone without the Oxford PDFs in `pdfs/`: **152 passed, 10 skipped**.
-
-| File | Covers |
-| --- | --- |
-| `test_normalizer.py` | Case, Unicode, apostrophes, hyphens, punctuation, non-words, no lemmatization |
-| `test_deduplication.py` | Collapsing, ordering, metadata merging, CEFR precedence |
-| `test_generic_parser.py` | Tokenising, punctuation, repeats, apostrophes, hyphens, numbers, document failures |
-| `test_oxford_parser.py` | Entry grammar, all four real quirks, detection, registry, and the real PDFs |
-| `test_database.py` | Schema creation, constraints, rollback, cross-source identity, the review queue |
-| `test_vocabulary_service.py` | Import, review, resume, re-import, export |
-| `test_ui.py` | Widgets, shortcuts, screen switching, themes, the window |
-
-Tests needing the real Oxford PDFs skip when `pdfs/` does not contain them. Put
-your own copies there to run them.
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_normalizer.py` | 30 | Case, Unicode, apostrophes, hyphens, non-words, no lemmatization |
+| `test_deduplication.py` | 9 | Collapsing, ordering, metadata merging |
+| `test_generic_parser.py` | 16 | Tokenising, punctuation, document failures |
+| `test_oxford_parser.py` | 28 | Entry grammar, real PDF quirks, zero dropped lines |
+| `test_database.py` | 21 | Schema, constraints, rollback, review queue |
+| `test_migrations.py` | 17 | v1 → v2: ids, statuses, timestamps, lists, backup, parity with fresh schema, failure rollback, newer-version refusal |
+| `test_lists.py` | 29 | Lists, membership, language identity, orphan deletion, bulk status |
+| `test_json.py` | 35 | Valid and invalid JSON, skipped items, metadata, export, round trip |
+| `test_import_workflow.py` | 20 | Preview, targets, multi-list, re-import, language resolution, atomic rollback |
+| `test_review_session.py` | 18 | Multi-step Backspace, forward, explicit changes, reset, Enter |
+| `test_vocabulary_service.py` | 29 | 0.1 behaviour: import, review, resume, re-import, export |
+| `test_ui.py` | 56 | Flashcard keys, table search/filter/sort/selection, pages, persistence, dialogs, import dialog, themes |
 
 ### What has genuinely been verified
 
-- **Both real Oxford PDFs were inspected before the parser was designed.**
-- **Zero lines dropped** across both documents — every line is an entry, a
-  heading or known page furniture, enforced by a test.
-- **A full import** of both lists gives 4,953 items; the 21 shared words are
-  asked about once.
-- **Re-import** of the same document adds 0 new words and preserves all answers.
-- **Resume** verified by closing a service and reopening the same database file.
-- **The UI was launched and driven**: both themes, the review loop, keyboard
-  shortcuts, undo, all three screens, and the import dialog.
-- **Exports were generated from real data** and their contents checked: unknown
-  words present, known words absent.
-- **A clean clone was verified end to end**: clone, venv, `pip install -e ".[dev]"`,
-  `pytest`, and launching the application, which created its database with no
-  manual setup. Both console entry points (`lexitrack`, `lexitrack-gui`) are
-  installed.
+- **Migration on real data:** a copy of an actual version 1 database (4,953
+  words, 812 known, 118 unknown) upgraded with every id, status and review
+  timestamp identical, two lists created, backup written, reopening a no-op.
+- **The upgraded copy was opened in the new UI:** it resumed at the next
+  unreviewed word, answering and multi-step Backspace behaved as specified, and
+  statuses in the database matched.
+- **Both themes** rendered and inspected for Home, Flashcard, List mode,
+  Unknown Words and the import dialog.
+- **Rendering bugs found by looking, then fixed:** clipped bold tab labels,
+  unpainted status pills, missing combo arrows, grey blocks inside panels,
+  a misleading "100%" on all-unknown lists.
+- **Dead code** scanned for with vulture and removed where no feature or test
+  used it.
 
 ---
 
 ## Next Exact Steps
 
-The MVP is complete, so these are enhancements rather than remaining work. In
-the order that adds most value:
-
-1. **Session statistics.** Words reviewed today, and a per-CEFR-level
-   breakdown. `StateRepository.progress()` is the place to extend;
-   `reviewed_at` is already stored.
-2. **Filter the review queue by level or source.** Add a parameter to
-   `WordRepository.next_unreviewed`, expose it on `VocabularyService`, and add
-   a selector to the app bar.
-3. **A vocabulary browser.** A searchable table of every word with its status,
-   allowing an answer to be changed after the fact. Needs a new screen and a
-   paginated repository query.
-4. **Export all words, not only unknown ones.** `ExportService` already takes a
-   status; expose the choice in the export flow.
-5. **Spaced repetition.** The largest addition. Needs a `review_history` table
-   and a scheduling policy; deliberately deferred until the basic loop has been
-   used in anger.
+1. **Edit word details** (see TODO). Add `VocabularyService.update_word`,
+   write to the manual source's `word_sources` row, and change the flattening
+   in `WordRepository._SELECT_WORD` so `parser_type = 'manual'` wins. Add an
+   Edit button to `WordDialog`.
+2. **CEFR filter for flashcards.** Optional `levels` on
+   `WordRepository.next_unreviewed` and `ReviewSession`; a small combo in the
+   Review context strip.
+3. **Session statistics** on Home from `user_word_state.reviewed_at`.
 
 ---
 
 ## How to Continue
 
 1. Read this file.
-2. Read [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit together.
-3. Read [DECISIONS.md](DECISIONS.md) before changing anything structural — most
-   surprising choices are deliberate and explained there.
-4. Read the latest entry in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md).
-5. Set up and run the tests:
+2. Read [ARCHITECTURE.md](ARCHITECTURE.md) — especially §3 (word, source, list,
+   status) and §8 (navigation versus status).
+3. Read [DECISIONS.md](DECISIONS.md) 23–36 before changing lists, identity,
+   review or migrations.
+4. Read the latest [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) entry.
+5. Set up and test:
 
    ```bash
    python -m venv .venv
@@ -216,26 +205,28 @@ the order that adds most value:
    pytest
    ```
 
-6. Launch it: `lexitrack`
-7. Pick an item from **Next Exact Steps** or from [TODO.md](TODO.md).
+6. Run: `lexitrack`
+7. Continue from **Next Exact Steps**.
 
 ### Where things live
 
 | Looking for | Go to |
 | --- | --- |
-| How a PDF becomes words | `lexitrack/parsers/` |
-| What the UI is allowed to call | `lexitrack/services/vocabulary_service.py` |
-| Every SQL statement | `lexitrack/repositories/` |
-| The schema | `lexitrack/database/schema.sql` |
-| Colours, spacing, fonts | `lexitrack/ui/theme/palette.py` |
-| The review screen | `lexitrack/ui/review_widget.py` |
-| Screen switching and menus | `lexitrack/ui/main_window.py` |
+| Schema and upgrades | `lexitrack/database/schema.sql`, `migrations.py` |
+| List rules (orphans, language) | `lexitrack/repositories/list_repository.py` |
+| Import pipeline and language resolution | `lexitrack/services/import_service.py` |
+| Backspace semantics | `lexitrack/services/review_session.py` |
+| JSON format | `lexitrack/parsers/json_parser.py`, `docs/formats/json-import-export.md` |
+| What the UI may call | `lexitrack/services/vocabulary_service.py` |
+| Screens | `lexitrack/ui/home_page.py`, `review_page.py`, `unknown_page.py` |
+| Shared table | `lexitrack/ui/components/vocabulary_table.py` |
+| Colours and component styles | `lexitrack/ui/theme/palette.py`, `component_styles.py` |
 
 ### Conventions to keep
 
-- The UI never issues SQL and never imports a parser.
-- Parsers never open files; they receive a `Document`.
-- Exceptions carry messages that can be shown to a user; tracebacks go to the log.
-- No hard-coded machine paths — use `lexitrack.core.paths`.
-- Tests assert behaviour, not that code exists.
+- The UI never issues SQL and never constructs a repository.
+- Seeing a word never changes its status; navigation never changes status.
+- Schema changes need a migration step and keep the parity test passing.
+- No feature without a use.
+- Status is never communicated by colour alone.
 - Never add an AI co-author trailer to a commit.

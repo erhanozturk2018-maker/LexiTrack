@@ -1,31 +1,27 @@
 # LexiTrack
 
-**PDF Vocabulary Learning & Review**
+**Vocabulary Learning & Review**
 
-LexiTrack turns a PDF into a vocabulary review session. Import a word list or
-any text-based document, and LexiTrack shows you the words one at a time. You
-answer **I Know** or **I Don't Know**, and it remembers — so you can close the
-app at word 1,200 and pick up at 1,201 tomorrow. When you are done, export
-everything you did not know as a printable PDF or a CSV.
+LexiTrack is a desktop app for learning vocabulary from word lists. Import the
+Oxford 3000, a German A1 list you wrote in JSON, or any text-based PDF; organise
+words into lists; then go through them one word at a time — **I Know** or
+**I Don't Know** — or work through them in a table. Everything you answer is
+remembered, shared across every list a word belongs to, and exportable as a
+printable PDF, a CSV or JSON.
 
-It runs entirely on your machine. There is no account, no server and no
-network access; your vocabulary lives in a local SQLite file.
+It runs entirely on your machine. No account, no server, no network; your
+vocabulary lives in a local SQLite file.
 
-![The review screen in light mode](docs/screenshots/review-light.png)
-
-<p align="center">
-  <em>The review screen, part-way through the Oxford 3000 and 5000.</em>
-</p>
+![Home: continue learning, overview and your lists](docs/screenshots/home.png)
 
 <details>
-<summary><b>The same screen in dark mode</b></summary>
+<summary><b>Dark mode</b></summary>
 
 <br>
 
-![The review screen in dark mode](docs/screenshots/review-dark.png)
+![Home in dark mode](docs/screenshots/home-dark.png)
 
-Light and dark are two separately designed palettes rather than one inverted
-into the other, so neither glares and both keep the same contrast.
+![Flashcards in dark mode](docs/screenshots/flashcard-dark.png)
 
 </details>
 
@@ -33,57 +29,53 @@ into the other, so neither glares and both keep the same contrast.
 
 ## Features
 
-- **Import any text-based PDF.** The Oxford 3000 and Oxford 5000 "by CEFR
-  level" lists are parsed properly, with each word's part of speech and level;
-  anything else falls back to plain word extraction.
-- **One word at a time.** A review screen built for long sessions, with the
-  word large and the two answers always in the same place.
-- **Keyboard-first.** `K` and `U` answer, `Enter` repeats your last answer,
-  `Backspace` undoes. The mouse works just as well.
-- **Your progress persists.** Review state lives in SQLite and is derived from
-  the database, so closing the app mid-session loses nothing.
-- **One word, asked once.** `ability` appears in both Oxford lists; you are
-  asked about it once, and both sources are recorded.
-- **Safe re-imports.** Importing the same document again adds nothing and
-  changes no answers.
-- **Export what you don't know.** A clean printable PDF, or a CSV for Excel
-  and Anki.
+- **Lists.** Create lists, import into them, add words by hand, rename, delete.
+  One word can be in many lists — "ability" in Oxford 3000, IELTS Vocabulary
+  and My Difficult Words — and what you know about it is shared between them.
+- **Languages.** Lists and words have a language, so English "gift" and German
+  "Gift" are different words with separate progress.
+- **Flashcard mode.** One large word, two equal answer buttons, keyboard-first.
+- **Multi-step Backspace.** Step back through every answer in a session.
+  Going back never changes an answer; pressing K, U or R does.
+- **List mode.** A searchable, sortable, filterable table of a list, with bulk
+  Known / Unknown / Reset, add to another list, and remove.
+- **Unknown Words manager.** Every word you did not know, across all lists,
+  with the lists each belongs to.
+- **Import PDF and JSON**, several files at once, into new or existing lists,
+  with a preview of what is new before anything is written.
+- **Export** a list, its unknown words, all unknown words or a selection — as
+  PDF, CSV or JSON. JSON exports import back unchanged.
+- **Oxford 3000 and 5000** parsed with part of speech and CEFR level.
+- **Safe upgrades.** A version 0.1 database is upgraded automatically, with a
+  backup, keeping every answer.
 - **Light and dark themes**, remembered between runs.
 
 ## Requirements
 
 - **Python 3.11 or newer**
-- **Windows 10/11** — developed and tested here. The code has no
-  Windows-specific dependencies and should run on macOS and Linux, but that is
-  untested.
-- Roughly 250 MB of disk space, almost all of it PySide6.
+- **Windows 10/11** — developed and tested here. Nothing in the code is
+  Windows-specific, but other platforms are untested.
+- About 250 MB of disk space, almost all of it PySide6.
 
 ## Installation
 
 ```bash
 git clone <your-repository-url> LexiTrack
 cd LexiTrack
-```
-
-Create a virtual environment and install the project. On Windows:
-
-```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 ```
 
-On macOS or Linux, use `source .venv/bin/activate` instead.
-
-Dependencies are declared in `pyproject.toml`; there is no `requirements.txt`.
-To work on LexiTrack, install the development extras as well:
+On macOS or Linux activate with `source .venv/bin/activate`. Dependencies are
+declared in `pyproject.toml`; there is no `requirements.txt`. For development:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-> **Windows note.** PySide6 unpacks some deeply nested files, so installing
-> into a folder whose path is already very long can fail with
+> **Windows note.** PySide6 unpacks deeply nested files, so installing into a
+> folder whose path is already very long can fail with
 > `[WinError 206] The filename or extension is too long`. Clone somewhere
 > shorter, such as `C:\Projects\LexiTrack`, or enable long paths in Windows.
 
@@ -93,283 +85,221 @@ pip install -e ".[dev]"
 lexitrack
 ```
 
-Or, without activating the environment:
+or `python -m lexitrack`, or `.venv\Scripts\lexitrack-gui.exe` to start without
+a console window. The database is created on first launch.
 
-```bash
-python -m lexitrack
-```
-
-The database and export folder are created automatically on first launch. You
-do not need to set anything up.
-
-## Testing
-
-```bash
-pytest
-```
-
-The suite is **162 tests** and runs in about four seconds. On a clean clone
-without the Oxford PDFs, 152 pass and 10 skip — the tests that need those
-documents. See [Validation](#validation) below.
-
-```bash
-pytest -v                          # see each test name
-pytest tests/test_oxford_parser.py # one file
-ruff check lexitrack tests         # lint
-```
+**Upgrading from 0.1:** just start the new version. Your database is upgraded
+in place, each document you imported becomes a list, and a copy of the old
+file is kept in the data folder (`vocabulary.v1-backup-<date>.db`).
 
 ## Usage
 
-Here is the whole application, in the order you meet it.
+### Importing
 
-### 1. First launch
+**Import** in the app bar, or **File → Import…** (`Ctrl+O`). Choose one or more
+PDF or JSON files. Each file gets a preview: the detected format, how many
+words it has, how many are new, any problems, and where the words should go —
+a new list named from the file, any existing lists, or both.
 
-On a clean install there is nothing to review yet, so LexiTrack explains the
-next step instead of showing an empty screen.
+![Import preview](docs/screenshots/import-preview.png)
 
-![The welcome screen on a clean install](docs/screenshots/welcome-light.png)
+If a file states its language and you choose a list in another language, the
+preview explains the clash instead of importing. Nothing is written until you
+press Import.
 
-### 2. Importing a PDF
+### Reviewing with flashcards
 
-**File → Import PDF…** (`Ctrl+O`), or the **Import** button.
+**Continue** on Home, or the **Review** tab. The list you are reviewing is the
+name at the top — click it to switch lists. Where the word came from is the
+small "Source" line on the card.
 
-![The import dialog](docs/screenshots/import-dialog-light.png)
+![Flashcards, stepped back to an earlier answer](docs/screenshots/flashcard.png)
 
-Pick a file and leave the parser on **Auto** — LexiTrack recognises the Oxford
-lists by their title and by their structure. If detection gets it wrong, pick a
-parser by hand in the same dialog. Large documents are parsed on a background
-thread with a progress bar, and cancelling leaves nothing behind.
+Press **Backspace** to step back through your answers. The card shows the
+earlier word with its current status and says so; nothing changes unless you
+answer again or press R.
 
-### 3. Reviewing
+### Reviewing as a list
 
-The word fills the middle of the screen, with its part of speech and CEFR level
-beneath it where the source provides them, the list it came from in the corner,
-and your position in the queue at the bottom. The two answers are always in the
-same place, so you can settle into a rhythm and stop aiming.
+Switch to **List** (`Ctrl+2`). Search, filter by status, sort by any column,
+select rows (`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. Looking at
+a word never marks it — only an action does.
 
-![The review screen](docs/screenshots/review-light.png)
+![List mode with a selection](docs/screenshots/list-mode.png)
 
-| Key | Action |
-| --- | --- |
-| `K` or `←` | I Know |
-| `U` or `→` | I Don't Know |
-| `Enter` | Repeat your last answer |
-| `Backspace` | Undo the previous answer |
-| `Ctrl+T` | Switch between light and dark |
-| `Ctrl+O` | Import a PDF |
+**More** adds the selection to another list, removes it from this one, or
+exports it. **Add Words…** types words in by hand. **List Actions** in the
+header edits, exports or deletes the list.
 
-### 4. Resuming
+### Unknown Words
 
-Just reopen the app. LexiTrack asks the database for the first word you have
-not reviewed, so there is no "continue" button and nothing to restore.
+Every word you answered "I Don't Know", across all lists. Mark words Known or
+reset them to Not Reviewed (they leave this page, and reset words come round
+again in flashcards), collect them into a list such as My Difficult Words, or
+export them.
 
-### 5. Finishing
+![Unknown Words manager](docs/screenshots/unknown-words.png)
 
-When every word has been answered, LexiTrack tells you how the session went and
-offers the obvious next step.
+### Exporting
 
-![The completed screen](docs/screenshots/completed-light.png)
-
-### 6. Exporting
-
-**File → Export Unknown Words as PDF…** or **as CSV…**, or the **Export**
-button. Only words you marked *unknown* are exported. The default location is
-`data/exports/`.
-
-The PDF is a printable table of word, part of speech, CEFR level and
-definition. Where a source did not supply a column — a plain PDF has no CEFR
-levels — the cell shows a dash rather than being left blank.
+**File → Export…** (`Ctrl+E`) offers what fits where you are: the current list,
+its unknown words, your selection, or all unknown words. Choose PDF for a
+printable study sheet, CSV for spreadsheets or Anki, JSON to edit and import
+again.
 
 <p align="center">
-  <img src="docs/screenshots/export-pdf.png" alt="The first page of an exported PDF" width="620">
-</p>
-<p align="center">
-  <em>A page of an exported study sheet: your unknown words, ready to print.</em>
+  <img src="docs/screenshots/export-pdf.png" alt="A page of an exported PDF" width="560">
 </p>
 
-### 7. Switching theme
+### Keyboard shortcuts
 
-The button at the right of the app bar names the theme it will switch *to*
-(`Ctrl+T`). Your choice is remembered between runs.
+**Help → Keyboard Shortcuts** (`F1`) lists them in the app.
 
-<details>
-<summary><b>Dark mode: import dialog and completed screen</b></summary>
+| Where | Key | Action |
+| --- | --- | --- |
+| Flashcards | `K` or `←` | I Know |
+| | `U` or `→` | I Don't Know |
+| | `Enter` / `Space` | Repeat your last answer; on an earlier word, move forward without changing it |
+| | `Backspace` | Step back to the previous word (status unchanged) |
+| | `R` | Reset the word on screen to Not Reviewed |
+| Tables | `K` / `U` / `R` | Mark the selection Known / Unknown / Not Reviewed |
+| | `Ctrl+A`, `Shift`+arrows | Select |
+| | `Enter` | Word details |
+| | `Delete` | Remove the selection from this list (asks first) |
+| | `Ctrl+F` | Search |
+| Everywhere | `Alt+H` / `Alt+R` / `Alt+U` | Home / Review / Unknown Words |
+| | `Ctrl+1` / `Ctrl+2` | Flashcard / List mode |
+| | `Ctrl+O` · `Ctrl+N` · `Ctrl+E` | Import · New list · Export |
+| | `Ctrl+T` | Light / dark |
 
-<br>
+## Supported formats
 
-![The import dialog in dark mode](docs/screenshots/import-dialog-dark.png)
+| Format | Parser | What it extracts |
+| --- | --- | --- |
+| Oxford 3000 / 5000 "by CEFR level" PDF | `OxfordParser` | Word, part of speech, CEFR level; English |
+| LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, example, language; list name, language, description, source |
+| Any other text-based PDF | `GenericTextParser` | Every distinct word, nothing else |
 
-![The completed screen in dark mode](docs/screenshots/completed-dark.png)
+The JSON format is documented in
+[docs/formats/json-import-export.md](docs/formats/json-import-export.md), and
+[`examples/`](examples) has files you can import straight away. Only `words` is
+required; a typical file looks like:
 
-</details>
+```json
+{ "name": "German A1", "language": "de", "words": ["Haus", "gehen", "kommen"] }
+```
+
+Limitations: the Oxford PDFs contain no definitions or examples; the generic
+parser cannot tell headwords from inflected forms; scanned PDFs are detected
+and reported, not read (no OCR).
 
 ## Architecture
 
 ```text
-             PDF
-              │
+   PDF      JSON      typed in
+     └────────┼────────────┘
               ▼
-      ┌───────────────┐     OxfordParser
-      │ ParserRegistry│ ──► GenericTextParser
-      └───────┬───────┘     (future parsers)
-              │
+     parsers ─► WordEntry
               ▼
-          WordEntry          ← the standard model every parser produces
-              │
+     VocabularyService          the only thing the UI talks to
               ▼
-        Normalizer            ← Ability / ABILITY / ability → one identity
-              │
+     repositories               the only code that issues SQL
               ▼
-       Deduplicator           ← a runtime set, not storage
-              │
-              ▼
-    VocabularyService         ← the only surface the UI talks to
-              │
-              ▼
-       Repositories           ← the only code that issues SQL
-              │
-              ▼
-          SQLite
-              │
-      ┌───────┴───────┐
-      ▼               ▼
-    Known          Unknown ──► PDF / CSV export
+            SQLite
+   ┌──────────┬──────────┬───────────────┐
+ words      sources     lists          status
+ (language, where it    what you       what you
+  word)     came from   study          know
 ```
 
-The layering is one-directional. The UI never issues SQL and never sees a
-parser; the vocabulary engine never learns how a PDF was laid out. Two
-separations matter most:
+Four ideas are kept strictly apart: a **word**, the **source** it came from,
+the **lists** it belongs to, and your **learning status**. Navigation in a
+flashcard session is a fifth, and it is never stored as status. The UI talks
+only to `VocabularyService`; only repositories issue SQL.
 
-- **Parsers belong to documents, not to words.** Which parser runs is decided
-  once per document. Supporting a new format means adding a parser, not
-  changing anything downstream of `WordEntry`.
-- **Source metadata and your review state are separate.** A word's level comes
-  from the document; whether you know it does not. They live in different
-  tables, which is why re-importing can never disturb your progress.
-
-For the full picture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Supported parsers
-
-### OxfordParser
-
-Handles the official "Oxford 3000/5000 by CEFR level" PDFs published by Oxford
-University Press. Extracts each word with its part of speech and CEFR level,
-and copes with the quirks the real files contain: parenthesised sense
-disambiguators that wrap across lines (`light (from the` / `sun/a lamp) n.`),
-superscript homograph numbering (`can1`, `can2`), non-breaking-space multi-word
-entries (`ice cream`), and comma-separated multi-form entries (`a, an`).
-
-**Limitation:** neither published PDF contains definitions or example
-sentences, so those fields stay empty for this source. That is a property of
-the documents, not a gap in the parser.
-
-### GenericTextParser
-
-The fallback for everything else. Extracts every distinct word from any
-text-based PDF, repairs words hyphenated across a line break, and keeps letters
-only — numbers, punctuation and single letters are skipped.
-
-**Limitation:** it produces words, nothing more. No part of speech, no level,
-no definition, and no attempt to tell headwords from inflected forms. `run` and
-`running` are two separate items, deliberately.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture and
+[docs/DECISIONS.md](docs/DECISIONS.md) for why.
 
 ## Project structure
 
 ```text
 lexitrack/
-├── core/            paths, logging, the exception hierarchy
-├── models/          WordEntry, Source, ReviewStatus, Progress
-├── parsers/         Document, the parser protocol, Oxford, generic, registry
-├── normalization/   word identity and runtime deduplication
-├── repositories/    the only code that issues SQL
-├── database/        connection handling and schema.sql
-├── services/        import, vocabulary and export services
-├── exporters/       PDF and CSV writers
-├── ui/              PySide6 widgets, dialogs and the theme system
-└── main.py          entry point
+├── core/            paths, logging, errors
+├── models/          WordEntry, VocabularyList, ReviewStatus, languages
+├── parsers/         PDF and JSON documents, Oxford / JSON / generic parsers
+├── normalization/   word identity and deduplication
+├── database/        schema.sql and migrations
+├── repositories/    words, sources, lists, review state — all the SQL
+├── services/        import workflow, review sessions, exports
+├── exporters/       PDF, CSV, JSON
+└── ui/              pages, dialogs, components, theme
 
-data/                database and exports (created at runtime, not committed)
-pdfs/                put your source PDFs here (not committed)
-docs/                architecture, decisions, status, log, TODO
-tests/               the test suite
+examples/            JSON word lists to try
+tools/               screenshot and design-mockup generators
+docs/                architecture, decisions, status, log, TODO, formats, design
+tests/               308 tests
+data/                your database and exports (created at runtime, not committed)
+pdfs/                put your PDFs here (not committed)
 ```
 
-## Adding a new parser
+## Testing
 
-1. Subclass `DocumentParser` in `lexitrack/parsers/`:
+```bash
+pytest
+ruff check lexitrack tests tools
+```
 
-   ```python
-   class CambridgeParser(DocumentParser):
-       key = "cambridge"
-       name = "Cambridge word list"
-       description = "Cambridge vocabulary PDFs."
-       priority = 90  # above generic (-100), below Oxford (100)
+308 tests. Tests that need the real Oxford PDFs skip when `pdfs/` does not
+contain them; the rest of the suite still runs.
 
-       def can_parse(self, document: Document) -> bool:
-           return "Cambridge" in document.text(max_pages=1)
+## Adding a parser
 
-       def parse(self, document, progress=None) -> list[WordEntry]:
-           ...
-   ```
+```python
+class CambridgeParser(DocumentParser):
+    key = "cambridge"
+    name = "Cambridge word list"
+    description = "Cambridge vocabulary PDFs."
+    priority = 90              # asked before generic (-100), after Oxford (100)
+    language = "en"            # if every document of this kind is English
 
-2. Register it in `default_parsers()` in `lexitrack/parsers/registry.py`.
+    def can_parse(self, document: Document) -> bool:
+        return "Cambridge" in document.text(max_pages=1)
 
-That is the whole extension point. The registry picks the highest-priority
-parser whose `can_parse` returns `True`, the new parser appears in the import
-dialog automatically, and nothing downstream of `WordEntry` changes.
+    def parse(self, document, progress=None) -> list[WordEntry]:
+        ...
+```
+
+Register it in `default_parsers()` in `lexitrack/parsers/registry.py`. It
+appears in the import dialog, and nothing downstream of `WordEntry` changes.
+For a non-PDF, non-JSON format, add a document class and set `document_types`.
 
 ## Documentation
 
 | Document | What it covers |
 | --- | --- |
-| [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | Where the project stands and what to do next |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The architecture as actually built |
+| [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | Where the project stands, what was verified, what is next |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The architecture as built |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Why each significant choice was made |
 | [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) | Chronological technical log |
-| [docs/TODO.md](docs/TODO.md) | Now / Next / Later / Ideas |
-
-## Validation
-
-What has actually been verified, as opposed to merely written:
-
-- **Both Oxford PDFs** were inspected before the parser was designed, and the
-  parser was validated against them: every line of both documents is either an
-  entry, a level heading or known page furniture, with **zero lines dropped**.
-  A test enforces this.
-- **A full import** of both lists produces 4,953 vocabulary items, with the 21
-  words the two lists share asked about only once.
-- **The UI** was launched and driven: both themes, the review loop, the
-  keyboard shortcuts, undo, the welcome and completed screens, and re-import.
-- **Exports** were generated from real data and their contents checked —
-  unknown words present, known words absent.
-- **162 tests pass** and `ruff check` is clean.
-- **A clean clone was verified end to end**: `git clone`, `python -m venv`,
-  `pip install -e ".[dev]"`, `pytest` (152 passed, 10 skipped), then launching
-  the application — which created its database automatically and ran with no
-  setup of any kind.
-
-The Oxford PDFs are not committed (they are Oxford University Press material).
-Put your own copies in `pdfs/` to run the tests that use them; they skip
-otherwise, and the rest of the suite still passes.
+| [docs/TODO.md](docs/TODO.md) | Next, later, ideas |
+| [docs/formats/json-import-export.md](docs/formats/json-import-export.md) | The JSON format |
+| [docs/design/](docs/design) | The three design directions explored for 0.2 |
 
 ## Known limitations
 
-- **No OCR.** Scanned, image-only PDFs are detected and reported clearly, not
-  silently imported as empty. Adding OCR is out of scope for now.
-- **No lemmatization.** `run`, `running` and `ran` are three separate items.
-  Merging them is a linguistic decision that loses meaning, so it is not done
-  automatically.
-- **No spaced repetition.** A word is reviewed once. There is no scheduling,
-  no confidence score and no review history yet.
-- **Exports cover unknown words only.** There is no "export everything" mode.
-- **Deduplication merges senses.** Oxford lists `bank (money)` and
-  `bank (river)` separately; LexiTrack treats them as one word so it does not
-  ask twice. The senses are stored but not shown during review.
-- **Non-Windows platforms are untested.** Nothing in the code is
-  Windows-specific, but it has only been run there.
-- **English word lists only.** Normalization handles Unicode correctly, but
-  the parsers and UI copy assume English.
+- **Word details cannot be edited after they are added** — status can.
+- **Backspace history lasts one session.** Reopening starts at the next
+  unreviewed word, as expected, but earlier answers are reached through the
+  table rather than Backspace.
+- **What you know is shared across lists.** A word cannot be known in one list
+  and unknown in another.
+- **Deleting a list deletes words that are in no other list**, with their
+  status. The confirmation says how many.
+- **No spaced repetition, no OCR, no lemmatization.** `run` and `running` are
+  separate words.
+- **No language-specific normalization yet.** German `Straße` and `Strasse`
+  count as the same word.
+- **Untested outside Windows.**
 
 ## License
 

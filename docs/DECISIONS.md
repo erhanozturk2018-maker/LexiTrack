@@ -2,6 +2,9 @@
 
 Significant choices, with the reasoning and the alternatives that lost.
 
+Decisions 1-22 were made for version 0.1; 23 onwards for 0.2. Where a later
+decision refines an earlier one, the earlier entry points to it.
+
 ---
 
 ## 1. PySide6 for the UI
@@ -270,6 +273,9 @@ distinguish at a glance, over thousands of repetitions.
 
 ## 18. The review position is derived, never stored
 
+*Still true in 0.2: the live word is always derived. 0.2 adds an in-memory
+navigation history on top of it (see 26 and 27), not a stored cursor.*
+
 **Decision.** `get_next_word()` queries for the first `not_reviewed` word
 ordered by insertion. No cursor exists.
 
@@ -337,3 +343,220 @@ the parser quietly losing vocabulary.
 **Consequence.** The real PDFs are not committed — they are Oxford University
 Press material — so those tests skip on a clean clone. The trade is deliberate:
 correct licensing over unconditional coverage.
+
+---
+
+# Version 0.2
+
+## 23. Lists are many-to-many with words
+
+**Decision.** A `lists` table and a `list_words` junction. A word belongs to
+any number of lists; lists never copy words.
+
+**Reason.** "ability" can be in Oxford 3000, IELTS Vocabulary and My Difficult
+Words at once. Copying it per list would split its learning status and make
+"do I know this word?" depend on which list you asked from.
+
+**Alternatives.** *A list column on `words`* — one list per word. *Tags as
+text* — unqueryable, no ordering, no metadata.
+
+---
+
+## 24. Learning status stays word-level, not list-level
+
+**Decision.** `user_word_state` is keyed by word. Marking "ability" known in
+one list marks it known everywhere.
+
+**Reason.** Knowledge belongs to the person and the word, not to the
+collection it was met in. Per-list status would ask the same question again in
+every list a word is added to — the duplication version 0.1 was built to avoid
+across Oxford 3000 and 5000.
+
+**Trade-off accepted.** A word cannot be "known for IELTS purposes only".
+Nothing asks for that, and it could be added later as a separate per-list flag
+without disturbing the global status.
+
+**Alternatives.** *Status on `list_words`* — rejected for the reason above.
+*Both* — two sources of truth that disagree.
+
+---
+
+## 25. Language is part of word identity
+
+**Decision.** `UNIQUE(language, normalized_word)`. Languages are short codes;
+`und` means unspecified.
+
+**Reason.** English "gift" and German "Gift" (poison) are different words and
+must not share a learning status. Normalization itself stays
+language-agnostic — case, Unicode, punctuation; no stemming or German-specific
+rules yet — so identity changed by adding a key, not by changing how spellings
+are compared.
+
+**On import** the language is the word's own, else the file's, else the one
+chosen in the preview, else the target list's, else `und`. A file that states a
+language cannot enter a list of another language; a list with language `und`
+accepts any.
+
+**Alternatives.** *Language only on lists* — a mixed list such as My Difficult
+Words could not say which "gift" it holds. *A language library* — LexiTrack
+stores and compares languages; it does not process them.
+
+---
+
+## 26. Backspace navigates; it never changes status
+
+**Decision.** Backspace steps back through every word answered in the session
+and shows each with its current status. Changing it takes an explicit answer
+(K/U) or reset (R). This replaces 0.1's single-step Backspace, which reset the
+word to Not Reviewed.
+
+**Reason.** "Go back" and "undo my answer" are different intentions. Tying
+them together meant looking back over five answers wiped all five. Separated,
+Backspace is always safe to press.
+
+**Enter** on an earlier word moves forward without changing it; on the live
+word it still repeats the last answer. **R** resets explicitly.
+
+**Alternatives.** *Backspace resets each word it passes* — destructive
+navigation. *A separate status-undo stack (Ctrl+Z)* — redundant: going back and
+pressing the right key does the same with one mechanism, and a second history
+would disagree with the first once a word was re-answered.
+
+---
+
+## 27. Review history is per session and in memory
+
+**Decision.** Navigation history lives in `ReviewSession`, not the database.
+Reopening the app starts at the first unreviewed word with empty history.
+
+**Reason.** The live position is already derived from the database (§18), so
+resume works without history. History is for correcting recent answers, a
+within-session need. Persisting it adds a table and the question of how stale
+history should behave after days away, for little gain.
+
+**Alternatives.** *Reconstruct history from `reviewed_at`* — re-marking an old
+word from the table would move it to the front, so "back" would jump
+unpredictably. *A history table* — see above.
+
+---
+
+## 28. No persistent "seen" state
+
+**Decision.** Displaying a word — in a table, in word details, on a card you
+navigated back to — changes nothing. There is no "Seen" flag.
+
+**Reason.** Seeing a word is not knowing it, and Not Reviewed must keep meaning
+"not answered", not "not looked at". A separate seen flag was rejected because
+no feature would use it: the flashcard queue is driven by status, and the table
+already shows everything.
+
+---
+
+## 29. Vocabulary is the union of the lists
+
+**Decision.** Removing a word from its last list, or deleting its last list,
+deletes the word and its status. Words still in another list are untouched.
+The confirmation states both counts first.
+
+**Reason.** Keeping orphaned words leaves vocabulary no screen shows but that
+still counts in totals, exports and "already in your vocabulary" figures. An
+invisible, undeletable residue is worse than an explicit, confirmed deletion.
+
+**Trade-off accepted.** Deleting German A1 and re-importing it starts that
+list's progress again. The dialog says so.
+
+---
+
+## 30. Source and list are shown as different things
+
+**Decision.** The Review page's largest text is the **list**, which is also the
+list switcher. The card shows provenance as "Source: …". JSON provenance is the
+file name unless the file names a source. ARCHITECTURE §3 traces how 0.1
+produced its "Oxford 3000" label.
+
+**Reason.** In 0.1 the only label was provenance, and it looked like the
+learning context. With user lists it would show a source unrelated to what the
+user chose to study.
+
+---
+
+## 31. Migrations: versioned steps, backup first, never recreate
+
+**Decision.** `schema_version` plus ordered steps. Back up with the SQLite
+backup API, rebuild tables preserving ids, verify foreign keys and row counts,
+commit or roll back. Refuse newer versions. Each existing source becomes a
+list. Only Oxford-extracted words become `en`.
+
+**Reason.** The database holds someone's review progress. "Delete it and import
+again" is not acceptable, and neither is inventing a language version 1 never
+recorded.
+
+**Alternatives.** *Alembic* — a dependency and a metadata layer for six tables.
+*`ALTER TABLE ADD COLUMN`* — cannot change a `UNIQUE` constraint in SQLite.
+
+---
+
+## 32. Import is prepare, preview, commit
+
+**Decision.** Parsing writes nothing. The preview shows format, new and
+existing counts, warnings and target lists; commit writes each file in one
+transaction.
+
+**Reason.** With lists, "where will these words go?" has more than one answer,
+and answering it after writing is too late. It also makes cancelling trivial.
+
+---
+
+## 33. JSON: minimal, forgiving about items, strict about shape
+
+**Decision.** Only `words` is required; items are strings or objects. A
+structurally wrong file is rejected with located errors; unusable items are
+skipped with a warning; unknown fields are ignored. Export writes no ids, no
+status and no empty fields.
+
+**Reason.** The format is for people. One stray `"42"` should not block a
+list; a `definition` that is a list is a mistake worth stopping for. Status is
+left out because importing never applies it, and a file that seemed to carry it
+would mislead.
+
+---
+
+## 34. Design direction A: evolve, don't replace
+
+**Decision.** Three directions were rendered from real components
+(`docs/design/`): A evolves the existing app bar and card; B is a sidebar
+dashboard; C a minimal workspace. A was chosen, without its separate Lists tab,
+because Home already is the list hub.
+
+**Reason.** A keeps LexiTrack's identity and the review screen people already
+use. B's sidebar, stat tiles and activity feed read as a generic dashboard,
+which the brief explicitly avoids. C hides list management and Unknown Words
+too deeply for an app that now has several lists.
+
+**Reversibility.** Pages know nothing about navigation; moving to B or C means
+rewriting `main_window.py`, not the pages.
+
+---
+
+## 35. Unknown Words is a working list, not an archive
+
+**Decision.** The manager shows exactly the words whose status is Unknown.
+Marking one Known or resetting it removes it from the page; nothing there
+deletes vocabulary. There is no separate "review unknown words" flashcard mode.
+
+**Reason.** Leaving "unknown" means the status changed, not that the word
+should disappear. For re-studying, the page uses actions that already exist:
+reset a batch so it returns to flashcards, or add it to a list such as My
+Difficult Words and review that.
+
+---
+
+## 36. No feature without a use
+
+**Decision.** Code no feature uses is removed rather than kept for later: 0.1's
+layout-aware PDF line extraction and column detection, an unused progress bar,
+and several unused helpers and palette tokens.
+
+**Reason.** Unused code is still read, maintained and worked around, and it
+suggests to the next developer that it matters. Git history keeps it if a
+future parser needs it.

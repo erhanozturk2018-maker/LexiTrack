@@ -219,3 +219,120 @@ tracked.
 
 **Final state:** 162 tests passing, lint clean, application verified end to end
 against the real Oxford documents.
+
+---
+
+# Version 0.2
+
+## 2026-09-16 — Inspection before change
+
+**Findings**
+
+- The user's real `data/vocabulary.db` was at schema 1 with 4,953 words, 812
+  known, 118 unknown and 2 sources. Backed up to the scratchpad before any
+  work; all migration testing used copies.
+- **Where "Oxford 3000" on the card came from:** `OxfordParser.source_name()`
+  matches `The\s+Oxford\s+(3000|5000)` on page 1's extracted text →
+  `sources.name` → `GROUP_CONCAT` in `WordRepository._SELECT_WORD` →
+  `StoredWord.source_label` → `#SourceChip` at the top left of the card.
+  Provenance, presented as if it were the learning context.
+- `ThemeManager` hard-coded `QSettings("LexiTrack", "LexiTrack")`, so the theme
+  tests had been writing to the developer's real settings.
+
+**Plan:** data layer and migration first (independent of any design), then
+JSON and the import workflow, then the review session, then components, design
+exploration, and the UI last.
+
+---
+
+## 2026-09-16 — Lists, language identity, migration
+
+**Changes:** schema v2, `migrations.py`, `ListRepository`, language on
+`WordEntry` and `words`, nested transactions in `Database`, language-aware
+runtime deduplication.
+
+**Problems and solutions**
+
+- SQLite cannot change a `UNIQUE` constraint in place. `words` is rebuilt with
+  explicit ids so every foreign key stays valid.
+- `schema.sql` used to run on every connect (`CREATE … IF NOT EXISTS`). Against
+  a v1 database that would skip `words` and then fail creating an index on
+  `language`. It now runs only on an empty database.
+- The deduplicator keyed on the spelling alone, so a mixed JSON file with
+  English "gift" and German "Gift" would have merged them. Keyed on
+  `(language, normalized_word)` now.
+- The first commit was checked for bisectability in a separate worktree; one
+  migration test used the not-yet-committed service API and was moved to the
+  next commit.
+
+**Verification:** migrated a copy of the real database — all ids, spellings,
+statuses and `reviewed_at` values identical; reopening a no-op.
+
+---
+
+## 2026-09-16 — JSON, import workflow, review session
+
+**Changes:** `JsonDocument`, `open_document`, `JsonParser`, `json_exporter`,
+`ImportService.prepare/check/resolve_language/commit`, `ReviewSession`,
+`ExportService` scopes.
+
+**Problems and solutions**
+
+- Parsers only knew PDFs. Rather than a separate JSON import path, parsers
+  declare `document_types` and the registry filters by them.
+- A rollback test initially failed before writing anything (duplicate list
+  name), so it did not prove atomicity. Replaced with one that fails after the
+  list, source and words are written.
+- `ImportResult.new_links` from 0.1 still relies on checking the link before
+  the upsert; kept.
+
+---
+
+## 2026-09-16 — Components and design exploration
+
+**Changes:** `VocabularyTable`, `StatusDelegate`, `StatusBadge`, `ListCard`,
+`SegmentedProgress`, `StatTile`, `ModeSwitch`; `component_styles.py`; themed
+SVG icons; `tools/design_mockups.py`; example JSON lists.
+
+**Rendering problems found only by looking at screenshots**
+
+| Problem | Cause | Fix |
+| --- | --- | --- |
+| Status column showed plain text | PySide returns a `StrEnum` from item data as `str`; `isinstance` failed | Role carries `status.value` |
+| Status filter matched nothing | Same, compared with `is` | Convert and compare with `!=` |
+| "Jnknown Word:" | Checked tab turned bold; width measured at normal weight | Same weight in both states |
+| Broken combo arrows | Styling the drop-down removes Fusion's arrow | Themed chevron SVGs |
+| All-unknown list shown as "100%" | Single reviewed bar | Two-tone known/unknown bar |
+
+**Decision:** design A, without a separate Lists tab (the user agreed).
+
+---
+
+## 2026-09-16 — Screens, dialogs, cleanup
+
+**Changes:** `HomePage`, `ReviewPage`, `UnknownPage`, `MainWindow`,
+`ListActions`, `ImportDialog` rewrite, `ExportDialog`, list/word/add-word
+dialogs, migration notice at startup.
+
+**Problems and solutions**
+
+- First draft of `ReviewPage` constructed a `WordRepository` in the UI. Replaced
+  with `VocabularyService.get_words`.
+- The R shortcut checked `isVisible()`, which is false whenever the window is
+  hidden. Uses `isHidden()`.
+- Fusion underlines `&` mnemonics permanently; tabs use explicit Alt shortcuts.
+- Import panels painted a grey block (plain `QWidget` inside a panel) and had
+  an unlabeled checkbox. `#PanelBody` is transparent; the file name is the
+  checkbox label; checkboxes get a themed tick.
+
+**Cleanup (user asked for no unused features):** vulture scan, then removed
+PDF layout extraction and column detection, `ProgressBarWidget`, a no-op
+signal handler, a one-item Review menu, `run_guarded`, `set_title`,
+`visible_count`, `return_to_live`, `contains`, `lists_for_word`,
+`accepts_any_language`, `Source.word_count`, `Document.metadata`,
+`CEFR_LEVELS`, and unused palette tokens. Remaining vulture hits are tested
+public API.
+
+**Verification:** 308 tests passing; the upgraded copy of the real database
+opened in the new UI, resumed at the next unreviewed word, and Backspace left
+statuses unchanged in the database.

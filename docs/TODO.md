@@ -1,65 +1,59 @@
 # TODO
 
-Kept in sync with the actual implementation. Everything under **Now** is
-genuinely unstarted; everything the MVP promised is done and lives in
-[PROJECT_STATUS.md](PROJECT_STATUS.md).
+Kept in sync with the actual implementation. Only genuinely unstarted work is
+listed; what exists is described in [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ---
 
 ## Now
 
-Nothing outstanding. The MVP is complete: import → review → persist → export
-all work and are verified.
+Nothing outstanding. Version 0.2 — lists, JSON, flashcard and list modes,
+review history, the Unknown Words manager and the migration — is complete and
+verified.
 
 ---
 
 ## Next
 
-Small, well-scoped, and valuable on the first session of real use.
+Small, well-scoped, and likely to matter in the first weeks of real use.
 
-- [ ] **Session statistics.** Words reviewed today; a breakdown per CEFR level.
-      `reviewed_at` is already stored, so this is a query and a screen.
-- [ ] **Filter the queue by level or source.** "Review only B2", "review only
-      Oxford 5000". Add a parameter to `WordRepository.next_unreviewed` and a
-      selector to the app bar.
-- [ ] **Export all words, not just unknown ones.** `ExportService` already
-      works per status; the choice just needs surfacing.
-- [ ] **Remember window size and position** alongside the theme in `QSettings`.
-- [ ] **Show a word count per source** in a Sources view, using the
-      `word_count` that `SourceRepository` already returns but nothing displays.
+- [ ] **Edit a word's details.** Words can be added with details and their
+      status changed, but part of speech, level, definition and example cannot
+      be edited afterwards. Needs a `word_sources` write for the manual source
+      and a flattening rule that lets manual edits win over imported values.
+- [ ] **Filter flashcards by CEFR level.** "Review only B2 in Oxford 5000."
+      A parameter on `WordRepository.next_unreviewed` and a control in the
+      Review context strip.
+- [ ] **Session statistics.** Words reviewed today and a per-level breakdown.
+      `reviewed_at` is already stored.
+- [ ] **Remember window size and position** alongside the theme.
+- [ ] **Drag and drop files onto the window** to open the import dialog with
+      them; `ImportDialog` already accepts initial paths.
 
 ## Later
 
 Larger, and worth doing only once the basic loop has been used in anger.
 
-- [ ] **Vocabulary browser.** A searchable, filterable table of every word with
-      its status, allowing an answer to be changed afterwards. Needs a new
-      screen and a paginated repository query.
-- [ ] **Spaced repetition.** A `review_history` table and a scheduling policy.
+- [ ] **Spaced repetition.** A review-history table and a scheduling policy.
       The biggest addition, and the one most likely to be designed wrong
       without real usage data first.
-- [ ] **Undo more than one step.** Currently only the last answer can be
-      undone. A bounded stack in `MainWindow` would cover a mis-click run.
-- [ ] **Per-sense review.** `bank (money)` and `bank (river)` as separate
-      questions. The senses are already stored; this is a product decision
-      about whether asking twice is wanted.
-- [ ] **Definitions for the Oxford lists.** Neither PDF contains them. Would
-      need a different source, which raises licensing questions.
-- [ ] **OCR for scanned PDFs.** Detection and the error message already exist;
-      this would replace the message with an actual code path.
-- [ ] **Verify on macOS and Linux.** Nothing should be Windows-specific, but
-      "should" is not "verified".
+- [ ] **Per-sense review.** Oxford's `bank (money)` and `bank (river)` as
+      separate questions. Senses are stored in `word_sources.metadata`.
+- [ ] **German-aware normalization.** Today `Straße` and `Strasse` are the same
+      identity (Unicode case folding) and nouns are not distinguished by
+      capitalisation. Language-specific rules would live in `normalization/`
+      and be selected by word language.
+- [ ] **OCR for scanned PDFs.** Detection and the error message exist.
+- [ ] **Verify on macOS and Linux.** Nothing is Windows-specific; nothing has
+      been run elsewhere.
 
 ## Ideas
 
 Unscheduled. Recorded so they are not lost, not committed to.
 
-- Anki export (`.apkg` or a CSV shaped for Anki import).
-- Turkish meanings, or another target language, as an optional column.
+- Anki export.
 - Personal notes per word.
-- A daily review goal with a streak.
 - Audio pronunciation.
-- Additional parsers: Cambridge, IELTS, domain-specific word lists.
-- A "show me this again later" answer, between known and unknown.
-- Import from plain text or EPUB, not only PDF.
-- A packaged Windows installer, so PySide6 need not be installed by hand.
+- A daily review goal.
+- More parsers: Cambridge, IELTS word lists, EPUB, plain text.
+- A packaged Windows installer.
