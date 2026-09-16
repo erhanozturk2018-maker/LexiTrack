@@ -6,11 +6,15 @@ is the difference between *seeing* a word and *knowing* it.
 
 The model holds ``StoredWord`` rows; a proxy handles search, status filtering
 and sorting, so filtering thousands of words never touches the database.
+
+Actions on a selection live in three places that always agree: the selection
+bar, the right-click menu, and single keys on the table (K, U, R, C, M,
+Delete). The table only asks; the page that owns it does the work.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import IntEnum
 
 from PySide6.QtCore import (
@@ -18,6 +22,7 @@ from PySide6.QtCore import (
     QItemSelectionModel,
     QModelIndex,
     QPersistentModelIndex,
+    QPoint,
     QSortFilterProxyModel,
     Qt,
     Signal,
@@ -81,6 +86,9 @@ class VocabularyTableModel(QAbstractTableModel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._words: list[StoredWord] = []
+        #: A list left out of the Lists column (the list being viewed).
+        self.hidden_list_name: str | None = None
+        self.titles = dict(COLUMN_TITLES)
 
     def set_words(self, words: Sequence[StoredWord]) -> None:
         self.beginResetModel()
@@ -120,7 +128,7 @@ class VocabularyTableModel(QAbstractTableModel):
         self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole
     ):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return COLUMN_TITLES[Column(section)]
+            return self.titles[Column(section)]
         return None
 
     def data(
@@ -145,8 +153,8 @@ class VocabularyTableModel(QAbstractTableModel):
                 if word.sources:
                     parts.append(f"Source: {word.source_label}")
                 return "\n".join(parts)
-            if column is Column.LISTS and word.lists:
-                return "\n".join(word.lists)
+            if column is Column.LISTS and self._lists(word):
+                return "\n".join(self._lists(word))
             return None
         if role == Qt.ItemDataRole.AccessibleTextRole and column is Column.STATUS:
             return STATUS_NAMES[word.status]
@@ -166,10 +174,13 @@ class VocabularyTableModel(QAbstractTableModel):
         if column is Column.STATUS:
             return status_text(word.status)
         if column is Column.LISTS:
-            return word.list_label or _PLACEHOLDER
+            return ", ".join(self._lists(word)) or _PLACEHOLDER
         if column is Column.LANGUAGE:
             return language_name(word.language)
         return None
+
+    def _lists(self, word: StoredWord) -> tuple[str, ...]:
+        return tuple(name for name in word.lists if name != self.hidden_list_name)
 
     @staticmethod
     def _sort_key(word: StoredWord, column: Column, row: int):
@@ -243,8 +254,12 @@ class VocabularyTable(QWidget):
 
     #: The user asked to set a status on these word ids.
     status_requested = Signal(list, object)
-    #: "Add to list…" for these word ids.
-    add_to_list_requested = Signal(list)
+    #: Copy these word ids to a list id (``NEW_LIST_ID`` for a new list).
+    copy_requested = Signal(list, int)
+    #: Move these word ids to a list id (``NEW_LIST_ID`` for a new list).
+    move_requested = Signal(list, int)
+    #: C or M pressed: open the keyboard list picker ("copy" or "move").
+    pick_requested = Signal(str)
     #: "Remove from list" for these word ids.
     remove_requested = Signal(list)
     #: "Export selection…" for these word ids.
@@ -260,13 +275,17 @@ class VocabularyTable(QWidget):
             Column.ORDER, Column.WORD, Column.PART_OF_SPEECH, Column.CEFR, Column.STATUS,
         ),
         allow_remove: bool = True,
+        allow_move: bool = True,
         noun: str = "words",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._columns = list(columns)
         self._allow_remove = allow_remove
+        self._allow_move = allow_move
         self._noun = noun
+        #: Supplies ``(list_id, name)`` targets for the given word ids.
+        self._targets: Callable[[list[int]], list[tuple[int, str]]] = lambda _ids: []
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -330,17 +349,27 @@ class VocabularyTable(QWidget):
         for button in (self.mark_known_button, self.mark_unknown_button, self.reset_button):
             bar.addWidget(button)
 
-        self.more_button = _small_button("More", "More actions for the selection")
-        more = QMenu(self.more_button)
-        more.addAction("Add to List…", lambda: self.add_to_list_requested.emit(self.selected_ids()))
-        self.remove_action = more.addAction(
-            "Remove from This List…", lambda: self.remove_requested.emit(self.selected_ids())
+        bar.addSpacing(m.space_2)
+        self.copy_button = _small_button(
+            "Copy to  \u25be", "Copy the selection to another list (C)"
         )
-        self.remove_action.setVisible(self._allow_remove)
-        more.addSeparator()
-        more.addAction("Export Selection…", lambda: self.export_requested.emit(self.selected_ids()))
-        self.more_button.setMenu(more)
-        bar.addWidget(self.more_button)
+        self.copy_button.setObjectName("MenuButton")
+        self.copy_button.setMenu(self._target_menu(self.copy_button, self.copy_requested))
+        bar.addWidget(self.copy_button)
+        self.move_button = _small_button(
+            "Move to  \u25be", "Move the selection to another list (M)"
+        )
+        self.move_button.setObjectName("MenuButton")
+        self.move_button.setMenu(self._target_menu(self.move_button, self.move_requested))
+        self.move_button.setVisible(self._allow_move)
+        bar.addWidget(self.move_button)
+        self.remove_button = _small_button("Remove", "Remove the selection from this list (Delete)")
+        self.remove_button.clicked.connect(lambda: self._emit_selection(self.remove_requested))
+        self.remove_button.setVisible(self._allow_remove)
+        bar.addWidget(self.remove_button)
+        self.export_button = _small_button("Export\u2026", "Export the selection")
+        self.export_button.clicked.connect(lambda: self._emit_selection(self.export_requested))
+        bar.addWidget(self.export_button)
 
         bar.addStretch(1)
         clear = _small_button("Clear Selection", "Clear selection (Esc)")
@@ -391,6 +420,9 @@ class VocabularyTable(QWidget):
         self.view.key_status.connect(self._request_status)
         self.view.key_open.connect(lambda: self._on_open(self.view.currentIndex()))
         self.view.key_remove.connect(self._on_key_remove)
+        self.view.key_pick.connect(self._on_key_pick)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.view, 1)
 
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self.search.setFocus)
@@ -426,7 +458,17 @@ class VocabularyTable(QWidget):
 
     def set_remove_allowed(self, allowed: bool) -> None:
         self._allow_remove = allowed
-        self.remove_action.setVisible(allowed)
+        self.remove_button.setVisible(allowed)
+
+    def set_target_provider(self, provider: Callable[[list[int]], list[tuple[int, str]]]) -> None:
+        """Tell the table which lists the selection may be copied or moved to."""
+        self._targets = provider
+
+    def set_hidden_list(self, name: str | None, title: str = "LISTS") -> None:
+        """Leave ``name`` out of the Lists column, and title the column."""
+        self.model.hidden_list_name = name
+        self.model.titles[Column.LISTS] = title
+        self.model.headerDataChanged.emit(Qt.Orientation.Horizontal, Column.LISTS, Column.LISTS)
 
     def selected_ids(self) -> list[int]:
         rows = self.view.selectionModel().selectedRows()
@@ -489,6 +531,81 @@ class VocabularyTable(QWidget):
         if ids and self._allow_remove:
             self.remove_requested.emit(ids)
 
+    def _on_key_pick(self, kind: str) -> None:
+        if not self.selected_ids() or (kind == "move" and not self._allow_move):
+            return
+        self.pick_requested.emit(kind)
+
+    def _emit_selection(self, signal) -> None:
+        ids = self.selected_ids()
+        if ids:
+            signal.emit(ids)
+
+    def _target_menu(self, owner: QWidget, signal) -> QMenu:
+        menu = QMenu(owner)
+        menu.aboutToShow.connect(lambda: self.fill_targets(menu, signal))
+        return menu
+
+    def fill_targets(self, menu: QMenu, signal) -> None:
+        """Fill ``menu`` with the lists the selection can go to, plus New List."""
+        from ..word_transfer import NEW_LIST_ID
+
+        menu.clear()
+        ids = self.selected_ids()
+        targets = self._targets(ids) if ids else []
+        for list_id, name in targets:
+            menu.addAction(name, lambda i=list_id: signal.emit(self.selected_ids(), i))
+        if not targets:
+            menu.addAction("No other list can take these words").setEnabled(False)
+        menu.addSeparator()
+        menu.addAction("New List\u2026", lambda: signal.emit(self.selected_ids(), NEW_LIST_ID))
+
+    def _show_context_menu(self, pos: QPoint) -> None:
+        index = self.view.indexAt(pos)
+        if not index.isValid():
+            return
+        # Right-clicking outside the selection acts on that row alone, as in a
+        # file manager; inside the selection it acts on the whole selection.
+        if not self.view.selectionModel().isRowSelected(index.row(), index.parent()):
+            self.view.selectionModel().select(
+                index,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                | QItemSelectionModel.SelectionFlag.Rows,
+            )
+            self.view.setCurrentIndex(index)
+        self.build_context_menu().exec(self.view.viewport().mapToGlobal(pos))
+
+    def build_context_menu(self) -> QMenu:
+        menu = QMenu(self.view)
+        for status, text, key in (
+            (ReviewStatus.KNOWN, "Mark Known", "K"),
+            (ReviewStatus.UNKNOWN, "Mark Unknown", "U"),
+            (ReviewStatus.NOT_REVIEWED, "Reset to Not Reviewed", "R"),
+        ):
+            action = menu.addAction(text, lambda s=status: self._request_status(s))
+            action.setShortcut(QKeySequence(key))
+        menu.addSeparator()
+        copy_menu = menu.addMenu("Copy to")
+        copy_menu.aboutToShow.connect(lambda: self.fill_targets(copy_menu, self.copy_requested))
+        if self._allow_move:
+            move_menu = menu.addMenu("Move to")
+            move_menu.aboutToShow.connect(
+                lambda: self.fill_targets(move_menu, self.move_requested)
+            )
+        if self._allow_remove:
+            remove = menu.addAction(
+                "Remove from This List\u2026", lambda: self._emit_selection(self.remove_requested)
+            )
+            remove.setShortcut(QKeySequence(Qt.Key.Key_Delete))
+        menu.addAction("Export\u2026", lambda: self._emit_selection(self.export_requested))
+        if len(self.selected_ids()) == 1:
+            menu.addSeparator()
+            details = menu.addAction(
+                "Word Details", lambda: self._on_open(self.view.currentIndex())
+            )
+            details.setShortcut(QKeySequence(Qt.Key.Key_Return))
+        return menu
+
 
 def order_cell_margin(view: QTableView) -> int:
     """Horizontal space a cell takes from its text.
@@ -503,11 +620,17 @@ def order_cell_margin(view: QTableView) -> int:
 
 
 class _KeyboardTableView(QTableView):
-    """A table that turns K / U / R into status actions on the selection."""
+    """A table that turns single keys into actions on the selection.
+
+    K / U / R set status, C / M copy or move, Enter opens, Delete removes.
+    Arrows, Shift+arrows, Page Up/Down, Home/End and Ctrl+A keep their
+    standard Qt behaviour.
+    """
 
     key_status = Signal(object)
     key_open = Signal()
     key_remove = Signal()
+    key_pick = Signal(str)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
@@ -527,6 +650,12 @@ class _KeyboardTableView(QTableView):
                 return
             if key == Qt.Key.Key_Delete:
                 self.key_remove.emit()
+                return
+            if key == Qt.Key.Key_C:
+                self.key_pick.emit("copy")
+                return
+            if key == Qt.Key.Key_M:
+                self.key_pick.emit("move")
                 return
         super().keyPressEvent(event)
 

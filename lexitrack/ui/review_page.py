@@ -34,17 +34,19 @@ from ..models.user_word_state import ReviewStatus
 from ..services.review_session import ReviewSession
 from ..services.vocabulary_service import VocabularyService
 from .components.cards import ModeSwitch
-from .components.vocabulary_table import VocabularyTable
-from .dialogs import ChooseListDialog, WordDialog, confirm
+from .components.toast import Toast
+from .components.vocabulary_table import Column, VocabularyTable
+from .dialogs import WordDialog, confirm
 from .empty_state import EmptyState
 from .list_actions import ListActions
 from .progress_widget import StatsBar
 from .review_widget import ReviewWidget
 from .theme.palette import METRICS
+from .word_transfer import ListPicker, WordTransfer
 
 
 class FinishedState(EmptyState):
-    """The end of a list. Backspace still steps back into it."""
+    """The end of a list. ← or Backspace still steps back into it."""
 
     back_requested = Signal()
 
@@ -60,7 +62,7 @@ class FinishedState(EmptyState):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        if event.key() == Qt.Key.Key_Backspace:
+        if event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Left):
             self.back_requested.emit()
             return
         super().keyPressEvent(event)
@@ -104,7 +106,7 @@ class ReviewPage(QWidget):
         names.addWidget(_label("REVIEWING", "ContextLabel"))
         self.list_button = QPushButton()
         self.list_button.setObjectName("ContextListButton")
-        self.list_button.setToolTip("Switch list")
+        self.list_button.setToolTip("Switch list (Ctrl+L)")
         self.list_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.list_menu = QMenu(self.list_button)
         self.list_menu.aboutToShow.connect(self._fill_list_menu)
@@ -138,6 +140,7 @@ class ReviewPage(QWidget):
         self.flashcard = ReviewWidget()
         self.flashcard.answered.connect(lambda known: self._step(lambda s: s.answer(known)))
         self.flashcard.back_requested.connect(lambda: self._step(ReviewSession.back))
+        self.flashcard.forward_requested.connect(lambda: self._step(ReviewSession.forward))
         self.flashcard.repeat_requested.connect(
             lambda: self._step(ReviewSession.repeat_last_answer)
         )
@@ -169,17 +172,29 @@ class ReviewPage(QWidget):
         holder = QWidget()
         holder_layout = QVBoxLayout(holder)
         holder_layout.setContentsMargins(m.space_6, m.space_2, m.space_6, m.space_4)
-        self.table = VocabularyTable()
+        self.table = VocabularyTable(
+            columns=(
+                Column.ORDER, Column.WORD, Column.PART_OF_SPEECH, Column.CEFR, Column.STATUS,
+                Column.LISTS,
+            )
+        )
         add_words = QPushButton("Add Words…")
         add_words.clicked.connect(self._add_words)
         self.table.extra_filters.addWidget(add_words)
         self.table.status_requested.connect(self._set_status)
-        self.table.add_to_list_requested.connect(self._add_to_other_list)
+        self.table.copy_requested.connect(self._copy_to)
+        self.table.move_requested.connect(self._move_to)
+        self.table.pick_requested.connect(self._pick_transfer)
+        self.table.set_target_provider(self._transfer_targets)
         self.table.remove_requested.connect(self._remove_from_list)
         self.table.export_requested.connect(self._export_selection)
         self.table.open_requested.connect(self._open_word)
         holder_layout.addWidget(self.table)
         self.modes.addWidget(holder)
+
+        self.toast = Toast(holder)
+        self.transfer = WordTransfer(self._service, self.toast, self)
+        self.transfer.changed.connect(self._after_transfer)
 
         self.stats = StatsBar()
         layout.addWidget(self.stats)
@@ -221,6 +236,7 @@ class ReviewPage(QWidget):
             return
 
         self.list_button.setText(f"{current.name}  ▾")
+        self.table.set_hidden_list(current.name, "ALSO IN")
         self.language_tag.setVisible(current.language != UNDETERMINED)
         self.language_tag.setText(current.language.upper())
         self.language_tag.setToolTip(current.language_name)
@@ -253,7 +269,7 @@ class ReviewPage(QWidget):
             self.finished.set_body(
                 f"You have reviewed every word in {name}: {progress.known:,} known, "
                 f"{progress.unknown:,} to learn. Open it as a list to change any answer"
-                + (", or press Backspace to step back." if self.session.can_go_back else ".")
+                + (", or press \u2190 to step back." if self.session.can_go_back else ".")
             )
             self.flashcard_stack.setCurrentWidget(self.finished)
             self.finished.setFocus()
@@ -283,24 +299,46 @@ class ReviewPage(QWidget):
         self.table.refresh_words(self._service.get_words(word_ids))
         self._after_change()
 
-    def _add_to_other_list(self, word_ids: list[int]) -> None:
-        dialog = ChooseListDialog(
-            self._service, f"Add {len(word_ids):,} words to a list", exclude_id=self.list_id,
-            parent=self,
-        )
-        if not dialog.exec() or dialog.chosen is None:
-            return
-        try:
-            added = self._service.add_words_to_list(dialog.chosen.id, word_ids)
-        except LexiTrackError as exc:
-            QMessageBox.warning(self, "Could not add words", exc.user_message)
-            return
-        skipped = len(word_ids) - added
-        message = f"Added {added:,} {'word' if added == 1 else 'words'} to “{dialog.chosen.name}”."
-        if skipped:
-            message += f" {skipped:,} were already in it."
-        QMessageBox.information(self, "Words added", message)
+    def _after_transfer(self) -> None:
+        """Redraw after a copy, move or undo, keeping whatever is still selected.
+
+        After a copy the words are all still here, so the selection survives and
+        can go on to another list; after a move the moved rows are simply gone.
+        """
+        selected = self.table.selected_ids()
         self._after_change(reload=True)
+        self.table.select_ids(selected)
+
+    def _transfer_targets(self, word_ids: list[int]) -> list[tuple[int, str]]:
+        return [(lst.id, lst.name) for lst in self.transfer.targets(word_ids, self.list_id)]
+
+    def _copy_to(self, word_ids: list[int], target_id: int) -> None:
+        self.transfer.copy(word_ids, target_id)
+
+    def _move_to(self, word_ids: list[int], target_id: int) -> None:
+        if self.list_id is not None:
+            self.transfer.move(word_ids, self.list_id, target_id)
+
+    def _pick_transfer(self, kind: str) -> None:
+        ids = self.table.selected_ids()
+        if not ids or self.list_id is None:
+            return
+        if kind == "move":
+            self.transfer.pick_and_move(ids, self.list_id, self.table.view)
+        else:
+            self.transfer.pick_and_copy(ids, self.list_id, self.table.view)
+
+    def pick_list(self) -> None:
+        """Ctrl+L: switch list from the keyboard."""
+        chosen = ListPicker.pick(
+            "Switch list",
+            self._service.lists(),
+            self.list_button,
+            allow_new=False,
+            current_id=self.list_id,
+        )
+        if chosen is not None and chosen != self.list_id:
+            self._switch_list(chosen)
 
     def _remove_from_list(self, word_ids: list[int]) -> None:
         if self.list_id is None:

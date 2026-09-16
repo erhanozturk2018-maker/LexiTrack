@@ -1,4 +1,4 @@
-"""The small dialogs: create/edit a list, add a word, choose a list, word details.
+"""The small dialogs: create/edit a list, add a word, word details.
 
 Every dialog reports problems inline, next to the field, and keeps what the
 user typed. A dialog that closes on a validation error and throws away the
@@ -16,8 +16,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -280,79 +278,6 @@ class AddWordDialog(QDialog):
             field.clear()
         self.pos_field.setCurrentIndex(0)
         self.word_field.setFocus()
-
-
-# -- choose a list ---------------------------------------------------------
-
-
-class ChooseListDialog(QDialog):
-    """Pick a list to add words to, or create one on the spot."""
-
-    def __init__(
-        self,
-        service: VocabularyService,
-        title: str,
-        exclude_id: int | None = None,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._service = service
-        self._exclude = exclude_id
-        self.chosen: VocabularyList | None = None
-        m = METRICS
-        self.setWindowTitle(title)
-        self.setMinimumWidth(420)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(m.space_5, m.space_5, m.space_5, m.space_5)
-        layout.setSpacing(m.space_3)
-        layout.addLayout(dialog_header(title))
-
-        self.lists = QListWidget()
-        self.lists.itemDoubleClicked.connect(lambda _item: self._accept())
-        layout.addWidget(self.lists)
-        self._populate()
-
-        buttons = QHBoxLayout()
-        new_list = QPushButton("New List…")
-        new_list.clicked.connect(self._create)
-        buttons.addWidget(new_list)
-        buttons.addStretch(1)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        buttons.addWidget(cancel)
-        ok = QPushButton("Add")
-        ok.setProperty("variant", "primary")
-        ok.setDefault(True)
-        ok.clicked.connect(self._accept)
-        buttons.addWidget(ok)
-        layout.addLayout(buttons)
-
-    def _populate(self, select_id: int | None = None) -> None:
-        self.lists.clear()
-        for lst in self._service.lists():
-            if lst.id == self._exclude:
-                continue
-            tag = "" if lst.language == UNDETERMINED else f"   ·   {lst.language_name}"
-            item = QListWidgetItem(f"{lst.name}{tag}")
-            item.setData(Qt.ItemDataRole.UserRole, lst.id)
-            self.lists.addItem(item)
-            if lst.id == select_id:
-                self.lists.setCurrentItem(item)
-        if self.lists.currentItem() is None and self.lists.count():
-            self.lists.setCurrentRow(0)
-
-    def _create(self) -> None:
-        dialog = ListDialog(self._service, parent=self)
-        if dialog.exec() and dialog.result_list is not None:
-            self._populate(dialog.result_list.id)
-
-    def _accept(self) -> None:
-        item = self.lists.currentItem()
-        if item is None:
-            return
-        self.chosen = self._service.get_list(int(item.data(Qt.ItemDataRole.UserRole)))
-        self.accept()
 
 
 # -- word details ----------------------------------------------------------

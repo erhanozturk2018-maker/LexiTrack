@@ -8,18 +8,21 @@ around one question: how fast can someone answer a word and see the next one?
   It is labelled "Source" on purpose — the *list* being reviewed is shown by
   the page around the card, and the two are never presented as the same thing.
 * Two answer buttons of equal size and weight. Neither is the "right" answer.
-* A keyboard path for everything, printed where it is used:
+* A keyboard path for everything, printed where it is used. Arrows move;
+  letters act — so an arrow key can never change an answer by accident:
 
   ======================  ==============================================
-  K or ←                  I Know
-  U or →                  I Don't Know
+  K                       I Know
+  U                       I Don't Know
+  ← or Backspace          previous word (status unchanged)
+  →                       next word, on a word you went back to (status
+                          unchanged); does nothing on an unanswered word
   Enter or Space          repeat the last answer; on an earlier word, move
                           forward keeping its status
-  Backspace               step back to the previous word (status unchanged)
   R                       reset the word on screen to Not Reviewed
   ======================  ==============================================
 
-* Backspace is navigation, never an undo. Stepping back shows the earlier word
+* Moving back is navigation, never an undo. Stepping back shows the earlier word
   *with* its status, in a banner that says so; changing it takes an explicit
   answer or R. See ``services/review_session.py``.
 * The card keeps a fixed minimum height so the buttons never move between
@@ -57,8 +60,10 @@ class ReviewWidget(QWidget):
 
     #: Emitted with ``known`` when the user answers.
     answered = Signal(bool)
-    #: Backspace: step back one word.
+    #: ← or Backspace: step back one word.
     back_requested = Signal()
+    #: →: step forward through words already answered.
+    forward_requested = Signal()
     #: Enter / Space: repeat the last answer, or move forward in history.
     repeat_requested = Signal()
     #: R: reset the word on screen to Not Reviewed.
@@ -148,9 +153,15 @@ class ReviewWidget(QWidget):
         self._position_label = QLabel()
         self._position_label.setObjectName("PositionLabel")
 
-        self._back_button = _ghost_button("← Back", "Step back to the previous word (Backspace)")
+        self._back_button = _ghost_button("\u2190 Back", "Previous word (\u2190 or Backspace)")
         self._back_button.clicked.connect(self.back_requested.emit)
         self._back_button.setEnabled(False)
+
+        self._next_button = _ghost_button(
+            "Next \u2192", "Step forward without changing it (\u2192)"
+        )
+        self._next_button.clicked.connect(self.forward_requested.emit)
+        self._next_button.setVisible(False)
 
         self._reset_button = _ghost_button("Reset", "Reset this word to Not Reviewed (R)")
         self._reset_button.clicked.connect(self.reset_requested.emit)
@@ -162,6 +173,7 @@ class ReviewWidget(QWidget):
         footer.addStretch(1)
         footer.addWidget(self._reset_button)
         footer.addWidget(self._back_button)
+        footer.addWidget(self._next_button)
         card_layout.addLayout(footer)
 
         centred = QHBoxLayout()
@@ -172,7 +184,7 @@ class ReviewWidget(QWidget):
 
         self._hint_label = QLabel(
             "K — I Know     ·     U — I Don't Know     ·     "
-            "Enter — repeat     ·     Backspace — back     ·     R — reset"
+            "← → previous / next     ·     Enter — repeat     ·     R — reset"
         )
         self._hint_label.setObjectName("ShortcutHint")
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -205,7 +217,7 @@ class ReviewWidget(QWidget):
         if item.is_history:
             steps = "1 word back" if item.steps_back == 1 else f"{item.steps_back} words back"
             self._history_banner.setText(
-                f"Earlier word · {steps} · Enter moves on without changing it"
+                f"Earlier word · {steps} · → moves on without changing it"
             )
             self._history_banner.setVisible(True)
             self._position_label.setText("Reviewing an earlier answer")
@@ -217,6 +229,7 @@ class ReviewWidget(QWidget):
         self._set_optional(self._definition_label, word.definition)
 
         self._back_button.setEnabled(can_go_back)
+        self._next_button.setVisible(item.is_history)
         self._reset_button.setVisible(word.status is not ReviewStatus.NOT_REVIEWED)
 
         for button in (self._known_button, self._unknown_button):
@@ -246,17 +259,22 @@ class ReviewWidget(QWidget):
             super().keyPressEvent(event)
             return
         key = event.key()
-        if key in (Qt.Key.Key_K, Qt.Key.Key_Left):
+        if key == Qt.Key.Key_K:
             if self._known_button.isEnabled():
                 self._answer(True)
-        elif key in (Qt.Key.Key_U, Qt.Key.Key_Right):
+        elif key == Qt.Key.Key_U:
             if self._unknown_button.isEnabled():
                 self._answer(False)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             self.repeat_requested.emit()
-        elif key == Qt.Key.Key_Backspace:
+        elif key in (Qt.Key.Key_Backspace, Qt.Key.Key_Left):
             if self._back_button.isEnabled():
                 self.back_requested.emit()
+        elif key == Qt.Key.Key_Right:
+            # Forward only through answered words: an unanswered word must be
+            # answered, not skipped.
+            if not self._next_button.isHidden():
+                self.forward_requested.emit()
         elif key == Qt.Key.Key_R:
             # isHidden, not isVisible: the latter is false whenever the window is.
             if not self._reset_button.isHidden():

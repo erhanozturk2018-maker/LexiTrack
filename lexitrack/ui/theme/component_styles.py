@@ -139,6 +139,37 @@ QPushButton#ModeButton:checked {{
 }}
 #ListCard:hover {{ border-color: {p.border_strong}; }}
 #ListCard[current="true"] {{ border: 1px solid {p.accent}; }}
+/* Keyboard focus is always visible and distinct from "current": a thicker
+   border and a tinted background, not just the accent outline. */
+#ListCard:focus {{
+    border: 2px solid {p.focus_ring};
+    background-color: {p.accent_soft};
+}}
+
+/* The label already ends in an arrow; Qt's own indicator would be a second. */
+QPushButton#MenuButton::menu-indicator {{ image: none; width: 0; }}
+
+/* Transfer result with Undo: an inverted chip that floats over the page. */
+#Toast {{
+    background-color: {p.text};
+    border-radius: {m.radius_md}px;
+}}
+#ToastText {{ color: {p.surface}; font-size: 13px; }}
+QPushButton#ToastAction {{
+    background: transparent;
+    border: none;
+    color: {p.accent_soft};
+    font-weight: 600;
+    padding: 4px 8px;
+    min-height: 0;
+}}
+QPushButton#ToastAction:hover {{ text-decoration: underline; }}
+
+#ListPicker {{
+    background-color: {p.surface_raised};
+    border: 1px solid {p.border_strong};
+    border-radius: {m.radius_md}px;
+}}
 
 #ListCardName {{
     font-size: 15px;

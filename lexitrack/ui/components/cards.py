@@ -84,6 +84,8 @@ class ListCard(QFrame):
 
     clicked = Signal(int)
     activated = Signal(int)
+    #: An arrow key was pressed on the card: ``(columns, rows)`` to move by.
+    navigate = Signal(int, int)
 
     def __init__(self, vocabulary_list: VocabularyList, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -162,8 +164,22 @@ class ListCard(QFrame):
         super().mouseDoubleClickEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
+        key = event.key()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             self.activated.emit(self.list_id)
+            return
+        arrows = {
+            Qt.Key.Key_Left: (-1, 0),
+            Qt.Key.Key_Right: (1, 0),
+            Qt.Key.Key_Up: (0, -1),
+            Qt.Key.Key_Down: (0, 1),
+        }
+        if key in arrows:
+            self.navigate.emit(*arrows[key])
+            return
+        if key == Qt.Key.Key_F10 and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            # Shift+F10 is the Windows keyboard equivalent of a right-click.
+            self.customContextMenuRequested.emit(self.rect().center())
             return
         super().keyPressEvent(event)
 

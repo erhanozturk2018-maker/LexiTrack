@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import QSettings, Qt, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -57,12 +57,12 @@ SHORTCUTS_TEXT = """
 <h3>Keyboard shortcuts</h3>
 <p><b>Flashcards</b></p>
 <table cellspacing="6">
-<tr><td><b>K</b> or <b>←</b></td><td>I Know</td></tr>
-<tr><td><b>U</b> or <b>→</b></td><td>I Don't Know</td></tr>
+<tr><td><b>K</b></td><td>I Know</td></tr>
+<tr><td><b>U</b></td><td>I Don't Know</td></tr>
+<tr><td><b>←</b> or <b>Backspace</b></td><td>Previous word. Its status is not changed.</td></tr>
+<tr><td><b>→</b></td><td>Next word, when you have gone back. Its status is not changed.</td></tr>
 <tr><td><b>Enter</b> / <b>Space</b></td><td>Repeat your last answer. On an earlier word:
 move forward without changing it.</td></tr>
-<tr><td><b>Backspace</b></td><td>Step back to the previous word.
-Its status is not changed.</td></tr>
 <tr><td><b>R</b></td><td>Reset the word on screen to Not Reviewed</td></tr>
 </table>
 <p><b>List mode and Unknown Words</b></p>
@@ -71,14 +71,20 @@ Its status is not changed.</td></tr>
 <tr><td><b>Ctrl+A</b></td><td>Select all visible words</td></tr>
 <tr><td><b>K</b> / <b>U</b> / <b>R</b></td>
 <td>Mark the selection Known / Unknown / Not Reviewed</td></tr>
+<tr><td><b>C</b> / <b>M</b></td><td>Copy / move the selection to another list</td></tr>
+<tr><td><b>Right-click</b> or <b>Menu key</b></td><td>All actions for the selection</td></tr>
 <tr><td><b>Enter</b></td><td>Open word details</td></tr>
 <tr><td><b>Delete</b></td><td>Remove the selection from this list (asks first)</td></tr>
 <tr><td><b>Ctrl+F</b></td><td>Search</td></tr>
 <tr><td><b>Esc</b></td><td>Clear the selection</td></tr>
+<tr><td><b>Ctrl+Z</b></td><td>Undo a copy or move while its message is showing</td></tr>
 </table>
 <p><b>Everywhere</b></p>
 <table cellspacing="6">
+<tr><td><b>Ctrl+Tab</b> / <b>Ctrl+Shift+Tab</b></td><td>Next / previous page</td></tr>
 <tr><td><b>Alt+H</b> / <b>Alt+R</b> / <b>Alt+U</b></td><td>Home / Review / Unknown Words</td></tr>
+<tr><td><b>Ctrl+L</b></td><td>Switch list</td></tr>
+<tr><td><b>Arrows</b> on Home</td><td>Move between lists; Enter opens</td></tr>
 <tr><td><b>Ctrl+1</b> / <b>Ctrl+2</b></td><td>Flashcard / List mode</td></tr>
 <tr><td><b>Ctrl+O</b></td><td>Import</td></tr>
 <tr><td><b>Ctrl+N</b></td><td>New list</td></tr>
@@ -115,6 +121,8 @@ class MainWindow(QMainWindow):
 
         self._build_menu()
         self._build_body()
+        for keys, step in (("Ctrl+Tab", 1), ("Ctrl+Shift+Tab", -1), ("Ctrl+Backtab", -1)):
+            QShortcut(QKeySequence(keys), self, activated=lambda s=step: self.cycle_page(s))
         self._ensure_current_list()
         self.show_page(REVIEW if self._has_resumable_review() else HOME)
 
@@ -140,6 +148,7 @@ class MainWindow(QMainWindow):
         self._action(view_menu, "&Home", None, lambda: self.show_page(HOME))
         self._action(view_menu, "&Review", None, lambda: self.show_page(REVIEW))
         self._action(view_menu, "&Unknown Words", None, lambda: self.show_page(UNKNOWN))
+        self._action(view_menu, "Switch &List\u2026", "Ctrl+L", self.switch_list)
         view_menu.addSeparator()
         self._action(view_menu, "&Flashcard Mode", "Ctrl+1",
                      lambda: self.open_review(mode=ModeSwitch.FLASHCARD))
@@ -257,6 +266,19 @@ class MainWindow(QMainWindow):
             self.review.set_list(self._current_list_id, self._mode)
         else:
             self.unknown.refresh()
+
+    def cycle_page(self, step: int) -> None:
+        """Ctrl+Tab / Ctrl+Shift+Tab: next or previous page, wrapping around."""
+        order = [HOME, REVIEW, UNKNOWN]
+        self.show_page(order[(order.index(self.current_page) + step) % len(order)])
+
+    def switch_list(self) -> None:
+        """Ctrl+L: open Review and choose a list from the keyboard."""
+        if not self._service.lists():
+            return
+        if self.current_page != REVIEW:
+            self.show_page(REVIEW)
+        self.review.pick_list()
 
     def open_review(self, list_id: int | None = None, mode: str | None = None) -> None:
         if list_id is not None:

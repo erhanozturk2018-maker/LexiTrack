@@ -28,7 +28,11 @@ from lexitrack.services.review_session import ReviewItem  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
 from lexitrack.ui.components.cards import ListCard, ModeSwitch, SegmentedProgress  # noqa: E402
 from lexitrack.ui.components.status import STATUS_ROLE  # noqa: E402
-from lexitrack.ui.components.vocabulary_table import Column, VocabularyTable  # noqa: E402
+from lexitrack.ui.components.vocabulary_table import (  # noqa: E402
+    WORD_ID_ROLE,
+    Column,
+    VocabularyTable,
+)
 from lexitrack.ui.dialogs import AddWordDialog, ListDialog  # noqa: E402
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
 from lexitrack.ui.main_window import HOME, REVIEW, UNKNOWN, MainWindow  # noqa: E402
@@ -121,15 +125,7 @@ def test_a_live_word_hides_its_status_and_an_earlier_word_shows_it(qapp) -> None
     assert not widget._reset_button.isHidden()
 
 
-@pytest.mark.parametrize(
-    "key, expected",
-    [
-        (Qt.Key.Key_K, True),
-        (Qt.Key.Key_Left, True),
-        (Qt.Key.Key_U, False),
-        (Qt.Key.Key_Right, False),
-    ],
-)
+@pytest.mark.parametrize("key, expected", [(Qt.Key.Key_K, True), (Qt.Key.Key_U, False)])
 def test_answer_keys(qtbot, key, expected) -> None:
     widget = ReviewWidget()
     qtbot.addWidget(widget)
@@ -735,31 +731,6 @@ def test_word_dialog_changes_status_explicitly(qapp, loaded) -> None:
     assert dialog.badge.text().endswith("Unknown")
 
 
-def test_adding_selected_words_to_another_list(
-    window, loaded, monkeypatch, no_blocking_dialogs
-) -> None:
-    import lexitrack.ui.review_page as review_page
-
-    other = loaded.create_list("My Difficult Words")
-
-    class Chooser:
-        def __init__(self, *args, **kwargs):
-            self.chosen = loaded.get_list(other.id)
-
-        def exec(self):
-            return True
-
-    monkeypatch.setattr(review_page, "ChooseListDialog", Chooser)
-    window.open_review(loaded.lists()[1].id, ModeSwitch.LIST)
-    ids = [w.id for w in window.review.table.model.words[:2]]
-    window.review.table.select_ids(ids)
-
-    window.review.table.add_to_list_requested.emit(ids)
-
-    assert loaded.get_progress(other.id).total == 2
-    assert "Added 2 words" in no_blocking_dialogs[-1]
-
-
 def test_order_numbers_are_never_cut_off(qtbot, theme) -> None:
     """Regression: a fixed 56px column showed "1,013" but elided "1,020" to "1,0…"."""
     theme.apply(ThemeName.LIGHT)
@@ -783,3 +754,267 @@ def test_order_numbers_are_never_cut_off(qtbot, theme) -> None:
     assert order_cell_margin(widget.view) >= 2 * 10 + 2 * frame
     for label in ("1,020", "4,953", "8,888"):
         assert metrics.horizontalAdvance(label) <= available, label
+
+
+
+def test_arrow_keys_navigate_and_never_answer(qtbot) -> None:
+    """Regression for the 0.2.0 behaviour where \u2190 and \u2192 marked the word."""
+    widget = ReviewWidget()
+    qtbot.addWidget(widget)
+    answered: list[bool] = []
+    back: list[bool] = []
+    forward: list[bool] = []
+    widget.answered.connect(answered.append)
+    widget.back_requested.connect(lambda: back.append(True))
+    widget.forward_requested.connect(lambda: forward.append(True))
+
+    # On an unanswered word: \u2190 goes back, \u2192 does nothing.
+    widget.show_item(item(), can_go_back=True)
+    qtbot.keyClick(widget, Qt.Key.Key_Right)
+    qtbot.keyClick(widget, Qt.Key.Key_Left)
+    assert (answered, back, forward) == ([], [True], [])
+    assert widget._next_button.isHidden()
+
+    # On a word you went back to: \u2192 moves forward.
+    widget.show_item(item(steps_back=1, status=ReviewStatus.KNOWN), can_go_back=True)
+    assert not widget._next_button.isHidden()
+    qtbot.keyClick(widget, Qt.Key.Key_Right)
+    assert (answered, forward) == ([], [True])
+
+
+def test_arrows_move_through_the_session_without_changing_status(window, loaded) -> None:
+    window.open_review(mode=ModeSwitch.FLASHCARD)
+    card = window.review.flashcard
+    card._known_button.click()   # alpha
+    card._unknown_button.click()  # beta
+
+    card.back_requested.emit()
+    card.back_requested.emit()
+    assert card._word_label.text() == "alpha"
+    card.forward_requested.emit()
+    assert card._word_label.text() == "beta"
+    card.forward_requested.emit()
+    assert card._word_label.text() == "gamma"
+
+    statuses = {w.normalized_word: w.status for w in loaded.list_words(window.review.list_id)}
+    assert (statuses["alpha"], statuses["beta"], statuses["gamma"]) == (
+        ReviewStatus.KNOWN, ReviewStatus.UNKNOWN, ReviewStatus.NOT_REVIEWED,
+    )
+
+
+# -- copying and moving words between lists ----------------------------------
+
+
+@pytest.fixture
+def two_lists(window, loaded):
+    """'sample' (five words, open in List mode) and an empty 'Difficult' list."""
+    sample = next(lst for lst in loaded.lists() if lst.name == "sample")
+    difficult = loaded.create_list("Difficult")
+    window.open_review(sample.id, ModeSwitch.LIST)
+    table = window.review.table
+    ids = [w.id for w in table.model.words[:2]]
+    table.select_ids(ids)
+    return window, loaded, sample, difficult, ids
+
+
+def test_copy_to_adds_words_and_keeps_them_here(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+
+    window.review.table.copy_requested.emit(ids, difficult.id)
+
+    assert service.get_progress(difficult.id).total == 2
+    assert service.get_progress(sample.id).total == 5
+    assert "Copied 2 words" in window.review.toast.message.text()
+    assert window.review.toast.can_undo
+
+
+def test_move_to_adds_there_and_removes_here_without_deleting(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+    service.mark_known(ids[0])
+
+    window.review.table.move_requested.emit(ids, difficult.id)
+
+    assert service.get_progress(sample.id).total == 3
+    assert service.get_progress(difficult.id).total == 2
+    assert service.get_word(ids[0]).status is ReviewStatus.KNOWN
+    assert window.review.table.model.rowCount() == 3
+    assert "Moved 2 words" in window.review.toast.message.text()
+
+
+def test_undo_reverses_a_move(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+    window.review.table.move_requested.emit(ids, difficult.id)
+
+    window.review.toast.undo()
+
+    assert service.get_progress(sample.id).total == 5
+    assert service.get_progress(difficult.id).total == 0
+    assert window.review.toast.isHidden()
+
+
+def test_undo_of_a_copy_leaves_words_that_were_already_there(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+    service.add_words_to_list(difficult.id, [ids[0]])
+
+    window.review.table.copy_requested.emit(ids, difficult.id)
+    assert "1 were already there" in window.review.toast.message.text()
+    window.review.toast.undo()
+
+    assert [w.id for w in service.list_words(difficult.id)] == [ids[0]]
+
+
+def test_lists_in_another_language_are_not_offered(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+    service.create_list("German", "de")
+    offered = [name for _id, name in window.review._transfer_targets(ids)]
+    assert offered == ["Difficult"]
+
+
+def test_selection_bar_menus_list_targets_and_new_list(two_lists) -> None:
+    window, *_ = two_lists
+    table = window.review.table
+    menu = table.copy_button.menu()
+    menu.aboutToShow.emit()
+    labels = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert labels == ["Difficult", "New List\u2026"]
+
+
+def test_right_click_menu_offers_every_selection_action(two_lists) -> None:
+    window, *_ = two_lists
+    labels = [a.text() for a in window.review.table.build_context_menu().actions()]
+    for expected in ("Mark Known", "Mark Unknown", "Reset to Not Reviewed", "Copy to",
+                     "Move to", "Remove from This List\u2026", "Export\u2026"):
+        assert expected in labels
+
+
+def test_c_and_m_keys_open_the_picker(qtbot, two_lists, monkeypatch) -> None:
+    import lexitrack.ui.word_transfer as word_transfer
+
+    window, service, sample, difficult, ids = two_lists
+    asked: list[str] = []
+
+    def fake_pick(title, lists, anchor, at=None, allow_new=True, current_id=None):
+        asked.append(title)
+        return difficult.id
+
+    monkeypatch.setattr(word_transfer.ListPicker, "pick", staticmethod(fake_pick))
+    qtbot.keyClick(window.review.table.view, Qt.Key.Key_M)
+
+    assert asked == ["Move 2 to"]
+    assert service.get_progress(difficult.id).total == 2
+    assert service.get_progress(sample.id).total == 3
+
+
+def test_list_picker_filters_and_is_keyboard_driven(qapp, loaded) -> None:
+    from lexitrack.ui.word_transfer import NEW_LIST_ID, ListPicker
+
+    loaded.create_list("German A1", "de")
+    loaded.create_list("IELTS Vocabulary", "en")
+    picker = ListPicker("Copy to", loaded.lists())
+
+    picker.filter.setText("ielts")
+    visible = [picker.items.item(r).text() for r in picker._visible_rows()]
+    assert visible[0].startswith("IELTS Vocabulary")
+    assert visible[-1].endswith("New List\u2026")
+
+    picker.move_selection(1)
+    picker._accept_current()
+    assert picker.chosen_id == NEW_LIST_ID
+
+
+def test_the_lists_column_shows_other_lists_only(two_lists) -> None:
+    window, service, sample, difficult, ids = two_lists
+    window.review.table.copy_requested.emit(ids[:1], difficult.id)
+    table = window.review.table
+    row = next(r for r in range(table.proxy.rowCount())
+               if table.proxy.index(r, Column.WORD).data(WORD_ID_ROLE) == ids[0])
+    assert table.proxy.index(row, Column.LISTS).data() == "Difficult"
+    assert table.proxy.headerData(Column.LISTS, Qt.Orientation.Horizontal) == "ALSO IN"
+    other = next(r for r in range(table.proxy.rowCount()) if r != row)
+    assert table.proxy.index(other, Column.LISTS).data() == "\u2014"
+
+
+def test_unknown_words_can_be_copied_but_not_moved(window, loaded) -> None:
+    difficult = loaded.create_list("Difficult")
+    first = loaded.list_words(next(lst.id for lst in loaded.lists() if lst.name == "sample"))[0]
+    loaded.mark_unknown(first.id)
+    window.show_page(UNKNOWN)
+    table = window.unknown.table
+    assert table.move_button.isHidden()
+
+    table.select_ids([first.id])
+    table.copy_requested.emit([first.id], difficult.id)
+
+    assert loaded.get_progress(difficult.id).total == 1
+    assert table.model.rowCount() == 1  # still unknown, still listed
+
+
+# -- keyboard navigation ---------------------------------------------------
+
+
+def test_arrow_keys_move_between_home_cards(qtbot, window, loaded) -> None:
+    """Arrows move focus across the 3-column grid; Up from the top row returns to Continue.
+
+    ``focusWidget()`` is checked rather than ``hasFocus()``: the latter is false
+    whenever the test window is not the active window, which it may not be.
+    """
+    for name in ("Beta", "Gamma", "Delta"):
+        created = loaded.create_list(name)
+        loaded.add_word(created.id, "word")
+    window.show_page(HOME)
+    window.show()
+    qtbot.waitExposed(window)
+    cards = list(window.home._cards.values())  # Beta, Delta, Gamma / sample
+
+    def focused():
+        return window.focusWidget()
+
+    cards[0].setFocus()
+    qtbot.keyClick(cards[0], Qt.Key.Key_Right)
+    assert focused() is cards[1]
+    qtbot.keyClick(cards[1], Qt.Key.Key_Down)  # nothing below Delta
+    assert focused() is cards[1]
+    qtbot.keyClick(cards[1], Qt.Key.Key_Left)
+    qtbot.keyClick(cards[0], Qt.Key.Key_Down)
+    assert focused() is cards[3]
+    qtbot.keyClick(cards[3], Qt.Key.Key_Up)
+    assert focused() is cards[0]
+    qtbot.keyClick(cards[0], Qt.Key.Key_Up)
+    assert focused() is window.home.continue_button
+    qtbot.keyClick(window.home.continue_button, Qt.Key.Key_Down)
+    assert isinstance(focused(), ListCard)
+
+def test_enter_on_a_home_card_opens_it(qtbot, window, loaded) -> None:
+    window.show_page(HOME)
+    card = next(iter(window.home._cards.values()))
+    qtbot.keyClick(card, Qt.Key.Key_Return)
+    assert window.current_page == REVIEW
+    assert window.review.list_id == card.list_id
+
+
+def test_ctrl_tab_cycles_pages(window) -> None:
+    window.show_page(HOME)
+    window.cycle_page(1)
+    assert window.current_page == REVIEW
+    window.cycle_page(1)
+    assert window.current_page == UNKNOWN
+    window.cycle_page(1)
+    assert window.current_page == HOME
+    window.cycle_page(-1)
+    assert window.current_page == UNKNOWN
+
+
+def test_ctrl_l_switches_list_from_the_keyboard(window, loaded, monkeypatch) -> None:
+    import lexitrack.ui.review_page as review_page
+
+    other = loaded.create_list("Other")
+    loaded.add_word(other.id, "zebra")
+    monkeypatch.setattr(
+        review_page.ListPicker, "pick", staticmethod(lambda *a, **k: other.id)
+    )
+    window.show_page(HOME)
+
+    window.switch_list()
+
+    assert window.current_page == REVIEW
+    assert window.review.list_id == other.id

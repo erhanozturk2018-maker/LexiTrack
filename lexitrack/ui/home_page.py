@@ -6,12 +6,14 @@ Three blocks, in order of how often they are wanted:
 2. **Overview** — four numbers for the whole vocabulary, and the way into the
    Unknown Words manager.
 3. **Your lists** — a card per list. Click to make it current, double-click or
-   Enter to open it, right-click for everything else.
+   Enter to open it, right-click (or the Menu key / Shift+F10) for everything
+   else. Arrow keys move between cards; Up from the top row returns to
+   Continue, Down from Continue enters the grid.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -103,6 +105,7 @@ class HomePage(QWidget):
         self.continue_button.setMinimumSize(170, 40)
         self.continue_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.continue_button.clicked.connect(self._continue)
+        self.continue_button.installEventFilter(self)
         buttons.addWidget(self.continue_button)
         self.mode_switch = ModeSwitch()
         buttons.addWidget(self.mode_switch, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -180,6 +183,7 @@ class HomePage(QWidget):
         for index, lst in enumerate(lists):
             card = ListCard(lst)
             card.clicked.connect(self._select)
+            card.navigate.connect(lambda dx, dy, c=card: self._move_focus(c, dx, dy))
             card.activated.connect(
                 lambda list_id: self.open_list.emit(list_id, self.mode_switch.mode)
             )
@@ -196,6 +200,8 @@ class HomePage(QWidget):
         self._current_id = current_id if current_id in ids else ids[0]
         self.mode_switch.set_mode(mode)
         self._show_current()
+        if self.isVisible():
+            self.continue_button.setFocus()
 
     def _show_current(self) -> None:
         current = self._service.get_list(self._current_id) if self._current_id else None
@@ -228,6 +234,28 @@ class HomePage(QWidget):
         return self._current_id
 
     # -- interaction -------------------------------------------------------
+
+    def _move_focus(self, card: ListCard, dx: int, dy: int) -> None:
+        cards = list(self._cards.values())
+        index = cards.index(card)
+        if dy < 0 and index < _GRID_COLUMNS:
+            self.continue_button.setFocus()
+            return
+        target = index + dx + dy * _GRID_COLUMNS
+        if 0 <= target < len(cards):
+            cards[target].setFocus()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if (
+            watched is self.continue_button
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Down
+            and self._cards
+        ):
+            current = self._cards.get(self._current_id) or next(iter(self._cards.values()))
+            current.setFocus()
+            return True
+        return super().eventFilter(watched, event)
 
     def _select(self, list_id: int) -> None:
         self._current_id = list_id

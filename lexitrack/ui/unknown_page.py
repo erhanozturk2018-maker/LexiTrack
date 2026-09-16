@@ -5,8 +5,8 @@ a working list, not an archive: marking a word Known or resetting it takes it
 off this page, because this page *is* "words whose status is Unknown". Nothing
 here deletes vocabulary — the word stays in its lists with its new status.
 
-Typical uses: collect the hardest words into "My Difficult Words" (More → Add
-to List), reset a batch to Not Reviewed so they come round again in flashcards,
+Typical uses: collect the hardest words into "My Difficult Words" (Copy to,
+or C), reset a batch to Not Reviewed so they come round again in flashcards,
 or export them to study on paper.
 """
 
@@ -28,11 +28,13 @@ from ..core.errors import LexiTrackError
 from ..models.user_word_state import ReviewStatus
 from ..services.export_service import ExportFormat
 from ..services.vocabulary_service import VocabularyService
+from .components.toast import Toast
 from .components.vocabulary_table import Column, VocabularyTable
-from .dialogs import ChooseListDialog, WordDialog
+from .dialogs import WordDialog
 from .empty_state import EmptyState
 from .export_dialog import ExportDialog, ExportScope
 from .theme.palette import METRICS
+from .word_transfer import WordTransfer
 
 
 class UnknownPage(QWidget):
@@ -71,6 +73,9 @@ class UnknownPage(QWidget):
         self.table = VocabularyTable(
             columns=(Column.WORD, Column.STATUS, Column.PART_OF_SPEECH, Column.CEFR, Column.LISTS),
             allow_remove=False,
+            # Words here come from every list, so there is no single list to
+            # move them out of; copying is the only transfer that makes sense.
+            allow_move=False,
             noun="unknown words",
         )
         # Every row here is Unknown by definition; filtering by status or
@@ -85,7 +90,11 @@ class UnknownPage(QWidget):
         self.table.extra_filters.addWidget(self.list_filter)
 
         self.table.status_requested.connect(self._set_status)
-        self.table.add_to_list_requested.connect(self._add_to_list)
+        self.table.copy_requested.connect(self._copy_to)
+        self.table.pick_requested.connect(self._pick_copy)
+        self.table.set_target_provider(
+            lambda ids: [(lst.id, lst.name) for lst in self.transfer.targets(ids, None)]
+        )
         self.table.export_requested.connect(lambda ids: self.export(ids))
         self.table.open_requested.connect(self._open_word)
         self.stack.addWidget(self.table)
@@ -96,6 +105,10 @@ class UnknownPage(QWidget):
             "so you can study, export or organise them.",
         )
         self.stack.addWidget(self.empty)
+
+        self.toast = Toast(self)
+        self.transfer = WordTransfer(self._service, self.toast, self)
+        self.transfer.changed.connect(self._reload_keeping_selection)
 
     # -- content -----------------------------------------------------------
 
@@ -120,6 +133,9 @@ class UnknownPage(QWidget):
         self.export_button.setEnabled(total > 0)
         self.stack.setCurrentWidget(self.table if total else self.empty)
         self.table.set_words(words)
+
+    def _reload_keeping_selection(self) -> None:
+        self.table.refresh_words(self._service.get_words([w.id for w in self.table.model.words]))
 
     # -- actions -----------------------------------------------------------
 
@@ -146,24 +162,13 @@ class UnknownPage(QWidget):
             self.stack.setCurrentWidget(self.empty)
             self.export_button.setEnabled(False)
 
-    def _add_to_list(self, word_ids: list[int]) -> None:
-        dialog = ChooseListDialog(
-            self._service, f"Add {len(word_ids):,} words to a list", parent=self
-        )
-        if not dialog.exec() or dialog.chosen is None:
-            return
-        try:
-            added = self._service.add_words_to_list(dialog.chosen.id, word_ids)
-        except LexiTrackError as exc:
-            QMessageBox.warning(self, "Could not add words", exc.user_message)
-            return
-        QMessageBox.information(
-            self,
-            "Words added",
-            f"Added {added:,} {'word' if added == 1 else 'words'} to “{dialog.chosen.name}”."
-            + (f" {len(word_ids) - added:,} were already in it." if added < len(word_ids) else ""),
-        )
-        self.refresh()
+    def _copy_to(self, word_ids: list[int], target_id: int) -> None:
+        self.transfer.copy(word_ids, target_id)
+
+    def _pick_copy(self, kind: str) -> None:
+        ids = self.table.selected_ids()
+        if ids and kind == "copy":
+            self.transfer.pick_and_copy(ids, None, self.table.view)
 
     def _open_word(self, word_id: int) -> None:
         word = self._service.get_word(word_id)
