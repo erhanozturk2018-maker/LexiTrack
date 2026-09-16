@@ -1,0 +1,63 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+
+# --- Packaging / build artefacts ---
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# --- Tooling caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- OS noise ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- LexiTrack runtime data ---
+# The database is created automatically on first launch and is personal to
+# each user, so it is never committed. The directories themselves are kept via
+# .gitkeep so a clean clone has somewhere to write.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.log
+data/exports/*
+!data/exports/.gitkeep
+!data/.gitkeep
+*.log
+
+# --- Source PDFs ---
+# Vocabulary PDFs are the user's own copies and may be copyrighted, so they
+# stay out of the repository. Drop your own into pdfs/ and import from there.
+pdfs/*
+!pdfs/.gitkeep
+!pdfs/README.md

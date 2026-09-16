@@ -1,0 +1,4 @@
+# Normalise line endings so the repository is identical on Windows and Unix.
+* text=auto eol=lf
+*.png binary
+*.pdf binary
