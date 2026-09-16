@@ -15,6 +15,7 @@ import pytest
 from lexitrack.core.errors import StorageError
 from lexitrack.database.connection import Database
 from lexitrack.database.migrations import SCHEMA_VERSION, MigrationError, read_version
+from lexitrack.services.vocabulary_service import VocabularyService
 
 V1_SCHEMA = Path(__file__).parent / "fixtures" / "schema_v1.sql"
 
@@ -194,6 +195,21 @@ def test_reopening_an_upgraded_database_does_nothing(v1_path: Path, migrated: Da
         assert len(list(v1_path.parent.glob("*backup*"))) == 1
     finally:
         again.close()
+
+
+def test_the_application_resumes_where_the_user_left_off(v1_path: Path) -> None:
+    with VocabularyService(Database(v1_path)) as service:
+        lists = {lst.name: lst for lst in service.lists()}
+        assert set(lists) == {"Oxford 3000", "Oxford 5000", "Novel"}
+
+        oxford_3000 = lists["Oxford 3000"]
+        assert (oxford_3000.progress.total, oxford_3000.progress.known,
+                oxford_3000.progress.unknown) == (2, 1, 1)
+        assert service.get_next_word(oxford_3000.id) is None
+
+        oxford_5000 = lists["Oxford 5000"]
+        assert service.get_next_word(oxford_5000.id).normalized_word == "absorb"
+        assert [w.normalized_word for w in service.list_unknown_words()] == ["ability"]
 
 
 def test_migrated_schema_matches_a_fresh_database(migrated: Database, tmp_path: Path) -> None:

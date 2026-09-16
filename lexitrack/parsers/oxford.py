@@ -119,6 +119,8 @@ class OxfordParser(DocumentParser):
         "Extracts each word with its part of speech and CEFR level."
     )
     priority = 100
+    #: Both lists are English learner vocabulary; the documents say so.
+    language = "en"
 
     # -- detection ---------------------------------------------------------
 
@@ -297,6 +299,7 @@ def _parse_entry_line(line: str, source_key: str, level: str | None) -> list[Wor
                 part_of_speech=part_of_speech,
                 cefr_level=level,
                 metadata=metadata,
+                language="en",
             )
         )
     return entries

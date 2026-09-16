@@ -1,9 +1,14 @@
 """The contract every parser implements.
 
-A parser belongs to a *document*, not to a word. It knows how one kind of PDF
+A parser belongs to a *document*, not to a word. It knows how one kind of file
 is laid out and turns it into ``WordEntry`` objects; everything downstream of
-that is format-agnostic. Adding support for a new PDF therefore means adding a
-parser, never changing the vocabulary engine.
+that is format-agnostic. Adding support for a new format therefore means adding
+a parser, never changing the vocabulary engine.
+
+Besides words, a parser can say what a document *is*: a suggested list name,
+its language and a description. These are suggestions for the import preview,
+where the user has the final say, and the parser only offers what the document
+actually states — it never invents a source or a language.
 """
 
 from __future__ import annotations
@@ -17,6 +22,16 @@ from .document import Document
 
 #: Called with ``(current, total)`` while a long document is parsed.
 ProgressCallback = Callable[[int, int], None]
+
+
+@dataclass(frozen=True, slots=True)
+class ListMetadata:
+    """What a document says about itself, as a suggestion for the target list."""
+
+    name: str
+    #: ``None`` when the document does not state a language.
+    language: str | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +54,14 @@ class DocumentParser(ABC):
     description: str = ""
     #: Higher priority parsers are offered a document first.
     priority: int = 0
+    #: Document classes this parser can read. The registry never offers a
+    #: parser a document of another type.
+    document_types: tuple[type, ...] = (Document,)
+    #: Language every document this parser reads is in, when that is fixed.
+    language: str | None = None
+
+    def accepts_type(self, document: object) -> bool:
+        return isinstance(document, self.document_types)
 
     @abstractmethod
     def can_parse(self, document: Document) -> bool:
@@ -70,6 +93,10 @@ class DocumentParser(ABC):
     def source_name(self, document: Document) -> str:
         """Return the display name for ``document`` as a source."""
         return document.name
+
+    def list_metadata(self, document: Document) -> ListMetadata:
+        """Suggest a name, language and description for the list to import into."""
+        return ListMetadata(name=self.source_name(document), language=self.language)
 
     @property
     def info(self) -> ParserInfo:

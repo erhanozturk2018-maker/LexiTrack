@@ -11,8 +11,10 @@ import logging
 
 from ..core.errors import NoParserError
 from .base import DocumentParser, ParserInfo
-from .document import Document
+from .document import Document  # noqa: F401 - re-exported for callers
 from .generic import GenericTextParser
+from .json_document import AnyDocument
+from .json_parser import JsonParser
 from .oxford import OxfordParser
 
 log = logging.getLogger(__name__)
@@ -49,7 +51,7 @@ class ParserRegistry:
                 return parser
         return None
 
-    def select(self, document: Document, preferred_key: str = AUTO) -> DocumentParser:
+    def select(self, document: AnyDocument, preferred_key: str = AUTO) -> DocumentParser:
         """Return the parser to use for ``document``.
 
         ``preferred_key`` lets the user override detection from the import
@@ -64,10 +66,16 @@ class ParserRegistry:
             parser = self.get(preferred_key)
             if parser is None:
                 raise NoParserError(f"There is no parser called '{preferred_key}'.")
+            if not parser.accepts_type(document):
+                raise NoParserError(
+                    f"The {parser.name} parser cannot read {document.path.name}."
+                )
             log.info("Using parser %s for %s (chosen by user)", parser.key, document.path.name)
             return parser
 
         for parser in self._parsers:
+            if not parser.accepts_type(document):
+                continue
             try:
                 if parser.can_parse(document):
                     log.info(
@@ -86,4 +94,4 @@ class ParserRegistry:
 
 def default_parsers() -> list[DocumentParser]:
     """Return the parsers shipped with LexiTrack, most specific first."""
-    return [OxfordParser(), GenericTextParser()]
+    return [JsonParser(), OxfordParser(), GenericTextParser()]
