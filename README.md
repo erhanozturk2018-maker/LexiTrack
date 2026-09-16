@@ -82,6 +82,11 @@ To work on LexiTrack, install the development extras as well:
 pip install -e ".[dev]"
 ```
 
+> **Windows note.** PySide6 unpacks some deeply nested files, so installing
+> into a folder whose path is already very long can fail with
+> `[WinError 206] The filename or extension is too long`. Clone somewhere
+> shorter, such as `C:\Projects\LexiTrack`, or enable long paths in Windows.
+
 ## Running
 
 ```bash
@@ -103,9 +108,9 @@ do not need to set anything up.
 pytest
 ```
 
-The suite is 162 tests and runs in well under a minute. Tests that need the
-real Oxford PDFs skip themselves when the files are not present — see
-[Validation](#validation) below.
+The suite is **162 tests** and runs in about four seconds. On a clean clone
+without the Oxford PDFs, 152 pass and 10 skip — the tests that need those
+documents. See [Validation](#validation) below.
 
 ```bash
 pytest -v                          # see each test name
@@ -339,6 +344,10 @@ What has actually been verified, as opposed to merely written:
 - **Exports** were generated from real data and their contents checked —
   unknown words present, known words absent.
 - **162 tests pass** and `ruff check` is clean.
+- **A clean clone was verified end to end**: `git clone`, `python -m venv`,
+  `pip install -e ".[dev]"`, `pytest` (152 passed, 10 skipped), then launching
+  the application — which created its database automatically and ran with no
+  setup of any kind.
 
 The Oxford PDFs are not committed (they are Oxford University Press material).
 Put your own copies in `pdfs/` to run the tests that use them; they skip

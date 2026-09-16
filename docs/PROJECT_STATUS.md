@@ -141,7 +141,9 @@ None.
 pytest
 ```
 
-**162 passing.** `ruff check lexitrack tests` is clean.
+**162 passing** in about four seconds. `ruff check lexitrack tests` is clean.
+
+On a clean clone without the Oxford PDFs in `pdfs/`: **152 passed, 10 skipped**.
 
 | File | Covers |
 | --- | --- |
@@ -169,6 +171,10 @@ your own copies there to run them.
   shortcuts, undo, all three screens, and the import dialog.
 - **Exports were generated from real data** and their contents checked: unknown
   words present, known words absent.
+- **A clean clone was verified end to end**: clone, venv, `pip install -e ".[dev]"`,
+  `pytest`, and launching the application, which created its database with no
+  manual setup. Both console entry points (`lexitrack`, `lexitrack-gui`) are
+  installed.
 
 ---
 
