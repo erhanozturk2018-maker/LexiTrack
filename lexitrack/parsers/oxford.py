@@ -73,9 +73,6 @@ POS_EXPANSIONS: dict[str, str] = {
     "infinitive marker": "infinitive marker",
 }
 
-#: Recognised CEFR section headings, in the order the documents use them.
-CEFR_LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2")
-
 _LEVEL_HEADING_RE = re.compile(r"^(A1|A2|B1|B2|C1|C2)$")
 
 # The part-of-speech tail of an entry line: one or more abbreviations joined by

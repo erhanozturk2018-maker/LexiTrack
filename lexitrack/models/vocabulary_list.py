@@ -38,7 +38,3 @@ class VocabularyList:
     @property
     def language_name(self) -> str:
         return language_name(self.language)
-
-    @property
-    def accepts_any_language(self) -> bool:
-        return self.language == UNDETERMINED

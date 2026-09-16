@@ -1,9 +1,7 @@
-"""Progress display: the bar in the app bar and the counters along the bottom.
+"""The Known / Unknown / Remaining / Total counters along the bottom of Review.
 
-Progress is split in two on purpose. The thin bar sits at the top, where it is
-visible but silent — a session's shape at a glance. The counters sit at the
-bottom, out of the path between the word and the buttons, because looking at
-them is an occasional act and answering is a constant one.
+They sit at the bottom, out of the path between the word and the buttons,
+because looking at them is an occasional act and answering is a constant one.
 """
 
 from __future__ import annotations
@@ -13,44 +11,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..models.user_word_state import Progress
 from .theme.palette import METRICS
-
-
-class ProgressBarWidget(QWidget):
-    """A thin determinate bar with a ``132 / 3000`` caption beside it."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        m = METRICS
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(m.space_3)
-
-        self._bar = QProgressBar()
-        self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(6)
-        self._bar.setMinimumWidth(160)
-        self._bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._bar.setRange(0, 100)
-
-        self._caption = QLabel()
-        self._caption.setObjectName("AppBarStatus")
-
-        layout.addWidget(self._bar, 1)
-        layout.addWidget(self._caption, 0)
-
-    def update_progress(self, progress: Progress) -> None:
-        self._bar.setValue(int(progress.percent_complete))
-        self._bar.setToolTip(f"{progress.percent_complete:.0f}% reviewed")
-        self._caption.setText(f"{progress.reviewed:,} / {progress.total:,}")
 
 
 class StatsBar(QWidget):

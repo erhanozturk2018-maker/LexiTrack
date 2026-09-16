@@ -117,10 +117,6 @@ class ReviewSession:
             self._cursor += 1
         return self.current()
 
-    def return_to_live(self) -> ReviewItem | None:
-        self._cursor = len(self._history)
-        return self.current()
-
     # -- explicit status changes ------------------------------------------
 
     def answer(self, known: bool) -> ReviewItem | None:

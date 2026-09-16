@@ -1,23 +1,29 @@
-"""The review screen.
+"""The flashcard review screen.
 
-This is where the user spends essentially all of their time, so the layout is
-built around one question: how fast can someone answer a word and see the next
-one? That leads to a few deliberate choices.
+This is where the user spends most of their time, so the layout is built
+around one question: how fast can someone answer a word and see the next one?
 
-* One word, very large, vertically centred. It is the only thing competing for
-  attention; part of speech and level sit below it in muted type.
-* Two answer buttons of equal size and weight. Neither is the "right" answer,
-  so neither is styled as primary.
-* Both a mouse and a keyboard path, always. K and U answer, Enter repeats the
-  last answer, Backspace undoes, and the hints are printed on the buttons so
-  they are learned rather than memorised.
-* No sense disambiguator is shown. Oxford lists ``bank (money)`` and
-  ``bank (river)`` separately, but deduplication merges them into one item, so
-  displaying a single sense would misrepresent what is being asked. The senses
-  are still stored, for exports and for a future per-sense review mode.
-* The card keeps a fixed minimum height so the buttons never move as words of
-  different lengths come and go. A target that jumps is a target that gets
-  mis-clicked.
+* One word, very large, centred. Part of speech and level sit below it in
+  muted type; where the word came from is a quiet line at the top of the card.
+  It is labelled "Source" on purpose — the *list* being reviewed is shown by
+  the page around the card, and the two are never presented as the same thing.
+* Two answer buttons of equal size and weight. Neither is the "right" answer.
+* A keyboard path for everything, printed where it is used:
+
+  ======================  ==============================================
+  K or ←                  I Know
+  U or →                  I Don't Know
+  Enter or Space          repeat the last answer; on an earlier word, move
+                          forward keeping its status
+  Backspace               step back to the previous word (status unchanged)
+  R                       reset the word on screen to Not Reviewed
+  ======================  ==============================================
+
+* Backspace is navigation, never an undo. Stepping back shows the earlier word
+  *with* its status, in a banner that says so; changing it takes an explicit
+  answer or R. See ``services/review_session.py``.
+* The card keeps a fixed minimum height so the buttons never move between
+  words. A target that jumps is a target that gets mis-clicked.
 """
 
 from __future__ import annotations
@@ -34,27 +40,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..models.user_word_state import ReviewStatus
 from ..repositories.word_repository import StoredWord
+from ..services.review_session import ReviewItem
+from .components.status import StatusBadge
 from .theme.palette import METRICS
 
 #: Keeps the answer buttons on the same line no matter how long the word is.
-_CARD_MIN_HEIGHT = 340
+_CARD_MIN_HEIGHT = 360
 #: Below this the two answer buttons start wrapping their labels.
 _CARD_MIN_WIDTH = 480
 
 
 class ReviewWidget(QWidget):
-    """Shows one word and collects the user's answer."""
+    """Shows one flashcard and collects the user's answer."""
 
-    #: Emitted with ``(word_id, known)`` when the user answers.
-    answered = Signal(int, bool)
-    #: Emitted when the user asks to undo the previous answer.
-    undo_requested = Signal()
+    #: Emitted with ``known`` when the user answers.
+    answered = Signal(bool)
+    #: Backspace: step back one word.
+    back_requested = Signal()
+    #: Enter / Space: repeat the last answer, or move forward in history.
+    repeat_requested = Signal()
+    #: R: reset the word on screen to Not Reviewed.
+    reset_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._word: StoredWord | None = None
-        self._last_answer: bool | None = None
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -63,7 +75,7 @@ class ReviewWidget(QWidget):
         m = METRICS
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(m.space_5, m.space_5, m.space_5, m.space_4)
+        outer.setContentsMargins(m.space_5, m.space_3, m.space_5, m.space_4)
         outer.setSpacing(m.space_4)
         outer.addStretch(1)
 
@@ -75,34 +87,37 @@ class ReviewWidget(QWidget):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(m.space_6, m.space_6, m.space_6, m.space_5)
+        card_layout.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_5)
         card_layout.setSpacing(0)
 
-        # -- source chip, top left of the card
+        # -- top row: provenance on the left, status on the right
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
         self._source_label = QLabel()
         self._source_label.setObjectName("SourceChip")
-        self._source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._source_label, 0, Qt.AlignmentFlag.AlignLeft)
+        top.addStretch(1)
+        self._status_badge = StatusBadge()
+        top.addWidget(self._status_badge, 0, Qt.AlignmentFlag.AlignRight)
+        card_layout.addLayout(top)
 
-        chip_row = QHBoxLayout()
-        chip_row.setContentsMargins(0, 0, 0, 0)
-        chip_row.addWidget(self._source_label, 0, Qt.AlignmentFlag.AlignLeft)
-        chip_row.addStretch(1)
-        card_layout.addLayout(chip_row)
+        card_layout.addSpacing(m.space_2)
+        self._history_banner = QLabel()
+        self._history_banner.setObjectName("HistoryBanner")
+        self._history_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._history_banner.setVisible(False)
+        card_layout.addWidget(self._history_banner, 0, Qt.AlignmentFlag.AlignHCenter)
         card_layout.addStretch(1)
 
-        # -- the word itself
+        # -- the word
         self._word_label = QLabel()
         self._word_label.setObjectName("WordLabel")
         self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._word_label.setWordWrap(True)
-        self._word_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self._word_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(self._word_label)
-
         card_layout.addSpacing(m.space_3)
 
-        # -- metadata beneath, each line optional
         self._meta_label = QLabel()
         self._meta_label.setObjectName("MetaLabel")
         self._meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -127,40 +142,37 @@ class ReviewWidget(QWidget):
         answers.addWidget(self._known_button, 1)
         answers.addWidget(self._unknown_button, 1)
         card_layout.addLayout(answers)
-
         card_layout.addSpacing(m.space_3)
 
-        # -- position and undo
+        # -- footer: position, back, reset
         self._position_label = QLabel()
         self._position_label.setObjectName("PositionLabel")
 
-        self._undo_button = QPushButton("Undo")
-        self._undo_button.setObjectName("UndoButton")
-        self._undo_button.setProperty("variant", "ghost")
-        self._undo_button.setToolTip("Undo the previous answer (Backspace)")
-        self._undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._undo_button.setEnabled(False)
-        self._undo_button.clicked.connect(self.undo_requested.emit)
+        self._back_button = _ghost_button("← Back", "Step back to the previous word (Backspace)")
+        self._back_button.clicked.connect(self.back_requested.emit)
+        self._back_button.setEnabled(False)
+
+        self._reset_button = _ghost_button("Reset", "Reset this word to Not Reviewed (R)")
+        self._reset_button.clicked.connect(self.reset_requested.emit)
+        self._reset_button.setVisible(False)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.addWidget(self._position_label, 0, Qt.AlignmentFlag.AlignLeft)
         footer.addStretch(1)
-        footer.addWidget(self._undo_button, 0, Qt.AlignmentFlag.AlignRight)
+        footer.addWidget(self._reset_button)
+        footer.addWidget(self._back_button)
         card_layout.addLayout(footer)
 
-        # Stretch factors rather than bare stretches: the card keeps the space
-        # it needs and the margins absorb the rest, up to content_max_width.
         centred = QHBoxLayout()
         centred.addStretch(1)
         centred.addWidget(card, 10)
         centred.addStretch(1)
         outer.addLayout(centred)
 
-        # -- shortcut hint, outside the card so it reads as ambient help
         self._hint_label = QLabel(
             "K — I Know     ·     U — I Don't Know     ·     "
-            "Enter — repeat last answer     ·     Backspace — undo"
+            "Enter — repeat     ·     Backspace — back     ·     R — reset"
         )
         self._hint_label.setObjectName("ShortcutHint")
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -171,33 +183,49 @@ class ReviewWidget(QWidget):
 
     # -- content -----------------------------------------------------------
 
-    def show_word(self, word: StoredWord, position: int, total: int) -> None:
-        """Display ``word`` as item ``position`` of ``total``."""
+    def show_item(self, item: ReviewItem, can_go_back: bool) -> None:
+        """Display a review item from a :class:`ReviewSession`."""
+        word = item.word
         self._word = word
         self._word_label.setText(word.word)
 
-        self._source_label.setText(word.source_label or "Imported")
-        self._source_label.setVisible(bool(word.sources))
+        if word.sources:
+            self._source_label.setText(f"Source: {word.source_label}")
+            self._source_label.setVisible(True)
+        else:
+            self._source_label.setVisible(False)
+
+        self._status_badge.set_status(word.status)
+        # A live word is by definition not reviewed; the badge would only
+        # repeat that on every card. It appears when it says something.
+        self._status_badge.setVisible(
+            item.is_history or word.status is not ReviewStatus.NOT_REVIEWED
+        )
+
+        if item.is_history:
+            steps = "1 word back" if item.steps_back == 1 else f"{item.steps_back} words back"
+            self._history_banner.setText(
+                f"Earlier word · {steps} · Enter moves on without changing it"
+            )
+            self._history_banner.setVisible(True)
+            self._position_label.setText("Reviewing an earlier answer")
+        else:
+            self._history_banner.setVisible(False)
+            self._position_label.setText(f"{item.position:,} / {item.progress.total:,}")
 
         self._set_optional(self._meta_label, _format_meta(word))
         self._set_optional(self._definition_label, word.definition)
 
-        self._position_label.setText(f"{position:,} / {total:,}")
+        self._back_button.setEnabled(can_go_back)
+        self._reset_button.setVisible(word.status is not ReviewStatus.NOT_REVIEWED)
 
         for button in (self._known_button, self._unknown_button):
             button.setEnabled(True)
-        self._known_button.setFocus()
-
-    def set_undo_enabled(self, enabled: bool) -> None:
-        self._undo_button.setEnabled(enabled)
+        self.setFocus()
 
     @staticmethod
     def _set_optional(label: QLabel, text: str | None) -> None:
-        """Show ``label`` only when there is something to put in it.
-
-        Reserving space for metadata that a source did not provide would leave
-        a hole under every generic-parser word.
-        """
+        """Show ``label`` only when there is something to put in it."""
         label.setText(text or "")
         label.setVisible(bool(text))
 
@@ -206,39 +234,54 @@ class ReviewWidget(QWidget):
     def _answer(self, known: bool) -> None:
         if self._word is None:
             return
-        word_id = self._word.id
-        self._last_answer = known
         # Guard against a double click racing ahead of the next word.
         self._known_button.setEnabled(False)
         self._unknown_button.setEnabled(False)
-        self.answered.emit(word_id, known)
+        self.answered.emit(known)
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+        ):
+            super().keyPressEvent(event)
+            return
         key = event.key()
         if key in (Qt.Key.Key_K, Qt.Key.Key_Left):
-            self._answer(True)
+            if self._known_button.isEnabled():
+                self._answer(True)
         elif key in (Qt.Key.Key_U, Qt.Key.Key_Right):
-            self._answer(False)
+            if self._unknown_button.isEnabled():
+                self._answer(False)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            # Enter repeats the previous answer, which makes long runs of
-            # familiar words fast. Before the first answer it does nothing.
-            if self._last_answer is not None:
-                self._answer(self._last_answer)
+            self.repeat_requested.emit()
         elif key == Qt.Key.Key_Backspace:
-            if self._undo_button.isEnabled():
-                self.undo_requested.emit()
+            if self._back_button.isEnabled():
+                self.back_requested.emit()
+        elif key == Qt.Key.Key_R:
+            # isHidden, not isVisible: the latter is false whenever the window is.
+            if not self._reset_button.isHidden():
+                self.reset_requested.emit()
         else:
             super().keyPressEvent(event)
 
 
 def _answer_button(text: str, shortcut_key: str, variant: str) -> QPushButton:
-    """Build one of the two answer buttons, with its shortcut printed on it."""
     button = QPushButton(f"{text}    {shortcut_key}")
     button.setProperty("variant", variant)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(f"{text}  (shortcut: {shortcut_key})")
     button.setMinimumHeight(56)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    return button
+
+
+def _ghost_button(text: str, tooltip: str) -> QPushButton:
+    button = QPushButton(text)
+    button.setProperty("variant", "ghost")
+    button.setToolTip(tooltip)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     return button
 
 

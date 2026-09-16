@@ -1,0 +1,157 @@
+{
+  "name": "IELTS Vocabulary",
+  "language": "en",
+  "description": "Academic words that come up often in IELTS reading and writing. A short sample list.",
+  "words": [
+    {
+      "word": "analyse",
+      "part_of_speech": "verb",
+      "definition": "to examine something in detail"
+    },
+    {
+      "word": "approach",
+      "part_of_speech": "noun",
+      "definition": "a way of dealing with something"
+    },
+    {
+      "word": "assess",
+      "part_of_speech": "verb",
+      "definition": "to judge the quality, value or importance of something"
+    },
+    {
+      "word": "benefit",
+      "part_of_speech": "noun",
+      "definition": "an advantage that something gives you"
+    },
+    {
+      "word": "consequence",
+      "part_of_speech": "noun",
+      "definition": "a result of something that has happened"
+    },
+    {
+      "word": "consistent",
+      "part_of_speech": "adjective",
+      "definition": "always behaving or happening in the same way"
+    },
+    {
+      "word": "contribute",
+      "part_of_speech": "verb",
+      "definition": "to give something to help achieve a result"
+    },
+    {
+      "word": "crucial",
+      "part_of_speech": "adjective",
+      "definition": "extremely important"
+    },
+    {
+      "word": "decline",
+      "part_of_speech": "verb",
+      "definition": "to become smaller, fewer or weaker"
+    },
+    {
+      "word": "demonstrate",
+      "part_of_speech": "verb",
+      "definition": "to show something clearly"
+    },
+    {
+      "word": "distinct",
+      "part_of_speech": "adjective",
+      "definition": "clearly different"
+    },
+    {
+      "word": "emerge",
+      "part_of_speech": "verb",
+      "definition": "to appear or become known"
+    },
+    {
+      "word": "enhance",
+      "part_of_speech": "verb",
+      "definition": "to improve the quality or value of something"
+    },
+    {
+      "word": "evaluate",
+      "part_of_speech": "verb",
+      "definition": "to form an opinion of the value or quality of something"
+    },
+    {
+      "word": "evident",
+      "part_of_speech": "adjective",
+      "definition": "clear; easily seen or understood"
+    },
+    {
+      "word": "factor",
+      "part_of_speech": "noun",
+      "definition": "one of the things that cause or influence a result"
+    },
+    {
+      "word": "fluctuate",
+      "part_of_speech": "verb",
+      "definition": "to change frequently in size, amount or level"
+    },
+    {
+      "word": "hypothesis",
+      "part_of_speech": "noun",
+      "definition": "an idea that has not yet been proved"
+    },
+    {
+      "word": "implement",
+      "part_of_speech": "verb",
+      "definition": "to make a plan or decision start to happen"
+    },
+    {
+      "word": "indicate",
+      "part_of_speech": "verb",
+      "definition": "to show that something is true or exists"
+    },
+    {
+      "word": "inevitable",
+      "part_of_speech": "adjective",
+      "definition": "certain to happen and impossible to avoid"
+    },
+    {
+      "word": "interpret",
+      "part_of_speech": "verb",
+      "definition": "to explain the meaning of something"
+    },
+    {
+      "word": "justify",
+      "part_of_speech": "verb",
+      "definition": "to give a good reason for something"
+    },
+    {
+      "word": "notion",
+      "part_of_speech": "noun",
+      "definition": "an idea or belief"
+    },
+    {
+      "word": "phenomenon",
+      "part_of_speech": "noun",
+      "definition": "a fact or event that can be observed"
+    },
+    {
+      "word": "significant",
+      "part_of_speech": "adjective",
+      "definition": "large or important enough to have an effect"
+    },
+    {
+      "word": "substantial",
+      "part_of_speech": "adjective",
+      "definition": "large in amount, value or importance"
+    },
+    {
+      "word": "sustainable",
+      "part_of_speech": "adjective",
+      "definition": "able to continue without causing damage"
+    },
+    {
+      "word": "ability",
+      "part_of_speech": "noun",
+      "definition": "the fact that somebody is able to do something"
+    },
+    {
+      "word": "abandon",
+      "part_of_speech": "verb",
+      "definition": "to stop doing something before it is finished"
+    }
+  ]
+}

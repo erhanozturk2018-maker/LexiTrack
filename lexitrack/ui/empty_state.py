@@ -1,4 +1,4 @@
-"""The two screens shown when there is no word to review.
+"""Screens shown when there is nothing to review.
 
 An empty screen is a chance to explain the next step, not a dead end, so each
 state names what happened and offers the action that follows from it.
@@ -79,58 +79,26 @@ class EmptyState(QWidget):
     def set_body(self, text: str) -> None:
         self._body_label.setText(text)
 
-    def set_title(self, text: str) -> None:
-        self._title_label.setText(text)
-
 
 class WelcomeState(EmptyState):
-    """Shown on a first run, before anything has been imported."""
+    """Shown before any list exists."""
 
     import_requested = Signal()
+    create_list_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             title="No vocabulary yet",
             body=(
-                "Import a PDF to get started. LexiTrack reads the Oxford 3000 and "
-                "Oxford 5000 word lists directly, and can pull the vocabulary out "
-                "of any other text-based PDF."
+                "Import a word list to get started — a PDF such as the Oxford 3000, "
+                "any text-based PDF, or a LexiTrack JSON file. Or create an empty list "
+                "and type your own words."
             ),
-            primary_text="Import PDF",
+            primary_text="Import…",
+            secondary_text="New List",
             parent=parent,
         )
         if self.primary_button is not None:
             self.primary_button.clicked.connect(self.import_requested.emit)
-
-
-class CompletedState(EmptyState):
-    """Shown when every word in the database has been reviewed."""
-
-    export_requested = Signal()
-    import_requested = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(
-            title="Review complete",
-            body="You have reviewed every word in your vocabulary.",
-            primary_text="Export Unknown Words",
-            secondary_text="Import PDF",
-            glyph="✓",
-            parent=parent,
-        )
-        if self.primary_button is not None:
-            self.primary_button.clicked.connect(self.export_requested.emit)
         if self.secondary_button is not None:
-            self.secondary_button.clicked.connect(self.import_requested.emit)
-
-    def update_summary(self, known: int, unknown: int) -> None:
-        """Explain the outcome in words rather than leaving the counters to do it."""
-        noun = "word" if unknown == 1 else "words"
-        self.set_body(
-            f"You have reviewed every word in your vocabulary: "
-            f"{known:,} known, {unknown:,} to learn.\n\n"
-            f"Export the {unknown:,} {noun} you marked as unknown to study them, "
-            "or import another PDF to keep going."
-        )
-        if self.primary_button is not None:
-            self.primary_button.setEnabled(unknown > 0)
+            self.secondary_button.clicked.connect(self.create_list_requested.emit)

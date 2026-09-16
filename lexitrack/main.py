@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     window.show()
     window.raise_()
     window.activateWindow()
+
+    backup = service.database.migration_backup
+    if backup is not None:
+        window.show_migration_notice(backup.name)
     return app.exec()
 
 

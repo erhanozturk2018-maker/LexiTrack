@@ -1,0 +1,257 @@
+{
+  "name": "German A1",
+  "language": "de",
+  "description": "Everyday German vocabulary at A1 level. A short sample list.",
+  "words": [
+    {
+      "word": "Haus",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "house",
+      "example": "Das Haus ist groß."
+    },
+    {
+      "word": "gehen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to go",
+      "example": "Wir gehen nach Hause."
+    },
+    {
+      "word": "kommen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to come",
+      "example": "Kommst du morgen?"
+    },
+    {
+      "word": "Wasser",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "water"
+    },
+    {
+      "word": "Brot",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "bread"
+    },
+    {
+      "word": "essen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to eat",
+      "example": "Wir essen um sieben Uhr."
+    },
+    {
+      "word": "trinken",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to drink"
+    },
+    {
+      "word": "Freund",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "friend"
+    },
+    {
+      "word": "Schule",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "school"
+    },
+    {
+      "word": "arbeiten",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to work",
+      "example": "Sie arbeitet in Berlin."
+    },
+    {
+      "word": "heute",
+      "part_of_speech": "adverb",
+      "cefr_level": "A1",
+      "definition": "today"
+    },
+    {
+      "word": "morgen",
+      "part_of_speech": "adverb",
+      "cefr_level": "A1",
+      "definition": "tomorrow"
+    },
+    {
+      "word": "groß",
+      "part_of_speech": "adjective",
+      "cefr_level": "A1",
+      "definition": "big, tall"
+    },
+    {
+      "word": "klein",
+      "part_of_speech": "adjective",
+      "cefr_level": "A1",
+      "definition": "small"
+    },
+    {
+      "word": "gut",
+      "part_of_speech": "adjective",
+      "cefr_level": "A1",
+      "definition": "good"
+    },
+    {
+      "word": "schnell",
+      "part_of_speech": "adjective",
+      "cefr_level": "A1",
+      "definition": "fast"
+    },
+    {
+      "word": "Zeit",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "time",
+      "example": "Ich habe keine Zeit."
+    },
+    {
+      "word": "Stadt",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "city, town"
+    },
+    {
+      "word": "fahren",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to drive, to travel"
+    },
+    {
+      "word": "kaufen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to buy"
+    },
+    {
+      "word": "lesen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to read"
+    },
+    {
+      "word": "schreiben",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to write"
+    },
+    {
+      "word": "sprechen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to speak",
+      "example": "Sprechen Sie Englisch?"
+    },
+    {
+      "word": "verstehen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to understand"
+    },
+    {
+      "word": "Familie",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "family"
+    },
+    {
+      "word": "Kind",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "child"
+    },
+    {
+      "word": "Zug",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "train"
+    },
+    {
+      "word": "Bahnhof",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "train station",
+      "example": "Wo ist der Bahnhof?"
+    },
+    {
+      "word": "Wohnung",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "flat, apartment"
+    },
+    {
+      "word": "Straße",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "street"
+    },
+    {
+      "word": "Geld",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "money"
+    },
+    {
+      "word": "Arzt",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "doctor"
+    },
+    {
+      "word": "Woche",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "week"
+    },
+    {
+      "word": "Jahr",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "year"
+    },
+    {
+      "word": "immer",
+      "part_of_speech": "adverb",
+      "cefr_level": "A1",
+      "definition": "always"
+    },
+    {
+      "word": "oft",
+      "part_of_speech": "adverb",
+      "cefr_level": "A1",
+      "definition": "often"
+    },
+    {
+      "word": "Frühstück",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "breakfast"
+    },
+    {
+      "word": "bezahlen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to pay",
+      "example": "Kann ich mit Karte bezahlen?"
+    },
+    {
+      "word": "wohnen",
+      "part_of_speech": "verb",
+      "cefr_level": "A1",
+      "definition": "to live (somewhere)",
+      "example": "Ich wohne in Hamburg."
+    },
+    {
+      "word": "Entschuldigung",
+      "part_of_speech": "noun",
+      "cefr_level": "A1",
+      "definition": "excuse me, sorry"
+    }
+  ]
+}

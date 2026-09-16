@@ -21,4 +21,3 @@ class Source:
     file_path: str | None = None
     id: int | None = None
     created_at: datetime | None = None
-    word_count: int = 0

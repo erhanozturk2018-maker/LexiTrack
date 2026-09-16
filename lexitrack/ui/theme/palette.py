@@ -68,11 +68,6 @@ class Palette:
 
     # Feedback.
     danger: str
-    overlay: str
-
-    @property
-    def is_dark(self) -> bool:
-        return self.name is ThemeName.DARK
 
 
 LIGHT = Palette(
@@ -101,7 +96,6 @@ LIGHT = Palette(
     unknown_soft="#FBF0E1",
     unknown_text="#8A4E07",
     danger="#C03030",
-    overlay="rgba(20, 23, 28, 0.45)",
 )
 
 DARK = Palette(
@@ -130,7 +124,6 @@ DARK = Palette(
     unknown_soft="#332818",
     unknown_text="#F0C489",
     danger="#E06767",
-    overlay="rgba(0, 0, 0, 0.55)",
 )
 
 PALETTES: dict[ThemeName, Palette] = {
@@ -161,7 +154,6 @@ class Metrics:
     space_5: int = 24
     space_6: int = 32
     space_7: int = 48
-    space_8: int = 64
 
     radius_sm: int = 6
     radius_md: int = 10

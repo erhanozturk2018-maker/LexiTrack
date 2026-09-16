@@ -240,23 +240,6 @@ class ListRepository:
         """How many words would be deleted outright if removed from this list."""
         return len(self._orphans_after_removal(self._db.connection, list_id, word_ids))
 
-    def contains(self, list_id: int, word_id: int) -> bool:
-        return (
-            self._db.connection.execute(
-                "SELECT 1 FROM list_words WHERE list_id = ? AND word_id = ?", (list_id, word_id)
-            ).fetchone()
-            is not None
-        )
-
-    def lists_for_word(self, word_id: int) -> list[VocabularyList]:
-        rows = self._db.connection.execute(
-            _SELECT_LIST
-            + " WHERE l.id IN (SELECT list_id FROM list_words WHERE word_id = ?)"
-            + " GROUP BY l.id ORDER BY l.name COLLATE NOCASE",
-            (word_id,),
-        ).fetchall()
-        return [_row_to_list(row) for row in rows]
-
     # -- helpers -----------------------------------------------------------
 
     def _check_language(self, target: VocabularyList, word_ids: Sequence[int]) -> None:

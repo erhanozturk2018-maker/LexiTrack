@@ -1,0 +1,203 @@
+"""The Unknown Words manager.
+
+Every word the user has marked unknown, across all lists, in one table. It is
+a working list, not an archive: marking a word Known or resetting it takes it
+off this page, because this page *is* "words whose status is Unknown". Nothing
+here deletes vocabulary — the word stays in its lists with its new status.
+
+Typical uses: collect the hardest words into "My Difficult Words" (More → Add
+to List), reset a batch to Not Reviewed so they come round again in flashcards,
+or export them to study on paper.
+"""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..core.errors import LexiTrackError
+from ..models.user_word_state import ReviewStatus
+from ..services.export_service import ExportFormat
+from ..services.vocabulary_service import VocabularyService
+from .components.vocabulary_table import Column, VocabularyTable
+from .dialogs import ChooseListDialog, WordDialog
+from .empty_state import EmptyState
+from .export_dialog import ExportDialog, ExportScope
+from .theme.palette import METRICS
+
+
+class UnknownPage(QWidget):
+    """Unknown words across every list, with bulk status actions."""
+
+    def __init__(self, service: VocabularyService, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._build()
+
+    def _build(self) -> None:
+        m = METRICS
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_4)
+        layout.setSpacing(m.space_4)
+
+        header = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        title = QLabel("Unknown Words")
+        title.setObjectName("PageTitle")
+        titles.addWidget(title)
+        self.subtitle = QLabel()
+        self.subtitle.setObjectName("PageSubtitle")
+        titles.addWidget(self.subtitle)
+        header.addLayout(titles)
+        header.addStretch(1)
+        self.export_button = QPushButton("Export…")
+        self.export_button.clicked.connect(lambda: self.export())
+        header.addWidget(self.export_button, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addLayout(header)
+
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+
+        self.table = VocabularyTable(
+            columns=(Column.WORD, Column.STATUS, Column.PART_OF_SPEECH, Column.CEFR, Column.LISTS),
+            allow_remove=False,
+            noun="unknown words",
+        )
+        # Every row here is Unknown by definition; filtering by status or
+        # marking Unknown again would only be noise.
+        self.table.status_filter.setVisible(False)
+        self.table.mark_unknown_button.setVisible(False)
+        self.table.reset_button.setText("Reset to Not Reviewed")
+
+        self.list_filter = QComboBox()
+        self.list_filter.setAccessibleName("Filter by list")
+        self.list_filter.currentIndexChanged.connect(self._reload)
+        self.table.extra_filters.addWidget(self.list_filter)
+
+        self.table.status_requested.connect(self._set_status)
+        self.table.add_to_list_requested.connect(self._add_to_list)
+        self.table.export_requested.connect(lambda ids: self.export(ids))
+        self.table.open_requested.connect(self._open_word)
+        self.stack.addWidget(self.table)
+
+        self.empty = EmptyState(
+            title="No unknown words",
+            body="Words you answer “I Don't Know” collect here, across every list, "
+            "so you can study, export or organise them.",
+        )
+        self.stack.addWidget(self.empty)
+
+    # -- content -----------------------------------------------------------
+
+    def refresh(self) -> None:
+        current = self.list_filter.currentData()
+        self.list_filter.blockSignals(True)
+        self.list_filter.clear()
+        self.list_filter.addItem("All lists", None)
+        for lst in self._service.lists():
+            self.list_filter.addItem(f"{lst.name} ({lst.progress.unknown:,})", lst.id)
+        index = self.list_filter.findData(current)
+        self.list_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.list_filter.blockSignals(False)
+        self._reload()
+
+    def _reload(self) -> None:
+        list_id = self.list_filter.currentData()
+        words = self._service.list_unknown_words(list_id)
+        total = self._service.unknown_count()
+        noun = "word" if total == 1 else "words"
+        self.subtitle.setText(f"{total:,} {noun} you marked as unknown, across all lists")
+        self.export_button.setEnabled(total > 0)
+        self.stack.setCurrentWidget(self.table if total else self.empty)
+        self.table.set_words(words)
+
+    # -- actions -----------------------------------------------------------
+
+    def _set_status(self, word_ids: list[int], status: ReviewStatus) -> None:
+        status = ReviewStatus(status)
+        if status is ReviewStatus.UNKNOWN:
+            return
+        try:
+            self._service.set_status(word_ids, status)
+        except LexiTrackError as exc:
+            QMessageBox.warning(self, "Could not change status", exc.user_message)
+            return
+        # They are no longer unknown, so they leave this page.
+        self.table.remove_word_ids(word_ids)
+        self._reload_counts()
+
+    def _reload_counts(self) -> None:
+        total = self._service.unknown_count()
+        self.subtitle.setText(
+            f"{total:,} {'word' if total == 1 else 'words'} "
+            "you marked as unknown, across all lists"
+        )
+        if total == 0:
+            self.stack.setCurrentWidget(self.empty)
+            self.export_button.setEnabled(False)
+
+    def _add_to_list(self, word_ids: list[int]) -> None:
+        dialog = ChooseListDialog(
+            self._service, f"Add {len(word_ids):,} words to a list", parent=self
+        )
+        if not dialog.exec() or dialog.chosen is None:
+            return
+        try:
+            added = self._service.add_words_to_list(dialog.chosen.id, word_ids)
+        except LexiTrackError as exc:
+            QMessageBox.warning(self, "Could not add words", exc.user_message)
+            return
+        QMessageBox.information(
+            self,
+            "Words added",
+            f"Added {added:,} {'word' if added == 1 else 'words'} to “{dialog.chosen.name}”."
+            + (f" {len(word_ids) - added:,} were already in it." if added < len(word_ids) else ""),
+        )
+        self.refresh()
+
+    def _open_word(self, word_id: int) -> None:
+        word = self._service.get_word(word_id)
+        if word is None:
+            return
+        dialog = WordDialog(self._service, word, parent=self)
+        dialog.exec()
+        self.refresh()
+
+    def export(self, selected_ids: list[int] | None = None) -> None:
+        scopes: list[ExportScope] = []
+        if selected_ids:
+            ids = list(selected_ids)
+            scopes.append(
+                ExportScope(
+                    f"Selected words ({len(ids):,})",
+                    lambda: self._service.export_content_for_selection(ids),
+                )
+            )
+        list_id = self.list_filter.currentData()
+        if list_id is not None:
+            current = self._service.get_list(list_id)
+            if current is not None:
+                scopes.append(
+                    ExportScope(
+                        f"Unknown words in {current.name} ({current.progress.unknown:,})",
+                        lambda: self._service.export_content_for_unknown(list_id),
+                    )
+                )
+        scopes.append(
+            ExportScope(
+                f"All unknown words ({self._service.unknown_count():,})",
+                lambda: self._service.export_content_for_unknown(None),
+                ExportFormat.PDF,
+            )
+        )
+        ExportDialog(self._service, scopes, parent=self).exec()

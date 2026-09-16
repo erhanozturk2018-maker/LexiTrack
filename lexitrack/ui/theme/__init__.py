@@ -13,9 +13,15 @@ from .stylesheet import build_stylesheet
 
 log = logging.getLogger(__name__)
 
-_ORGANISATION = "LexiTrack"
-_APPLICATION = "LexiTrack"
 _SETTINGS_KEY = "appearance/theme"
+
+#: The palette in effect. Painted components (table badges) read it, since a
+#: delegate cannot be styled with a stylesheet.
+_current_palette: Palette = LIGHT
+
+
+def current_palette() -> Palette:
+    return _current_palette
 
 
 class ThemeManager(QObject):
@@ -31,7 +37,9 @@ class ThemeManager(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._settings = QSettings(_ORGANISATION, _APPLICATION)
+        # The application's own settings scope (organisation and name are set in
+        # main.py), so tests that use a different scope never touch real settings.
+        self._settings = QSettings()
         self._name = self._load_saved_theme()
 
     # -- state -------------------------------------------------------------
@@ -62,7 +70,9 @@ class ThemeManager(QObject):
         if app is None:  # pragma: no cover - only in headless unit tests
             return
 
+        global _current_palette
         palette = self.palette
+        _current_palette = palette
         app.setStyleSheet(build_stylesheet(palette))
         _apply_qpalette(app, palette)
 
@@ -125,5 +135,6 @@ __all__ = [
     "ThemeManager",
     "ThemeName",
     "build_stylesheet",
+    "current_palette",
     "get_palette",
 ]

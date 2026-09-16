@@ -62,8 +62,7 @@ class SourceRepository:
 
 
 _COLUMNS = """
-    s.id, s.key, s.name, s.parser_type, s.file_path, s.created_at,
-    (SELECT COUNT(*) FROM word_sources ws WHERE ws.source_id = s.id) AS word_count
+    s.id, s.key, s.name, s.parser_type, s.file_path, s.created_at
 """
 
 
@@ -75,7 +74,6 @@ def _row_to_source(row: sqlite3.Row) -> Source:
         parser_type=row["parser_type"],
         file_path=row["file_path"],
         created_at=_parse_timestamp(row["created_at"]),
-        word_count=row["word_count"],
     )
 
 

@@ -10,6 +10,7 @@ Widgets opt into a look with ``setObjectName`` or a ``class`` property, e.g.
 
 from __future__ import annotations
 
+from .component_styles import component_rules
 from .palette import DISPLAY_FONT_STACK, METRICS, UI_FONT_STACK, Palette
 
 
@@ -17,6 +18,10 @@ def build_stylesheet(palette: Palette) -> str:
     """Return the full Qt stylesheet for ``palette``."""
     p = palette
     m = METRICS
+    return _base_rules(p, m) + component_rules(p)
+
+
+def _base_rules(p: Palette, m) -> str:
     return f"""
 /* ---------------------------------------------------------------- base */
 

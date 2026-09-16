@@ -1,20 +1,28 @@
-"""The application window.
+"""The application window: navigation, menus and the current-list context.
 
-Three screens live in a stack — welcome, review and completed — and the window
-switches between them based on one question asked of the service: is there a
-next word? Keeping that decision in a single method means the UI cannot drift
-out of step with the database.
+Three destinations, reached from tabs in the app bar:
+
+* **Home** — continue learning, overview, your lists.
+* **Review** — the current list, as flashcards or as a table.
+* **Unknown Words** — every unknown word, across lists.
+
+The window owns only what is shared between them: which list is current and
+which review mode was last used (both remembered between runs), the theme, and
+the menus. Each page reads what it needs from the service when shown, so no
+page can show stale numbers after another page changed something.
+
+The pages do not know how they are navigated to. Changing the navigation
+(say, to a sidebar) means changing this file, not the pages.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog,
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -27,26 +35,60 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import paths
-from ..core.errors import LexiTrackError
-from ..repositories.word_repository import ImportResult
 from ..services.vocabulary_service import VocabularyService
-from .empty_state import CompletedState, WelcomeState
-from .import_dialog import ImportDialog
-from .progress_widget import ProgressBarWidget, StatsBar
-from .review_widget import ReviewWidget
+from .components.cards import ModeSwitch
+from .dialogs import confirm
+from .export_dialog import ExportDialog, ExportScope
+from .home_page import HomePage
+from .list_actions import ListActions
+from .review_page import ReviewPage
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
+from .unknown_page import UnknownPage
 
 log = logging.getLogger(__name__)
 
-_WELCOME_PAGE = 0
-_REVIEW_PAGE = 1
-_COMPLETED_PAGE = 2
+HOME, REVIEW, UNKNOWN = "home", "review", "unknown"
+
+_SETTINGS_LIST = "review/list_id"
+_SETTINGS_MODE = "review/mode"
+
+SHORTCUTS_TEXT = """
+<h3>Keyboard shortcuts</h3>
+<p><b>Flashcards</b></p>
+<table cellspacing="6">
+<tr><td><b>K</b> or <b>←</b></td><td>I Know</td></tr>
+<tr><td><b>U</b> or <b>→</b></td><td>I Don't Know</td></tr>
+<tr><td><b>Enter</b> / <b>Space</b></td><td>Repeat your last answer. On an earlier word:
+move forward without changing it.</td></tr>
+<tr><td><b>Backspace</b></td><td>Step back to the previous word.
+Its status is not changed.</td></tr>
+<tr><td><b>R</b></td><td>Reset the word on screen to Not Reviewed</td></tr>
+</table>
+<p><b>List mode and Unknown Words</b></p>
+<table cellspacing="6">
+<tr><td><b>↑ ↓</b>, <b>Shift</b>+arrows</td><td>Move and extend the selection</td></tr>
+<tr><td><b>Ctrl+A</b></td><td>Select all visible words</td></tr>
+<tr><td><b>K</b> / <b>U</b> / <b>R</b></td>
+<td>Mark the selection Known / Unknown / Not Reviewed</td></tr>
+<tr><td><b>Enter</b></td><td>Open word details</td></tr>
+<tr><td><b>Delete</b></td><td>Remove the selection from this list (asks first)</td></tr>
+<tr><td><b>Ctrl+F</b></td><td>Search</td></tr>
+<tr><td><b>Esc</b></td><td>Clear the selection</td></tr>
+</table>
+<p><b>Everywhere</b></p>
+<table cellspacing="6">
+<tr><td><b>Alt+H</b> / <b>Alt+R</b> / <b>Alt+U</b></td><td>Home / Review / Unknown Words</td></tr>
+<tr><td><b>Ctrl+1</b> / <b>Ctrl+2</b></td><td>Flashcard / List mode</td></tr>
+<tr><td><b>Ctrl+O</b></td><td>Import</td></tr>
+<tr><td><b>Ctrl+N</b></td><td>New list</td></tr>
+<tr><td><b>Ctrl+E</b></td><td>Export</td></tr>
+<tr><td><b>Ctrl+T</b></td><td>Switch between light and dark</td></tr>
+</table>
+"""
 
 
 class MainWindow(QMainWindow):
-    """LexiTrack's main window."""
-
     def __init__(
         self,
         service: VocabularyService,
@@ -56,356 +98,326 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._service = service
         self._theme = theme
-        #: The word answered most recently, so Undo has something to undo.
-        self._last_answered_id: int | None = None
+        self._settings = QSettings()
+        self._current_list_id: int | None = self._load_int(_SETTINGS_LIST)
+        self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.FLASHCARD))
+        if self._mode not in (ModeSwitch.FLASHCARD, ModeSwitch.LIST):
+            self._mode = ModeSwitch.FLASHCARD
 
         self.setWindowTitle("LexiTrack")
-        self.resize(940, 720)
-        self.setMinimumSize(620, 560)
+        self.resize(1080, 760)
+        self.setMinimumSize(760, 600)
+
+        self.actions = ListActions(service, self)
+        self.actions.changed.connect(self._on_data_changed)
+        self.actions.focus_list.connect(self._focus_list)
+        self.actions.deleted.connect(self._on_list_deleted)
 
         self._build_menu()
         self._build_body()
-        self.refresh()
+        self._ensure_current_list()
+        self.show_page(REVIEW if self._has_resumable_review() else HOME)
 
     # -- construction ------------------------------------------------------
 
     def _build_menu(self) -> None:
-        menu_bar = self.menuBar()
+        bar = self.menuBar()
 
-        file_menu = menu_bar.addMenu("&File")
-
-        self._import_action = QAction("&Import PDF…", self)
-        self._import_action.setShortcut(QKeySequence.StandardKey.Open)
-        self._import_action.triggered.connect(self.import_pdf)
-        file_menu.addAction(self._import_action)
-
+        file_menu = bar.addMenu("&File")
+        self._action(file_menu, "&Import…", QKeySequence.StandardKey.Open,
+                     lambda: self.actions.import_into(None))
+        self._action(file_menu, "&New List…", QKeySequence.StandardKey.New,
+                     self.actions.create_list)
         file_menu.addSeparator()
-
-        self._export_pdf_action = QAction("Export Unknown Words as &PDF…", self)
-        self._export_pdf_action.triggered.connect(lambda: self.export_unknown("pdf"))
-        file_menu.addAction(self._export_pdf_action)
-
-        self._export_csv_action = QAction("Export Unknown Words as &CSV…", self)
-        self._export_csv_action.triggered.connect(lambda: self.export_unknown("csv"))
-        file_menu.addAction(self._export_csv_action)
-
+        self._action(file_menu, "&Export…", "Ctrl+E", self.export)
         file_menu.addSeparator()
+        self._action(file_menu, "Reset All Progress…", None, self.reset_progress)
+        self._action(file_menu, "Open &Data Folder", None, self._open_data_folder)
+        file_menu.addSeparator()
+        self._action(file_menu, "&Quit", QKeySequence.StandardKey.Quit, self.close)
 
-        quit_action = QAction("&Quit", self)
-        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
+        view_menu = bar.addMenu("&View")
+        self._action(view_menu, "&Home", None, lambda: self.show_page(HOME))
+        self._action(view_menu, "&Review", None, lambda: self.show_page(REVIEW))
+        self._action(view_menu, "&Unknown Words", None, lambda: self.show_page(UNKNOWN))
+        view_menu.addSeparator()
+        self._action(view_menu, "&Flashcard Mode", "Ctrl+1",
+                     lambda: self.open_review(mode=ModeSwitch.FLASHCARD))
+        self._action(view_menu, "&List Mode", "Ctrl+2",
+                     lambda: self.open_review(mode=ModeSwitch.LIST))
+        view_menu.addSeparator()
+        self._theme_action = self._action(view_menu, "", "Ctrl+T", self.toggle_theme)
 
-        view_menu = menu_bar.addMenu("&View")
+        help_menu = bar.addMenu("&Help")
+        self._action(help_menu, "&Keyboard Shortcuts", QKeySequence.StandardKey.HelpContents,
+                     self._show_shortcuts)
+        self._action(help_menu, "&About LexiTrack", None, self._show_about)
 
-        self._theme_action = QAction(self)
-        self._theme_action.setShortcut("Ctrl+T")
-        self._theme_action.triggered.connect(self.toggle_theme)
-        view_menu.addAction(self._theme_action)
-        self._update_theme_action_text()
-
-        review_menu = menu_bar.addMenu("&Review")
-
-        self._undo_action = QAction("&Undo Last Answer", self)
-        self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        self._undo_action.setEnabled(False)
-        self._undo_action.triggered.connect(self.undo_last_answer)
-        review_menu.addAction(self._undo_action)
-
-        self._reset_action = QAction("&Reset All Progress…", self)
-        self._reset_action.triggered.connect(self.reset_progress)
-        review_menu.addAction(self._reset_action)
-
-        help_menu = menu_bar.addMenu("&Help")
-
-        open_data_action = QAction("Open &Data Folder", self)
-        open_data_action.triggered.connect(self._open_data_folder)
-        help_menu.addAction(open_data_action)
-
-        about_action = QAction("&About LexiTrack", self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+    def _action(self, menu, text, shortcut, slot) -> QAction:
+        action = QAction(text, self)
+        if shortcut is not None:
+            action.setShortcut(QKeySequence(shortcut))
+        action.triggered.connect(slot)
+        menu.addAction(action)
+        return action
 
     def _build_body(self) -> None:
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
         layout.addWidget(self._build_app_bar())
 
-        self._pages = QStackedWidget()
+        self.pages = QStackedWidget()
+        self.home = HomePage(self._service, self.actions)
+        self.home.open_list.connect(lambda list_id, mode: self.open_review(list_id, mode))
+        self.home.current_changed.connect(self._set_current_list)
+        self.home.show_unknown.connect(lambda: self.show_page(UNKNOWN))
 
-        self._welcome = WelcomeState()
-        self._welcome.import_requested.connect(self.import_pdf)
+        self.review = ReviewPage(self._service, self.actions)
+        self.review.list_missing.connect(self._on_list_missing)
+        self.review.context_changed.connect(self._on_review_context)
 
-        self._review = ReviewWidget()
-        self._review.answered.connect(self._on_answered)
-        self._review.undo_requested.connect(self.undo_last_answer)
+        self.unknown = UnknownPage(self._service)
 
-        self._completed = CompletedState()
-        self._completed.export_requested.connect(lambda: self.export_unknown("pdf"))
-        self._completed.import_requested.connect(self.import_pdf)
-
-        self._pages.addWidget(self._welcome)
-        self._pages.addWidget(self._review)
-        self._pages.addWidget(self._completed)
-        layout.addWidget(self._pages, 1)
-
-        self._stats = StatsBar()
-        layout.addWidget(self._stats)
-
+        self._page_widgets = {HOME: self.home, REVIEW: self.review, UNKNOWN: self.unknown}
+        for widget in self._page_widgets.values():
+            self.pages.addWidget(widget)
+        layout.addWidget(self.pages, 1)
         self.setCentralWidget(central)
 
     def _build_app_bar(self) -> QWidget:
         m = METRICS
-
         bar = QFrame()
         bar.setObjectName("AppBar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(m.space_5, m.space_3, m.space_5, m.space_3)
-        layout.setSpacing(m.space_4)
+        layout.setContentsMargins(m.space_5, m.space_2, m.space_5, 0)
+        layout.setSpacing(m.space_2)
 
         title = QLabel("LexiTrack")
         title.setObjectName("AppTitle")
-        layout.addWidget(title)
+        layout.addWidget(title, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addSpacing(m.space_5)
 
-        self._progress_bar = ProgressBarWidget()
-        layout.addWidget(self._progress_bar, 1)
+        self._tabs = QButtonGroup(self)
+        self._tabs.setExclusive(True)
+        self.tab_buttons: dict[str, QPushButton] = {}
+        # Explicit Alt shortcuts rather than "&" mnemonics, which the Fusion
+        # style underlines permanently.
+        for key, text, shortcut in (
+            (HOME, "Home", "Alt+H"),
+            (REVIEW, "Review", "Alt+R"),
+            (UNKNOWN, "Unknown Words", "Alt+U"),
+        ):
+            tab = QPushButton(text)
+            tab.setShortcut(QKeySequence(shortcut))
+            tab.setToolTip(f"{text} ({shortcut})")
+            tab.setObjectName("NavTab")
+            tab.setCheckable(True)
+            tab.setCursor(Qt.CursorShape.PointingHandCursor)
+            tab.clicked.connect(lambda _c=False, k=key: self.show_page(k))
+            self._tabs.addButton(tab)
+            self.tab_buttons[key] = tab
+            layout.addWidget(tab, 0, Qt.AlignmentFlag.AlignBottom)
 
+        layout.addStretch(1)
         import_button = QPushButton("Import")
-        import_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_button.setToolTip("Import a PDF (Ctrl+O)")
-        import_button.clicked.connect(self.import_pdf)
-        layout.addWidget(import_button)
+        import_button.setProperty("size", "small")
+        import_button.setToolTip("Import PDF or JSON files (Ctrl+O)")
+        import_button.clicked.connect(lambda: self.actions.import_into(None))
+        layout.addWidget(import_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self._export_button = QPushButton("Export")
-        self._export_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._export_button.setToolTip("Export the words you marked as unknown")
-        self._export_button.clicked.connect(lambda: self.export_unknown("pdf"))
-        layout.addWidget(self._export_button)
-
-        self._theme_button = QPushButton()
-        self._theme_button.setProperty("variant", "ghost")
-        self._theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._theme_button.setToolTip("Switch between Light and Dark (Ctrl+T)")
-        self._theme_button.clicked.connect(self.toggle_theme)
-        layout.addWidget(self._theme_button)
-        self._update_theme_button_text()
-
+        self.theme_button = QPushButton()
+        self.theme_button.setProperty("variant", "ghost")
+        self.theme_button.setProperty("size", "small")
+        self.theme_button.setToolTip("Switch between Light and Dark (Ctrl+T)")
+        self.theme_button.clicked.connect(self.toggle_theme)
+        layout.addWidget(self.theme_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._update_theme_labels()
+        bar.setMinimumHeight(54)
         return bar
 
-    # -- state -------------------------------------------------------------
+    # -- navigation --------------------------------------------------------
 
-    def refresh(self) -> None:
-        """Re-read the database and show whichever screen now applies."""
-        try:
-            progress = self._service.get_progress()
-            word = self._service.get_next_word()
-        except LexiTrackError as exc:
-            self._show_error("Could not read your vocabulary", exc.user_message)
+    @property
+    def current_page(self) -> str:
+        widget = self.pages.currentWidget()
+        return next(key for key, page in self._page_widgets.items() if page is widget)
+
+    def show_page(self, page: str) -> None:
+        if page == REVIEW:
+            self._ensure_current_list()
+            if self._current_list_id is None:
+                page = HOME
+        self.tab_buttons[page].setChecked(True)
+        self.pages.setCurrentWidget(self._page_widgets[page])
+        if page == HOME:
+            self.home.refresh(self._current_list_id, self._mode)
+        elif page == REVIEW:
+            self.review.set_list(self._current_list_id, self._mode)
+        else:
+            self.unknown.refresh()
+
+    def open_review(self, list_id: int | None = None, mode: str | None = None) -> None:
+        if list_id is not None:
+            self._set_current_list(list_id)
+        if mode is not None:
+            self._set_mode(mode)
+        self.show_page(REVIEW)
+
+    # -- context -----------------------------------------------------------
+
+    def _set_current_list(self, list_id: int) -> None:
+        self._current_list_id = list_id
+        self._settings.setValue(_SETTINGS_LIST, list_id)
+
+    def _set_mode(self, mode: str) -> None:
+        self._mode = mode
+        self._settings.setValue(_SETTINGS_MODE, mode)
+
+    def _on_review_context(self, list_id: int, mode: str) -> None:
+        self._set_current_list(list_id)
+        self._set_mode(mode)
+
+    def _ensure_current_list(self) -> None:
+        lists = self._service.lists()
+        ids = {lst.id for lst in lists}
+        if self._current_list_id not in ids:
+            self._current_list_id = None
+            if lists:
+                # Prefer a list with something left to review.
+                pending = [lst for lst in lists if lst.progress.remaining]
+                self._set_current_list((pending or lists)[0].id)
+
+    def _has_resumable_review(self) -> bool:
+        if self._current_list_id is None:
+            return False
+        current = self._service.get_list(self._current_list_id)
+        if current is None:
+            return False
+        return current.progress.reviewed > 0 and current.progress.remaining > 0
+
+    def _focus_list(self, list_id: int) -> None:
+        self._set_current_list(list_id)
+
+    def _on_list_deleted(self, list_id: int) -> None:
+        if self._current_list_id == list_id:
+            self._current_list_id = None
+            self._settings.remove(_SETTINGS_LIST)
+
+    def _on_list_missing(self) -> None:
+        self._current_list_id = None
+        self._ensure_current_list()
+        self.show_page(HOME)
+
+    def _on_data_changed(self) -> None:
+        """Something was written; redraw the page on screen from the database."""
+        self._ensure_current_list()
+        page = self.current_page
+        if page == REVIEW and self._current_list_id is not None:
+            if self.review.list_id != self._current_list_id:
+                self.review.set_list(self._current_list_id, self._mode)
+            else:
+                self.review.refresh(reload_table=True)
+        else:
+            self.show_page(page)
+
+    # -- commands ----------------------------------------------------------
+
+    def export(self) -> None:
+        """Export from wherever the user is, with scopes that fit."""
+        page = self.current_page
+        if page == UNKNOWN:
+            self.unknown.export(self.unknown.table.selected_ids())
             return
-
-        self._stats.update_progress(progress)
-        self._progress_bar.update_progress(progress)
-
-        has_unknown = progress.unknown > 0
-        for action in (self._export_pdf_action, self._export_csv_action):
-            action.setEnabled(has_unknown)
-        self._export_button.setEnabled(has_unknown)
-        self._reset_action.setEnabled(progress.total > 0)
-
-        undo_available = self._last_answered_id is not None
-        self._undo_action.setEnabled(undo_available)
-        self._review.set_undo_enabled(undo_available)
-
-        if progress.total == 0:
-            self._pages.setCurrentIndex(_WELCOME_PAGE)
+        if self._current_list_id is not None and page in (HOME, REVIEW):
+            selected = (
+                self.review.table.selected_ids()
+                if page == REVIEW and self.review.mode == ModeSwitch.LIST
+                else None
+            )
+            self.actions.export_list(self._current_list_id, selected)
             return
-
-        if word is None:
-            self._completed.update_summary(progress.known, progress.unknown)
-            self._pages.setCurrentIndex(_COMPLETED_PAGE)
-            return
-
-        self._review.show_word(word, progress.reviewed + 1, progress.total)
-        self._pages.setCurrentIndex(_REVIEW_PAGE)
-        self._review.setFocus()
-
-    # -- review ------------------------------------------------------------
-
-    def _on_answered(self, word_id: int, known: bool) -> None:
-        try:
-            self._service.mark(word_id, known)
-        except LexiTrackError as exc:
-            self._show_error("Could not save your answer", exc.user_message)
-            return
-        self._last_answered_id = word_id
-        self.refresh()
-
-    def undo_last_answer(self) -> None:
-        """Return the most recently answered word to the queue."""
-        if self._last_answered_id is None:
-            return
-        try:
-            self._service.undo(self._last_answered_id)
-        except LexiTrackError as exc:
-            self._show_error("Could not undo", exc.user_message)
-            return
-        self._last_answered_id = None
-        self.refresh()
+        scopes = [
+            ExportScope(
+                f"All unknown words ({self._service.unknown_count():,})",
+                lambda: self._service.export_content_for_unknown(None),
+            )
+        ]
+        ExportDialog(self._service, scopes, parent=self).exec()
 
     def reset_progress(self) -> None:
-        """Clear every answer, after confirming — this cannot be undone."""
         progress = self._service.get_progress()
         if progress.reviewed == 0:
+            QMessageBox.information(self, "Nothing to reset", "No word has been reviewed yet.")
             return
-
-        confirmed = QMessageBox.question(
-            self,
-            "Reset all progress?",
-            f"This marks all {progress.total:,} words as not reviewed, clearing "
+        text = (
+            f"This marks all {progress.total:,} words in every list as not reviewed, clearing "
             f"{progress.known:,} known and {progress.unknown:,} unknown answers.\n\n"
-            "Your imported words are kept. This cannot be undone.",
-            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Reset,
-            QMessageBox.StandardButton.Cancel,
+            "Your lists and words are kept. This cannot be undone."
         )
-        if confirmed != QMessageBox.StandardButton.Reset:
+        if not confirm(self, "Reset all progress?", text, "Reset Everything"):
             return
-
-        try:
-            self._service.reset_progress()
-        except LexiTrackError as exc:
-            self._show_error("Could not reset progress", exc.user_message)
-            return
-        self._last_answered_id = None
-        self.refresh()
-
-    # -- import ------------------------------------------------------------
-
-    def import_pdf(self) -> None:
-        """Open the import dialog and refresh when it succeeds."""
-        dialog = ImportDialog(self._service, self)
-        if dialog.exec() != ImportDialog.DialogCode.Accepted:
-            return
-
-        self._last_answered_id = None
-        self.refresh()
-        if dialog.result_data is not None:
-            self._report_import(dialog.result_data)
-
-    def _report_import(self, result: ImportResult) -> None:
-        if result.total_words == 0:
-            return
-
-        lines = [f"Imported {result.source_name}."]
-        if result.new_words:
-            noun = "word" if result.new_words == 1 else "words"
-            lines.append(f"{result.new_words:,} new {noun} added to your review queue.")
-        if result.existing_words:
-            noun = "word was" if result.existing_words == 1 else "words were"
-            lines.append(
-                f"{result.existing_words:,} {noun} already in your vocabulary "
-                "and kept their review state."
-            )
-        if not result.new_words:
-            lines.append("There is nothing new to review from this document.")
-
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Import complete")
-        box.setText("\n".join(lines))
-        box.exec()
-
-    # -- export ------------------------------------------------------------
-
-    def export_unknown(self, file_format: str) -> None:
-        """Export the unknown words as ``pdf`` or ``csv``."""
-        count = self._service.unknown_count()
-        if count == 0:
-            QMessageBox.information(
-                self,
-                "Nothing to export",
-                "You have not marked any words as unknown yet.",
-            )
-            return
-
-        paths.ensure_data_dirs()
-        suggested = paths.exports_dir() / f"unknown_words.{file_format}"
-        label = "PDF file (*.pdf)" if file_format == "pdf" else "CSV file (*.csv)"
-
-        path_text, _ = QFileDialog.getSaveFileName(
-            self, "Export Unknown Words", str(suggested), label
-        )
-        if not path_text:
-            return
-
-        target = Path(path_text)
-        try:
-            if file_format == "pdf":
-                self._service.export_unknown_pdf(target)
-            else:
-                self._service.export_unknown_csv(target)
-        except LexiTrackError as exc:
-            self._show_error("Export failed", exc.user_message)
-            return
-
-        noun = "word" if count == 1 else "words"
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Export complete")
-        box.setText(f"Exported {count:,} {noun} to:\n{target}")
-        open_button = box.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
-        box.addButton(QMessageBox.StandardButton.Ok)
-        box.exec()
-        if box.clickedButton() is open_button:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target.parent)))
-
-    # -- appearance --------------------------------------------------------
+        self._service.reset_progress()
+        self.review.session = None
+        self._on_data_changed()
 
     def toggle_theme(self) -> None:
         self._theme.toggle()
-        self._update_theme_button_text()
-        self._update_theme_action_text()
+        self._update_theme_labels()
+        # Painted components (table pills, progress bars) read the palette.
+        self.update()
+        for widget in self.findChildren(QWidget):
+            widget.update()
 
-    def _update_theme_button_text(self) -> None:
-        # The button names the theme it switches *to*, which is what the user
-        # is deciding about.
+    def _update_theme_labels(self) -> None:
         going_dark = self._theme.current is ThemeName.LIGHT
-        self._theme_button.setText("Dark" if going_dark else "Light")
+        self.theme_button.setText("Dark" if going_dark else "Light")
+        if hasattr(self, "_theme_action"):
+            self._theme_action.setText(
+                "Switch to &Dark Mode" if going_dark else "Switch to &Light Mode"
+            )
 
-    def _update_theme_action_text(self) -> None:
-        going_dark = self._theme.current is ThemeName.LIGHT
-        self._theme_action.setText(
-            "Switch to &Dark Mode" if going_dark else "Switch to &Light Mode"
+    def show_migration_notice(self, backup_name: str) -> None:
+        QMessageBox.information(
+            self,
+            "Vocabulary upgraded",
+            "LexiTrack upgraded your vocabulary to support lists. Your words and "
+            "everything you have reviewed were kept, and each document you imported "
+            "is now a list.\n\n"
+            f"A copy of your previous data was saved as {backup_name} in the data folder.",
         )
 
     # -- misc --------------------------------------------------------------
 
     def _open_data_folder(self) -> None:
-        folder = paths.ensure_data_dirs()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.ensure_data_dirs())))
+
+    def _show_shortcuts(self) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Keyboard Shortcuts")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(SHORTCUTS_TEXT)
+        box.exec()
 
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
             "About LexiTrack",
             "<h3>LexiTrack</h3>"
-            "<p>PDF Vocabulary Learning &amp; Review</p>"
-            "<p>Import vocabulary from PDF documents and review it one word at "
-            "a time. Your progress is stored locally and nothing leaves your "
-            "computer.</p>"
+            "<p>Vocabulary Learning &amp; Review</p>"
+            "<p>Import word lists from PDF and JSON, organise them into lists, and "
+            "review them as flashcards or in a table. Everything is stored locally.</p>"
             f"<p style='color:gray'>Data folder: {paths.data_dir()}</p>",
         )
 
-    def _show_error(self, title: str, message: str) -> None:
-        log.error("%s: %s", title, message)
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle(title)
-        box.setText(message)
-        box.exec()
+    def _load_int(self, key: str) -> int | None:
+        value = self._settings.value(key)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
-    def closeEvent(self, event: QCloseEvent) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self._service.close()
         super().closeEvent(event)

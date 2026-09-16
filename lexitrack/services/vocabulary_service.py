@@ -261,6 +261,10 @@ class VocabularyService:
     def get_word(self, word_id: int) -> StoredWord | None:
         return self._words.get(word_id)
 
+    def get_words(self, word_ids: Sequence[int]) -> list[StoredWord]:
+        """Words for ``word_ids``, in the order given; missing ids are skipped."""
+        return self._words.get_many(word_ids)
+
     # -- progress ----------------------------------------------------------
 
     def get_progress(self, list_id: int | None = None) -> Progress:
