@@ -17,6 +17,7 @@ _ICONS = Path(__file__).with_name("icons")
 def component_rules(p: Palette) -> str:
     m = METRICS
     chevron = (_ICONS / f"chevron-down-{p.name.value}.svg").as_posix()
+    check = (_ICONS / f"check-{p.name.value}.svg").as_posix()
     return f"""
 /* ------------------------------------------------------------ page chrome */
 
@@ -72,6 +73,11 @@ QPushButton#ContextListButton::menu-indicator {{ image: none; width: 0; }}
 #ErrorText {{ color: {p.danger}; font-size: 13px; }}
 #WarningText {{ color: {p.unknown_text}; font-size: 13px; }}
 #Faint {{ color: {p.text_faint}; font-size: 12px; }}
+
+/* Plain containers inside a panel show the panel through, instead of painting
+   the window colour as a grey block. */
+#PanelBody {{ background: transparent; }}
+QCheckBox#FileCheck {{ font-size: 15px; font-weight: 600; }}
 
 /* A raised panel. Used sparingly: most structure is whitespace. */
 #Panel {{
@@ -254,7 +260,11 @@ QCheckBox::indicator {{
     background-color: {p.surface};
 }}
 QCheckBox::indicator:hover {{ border-color: {p.accent}; }}
-QCheckBox::indicator:checked {{ background-color: {p.accent}; border-color: {p.accent}; }}
+QCheckBox::indicator:checked {{
+    background-color: {p.accent};
+    border-color: {p.accent};
+    image: url("{check}");
+}}
 
 QListWidget {{
     background-color: {p.surface};

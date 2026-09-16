@@ -184,18 +184,14 @@ class FilePanel(QFrame):
         layout.setContentsMargins(m.space_4, m.space_3, m.space_4, m.space_4)
         layout.setSpacing(m.space_2)
 
-        top = QHBoxLayout()
-        self.include = QCheckBox()
-        self.include.setToolTip("Include this file")
+        # The file name is the checkbox label: unticking it skips the file.
+        self.include = QCheckBox(outcome.path.name)
+        self.include.setObjectName("FileCheck")
+        self.include.setToolTip("Untick to skip this file")
         self.include.setChecked(outcome.preview is not None)
         self.include.setEnabled(outcome.preview is not None)
         self.include.toggled.connect(self._on_include)
-        top.addWidget(self.include)
-        name = QLabel(outcome.path.name)
-        name.setObjectName("ListCardName")
-        top.addWidget(name)
-        top.addStretch(1)
-        layout.addLayout(top)
+        layout.addWidget(self.include)
 
         if outcome.preview is None:
             error = QLabel(outcome.error or "This file could not be read.")
@@ -217,6 +213,7 @@ class FilePanel(QFrame):
             layout.addWidget(label)
 
         self.body = QWidget()
+        self.body.setObjectName("PanelBody")
         body = QVBoxLayout(self.body)
         body.setContentsMargins(0, m.space_2, 0, 0)
         body.setSpacing(m.space_2)

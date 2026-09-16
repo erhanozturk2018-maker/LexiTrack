@@ -15,5 +15,5 @@ Nothing above the repository layer issues SQL, and nothing below the service
 layer knows that a UI exists.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["__version__"]

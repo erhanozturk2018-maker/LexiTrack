@@ -615,8 +615,9 @@ def test_both_themes_produce_complete_and_different_stylesheets() -> None:
 
 def test_theme_icons_exist() -> None:
     icons = Path(__file__).resolve().parents[1] / "lexitrack" / "ui" / "theme" / "icons"
-    assert (icons / "chevron-down-light.svg").exists()
-    assert (icons / "chevron-down-dark.svg").exists()
+    for name in ("chevron-down", "check"):
+        for theme_name in ("light", "dark"):
+            assert (icons / f"{name}-{theme_name}.svg").exists()
 
 
 def test_toggling_switches_between_the_two_themes(theme) -> None:
