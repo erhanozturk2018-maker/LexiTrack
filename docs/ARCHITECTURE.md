@@ -307,7 +307,20 @@ Manually added words go through the same `WordEntry`, normalization and
 repositories as imported ones, with provenance "Added manually".
 
 `ExportService` resolves a *scope* (list, unknown in a list, all unknown,
-selection) into `ExportContent`, which any exporter can write.
+selection) into `ExportContent`, which any exporter can write. The words are
+written in the order given, so ordering (A → Z, CEFR, list order) is applied by
+the caller. `ExportContent.group_by_level` asks the PDF exporter for a heading
+wherever the CEFR level changes.
+
+### Notes
+
+`StoredWord.note` is a short note about a word — a sense (*bank*: money), a
+UK/US variant, an opposite. It is not a column: it lives in
+`word_sources.metadata` as `note` (from a JSON `note` field) or `sense` (from
+an Oxford-format entry such as `bank (money) n.`), and is flattened like every
+other detail — the first source that supplies one wins. No schema change was
+needed. The table search, the details panel, the flashcard, the PDF definition
+column, CSV (a Note column) and JSON (`note`) all carry it.
 
 ---
 
@@ -315,10 +328,11 @@ selection) into `ExportContent`, which any exporter can write.
 
 ```text
 MainWindow
-├── app bar     LexiTrack · Home | Review | Unknown Words · Import · theme
+├── app bar     LexiTrack · Home | Review | Unknown Words
+│               · Search or run a command (Ctrl+K) · Import · theme icon · ⋯ menu
 ├── HomePage
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
-│   ├── Overview            four totals, link to Unknown Words
+│   ├── Overview            four totals; the Unknown tile opens Unknown Words
 │   └── Your lists          ListCard grid (click: current; double-click: open;
 │                           right-click: review, open, add words, import into,
 │                           export, edit, delete)
@@ -326,13 +340,18 @@ MainWindow
 │   ├── context strip       REVIEWING · <list ▾ switcher> · language · List Actions
 │   │                       · Flashcard|List
 │   ├── Flashcard mode      ReviewWidget / list complete / empty list
-│   ├── List mode           VocabularyTable + Add Words
+│   ├── List mode           VocabularyTable (details panel, floating bar) + Add Words
 │   └── StatsBar            known · unknown · remaining · total for the list
-└── UnknownPage             VocabularyTable (all unknown words) + list filter
+└── UnknownPage             VocabularyTable (all unknown words, no status
+                            column) + list filter
 ```
 
 `MainWindow` owns only shared context: the current list and review mode
-(persisted in `QSettings`), the theme and the menus. Pages re-read the service
+(persisted in `QSettings`), the theme and the commands. There is no menu bar:
+`MainWindow.commands()` declares everything the app can do, with a description
+and a shortcut, and three things are built from that one list — the Ctrl+K
+`CommandPalette`, the "⋯" menu and the `ShortcutsDialog`. Window-wide
+shortcuts are `QAction`s added to the window itself. Pages re-read the service
 whenever shown. Pages do not know how they are navigated to, so changing the
 navigation style means changing `main_window.py` only.
 
@@ -343,11 +362,21 @@ and on Home otherwise.
 
 - **`VocabularyTable`** — a `QAbstractTableModel` of `StoredWord` behind a
   `QSortFilterProxyModel` for search (word and definition), status filter and
-  sorting (CEFR by level order, status by what needs attention first). Row
-  selection with a selection bar: Known, Unknown, Reset, Copy to ▾, Move to ▾,
-  Remove, Export. The same actions are on a right-click menu. K / U / R set
-  status, C / M open the list picker, Enter opens word details, Delete removes
-  after confirmation. Displaying a row never changes status.
+  sorting (CEFR by level order, status by what needs attention first), and CEFR
+  level chips built from the levels present. Selecting rows shows a
+  **floating selection bar** — Known, Unknown, Reset, Copy to ▾, Move to ▾,
+  More ▾ (Export, Remove), × — a child of the table positioned over the bottom
+  of its frame. The frame grows an empty strip under the rows while the bar is
+  showing, so no row is hidden under it and nothing above moves. The same
+  actions are on a right-click menu. K / U / R set status, C / M open the list
+  picker, Enter opens the details panel, Delete removes after confirmation.
+  Displaying a row never changes status.
+- **`WordPanel`** — the details panel beside the table, following the current
+  row: status, word, part of speech and level, definition, note, example,
+  lists, source, language, and status buttons that go through the page exactly
+  as K / U / R do. Open or closed is remembered.
+- **`Toast`** — a short message floating over a page, with Undo or another
+  action (Open Folder after an export). It keeps clear of the selection bar.
 - **`StatusDelegate` / `StatusBadge`** — status as symbol plus word
   (✓ Known, ? Unknown, – Not reviewed), never colour alone.
 - **`ListCard`, `SegmentedProgress`, `StatTile`, `ModeSwitch`.**
@@ -375,13 +404,19 @@ Arrows move; letters act. In flashcards ← and → navigate the session history
 and never answer. On Home the arrows move focus across the card grid (Up from
 the top row returns to Continue). Ctrl+Tab cycles pages; Ctrl+L switches list.
 
+Shortcuts are listed in one place, Keyboard Shortcuts (F1), and shown next to
+each command in the Ctrl+K palette. They are not printed under the flashcard
+or on buttons; tooltips still name them.
+
 ### Dialogs
 
 `ImportDialog` (choose → read → preview per file → import → result),
-`ExportDialog` (scope + format), `ListDialog` (create/edit), `AddWordDialog`
-(stays open for the next word), `WordDialog`
-(details + explicit status buttons). Validation errors are shown inline and
-keep the user's input.
+`ExportDialog` (settings on the left — scope, format, order, remember; a live
+preview on the right rendered from a real export of the first 40 words, the PDF
+drawn with PyMuPDF; Enter saves with the defaults; the result is a toast),
+`ListDialog` (create/edit), `AddWordDialog` (stays open for the next word),
+`CommandPalette` and `ShortcutsDialog` (scrollable, filterable, sized to the
+screen). Validation errors are shown inline and keep the user's input.
 
 ### Theme system
 

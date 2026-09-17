@@ -336,3 +336,46 @@ public API.
 **Verification:** 308 tests passing; the upgraded copy of the real database
 opened in the new UI, resumed at the next unreviewed word, and Backspace left
 statuses unchanged in the database.
+
+---
+
+## 2026-09-17 — Interface audit, export preview, notes and definitions
+
+**Asked for.** An export flow with a preview and a choice of alphabetical or
+CEFR order; a critique of the selection bar and the other windows; the
+approved proposals: floating selection bar, Unknown Words cleanup, details
+panel, Ctrl+K palette, simpler app bar, shortcuts collected in one scrollable
+window instead of printed under the flashcard; definitions in the PDF and a
+note or definition for every word.
+
+**Done.**
+
+- `ExportDialog` rewritten as settings plus live preview; `ExportOrder`,
+  `order_words`; remembered format and order; result as a toast with Open
+  Folder (`notify` in `toast.py`).
+- `VocabularyTable`: floating selection bar with More ▾, CEFR level chips,
+  `WordPanel` replacing `WordDialog`; the table sits in `#TableFrame` whose
+  bottom strip opens while the bar shows.
+- `CommandPalette`, `ShortcutsDialog`, `MainWindow.commands()`; menu bar
+  replaced by a "⋯" menu; theme toggle is an icon; the Unknown tile on Home is
+  clickable; the flashcard no longer prints shortcuts.
+- `StoredWord.note`; JSON `note`; CSV Note column; PDF definition column with
+  the note beneath and `group_by_level` headings.
+- Definitions written for all 6,825 words in the user's database, delivered as
+  `lexitrack_definitions.json` for import. Trial import on a copy: 6,825
+  definitions, no new words, no status changed.
+
+**Problems and solutions**
+
+- `QTableView` resets its viewport margins in `updateGeometries`, and QSS
+  padding does not reach the viewport, so neither could reserve room under
+  the floating bar. The view now sits in a frame with a spacer that grows.
+- The PDF level heading had `keepWithNext`; with a level pages long, ReportLab
+  moved the heading to page two and left page one blank. Replaced with a
+  conditional page break; a test fails without the fix.
+- With "Remember these settings" on by default, a scope's own default format
+  was ignored before any format had ever been chosen. The dialog now follows
+  scope defaults until a format is chosen or remembered.
+
+**Verification:** 343 tests passing, lint clean; screenshots regenerated;
+dialogs, palette and PDF inspected in both themes.

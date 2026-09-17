@@ -37,15 +37,20 @@ vocabulary lives in a local SQLite file.
 - **Flashcard mode.** One large word, two equal answer buttons, keyboard-first.
 - **Free movement.** ← and → step back and forward through every answer in a
   session. Moving never changes an answer; pressing K, U or R does.
-- **List mode.** A searchable, sortable, filterable table of a list, with bulk
-  Known / Unknown / Reset, and one-step Copy to / Move to another list with
-  Undo.
+- **List mode.** A searchable, sortable table of a list with CEFR level filters,
+  a details panel beside it, and a floating bar for bulk Known / Unknown /
+  Reset and one-step Copy to / Move to another list with Undo.
+- **Definitions and notes.** Words carry a definition, an example and a short
+  note (a UK/US variant, an opposite, a sense), shown on the card, in the
+  details panel and in exports.
+- **Ctrl+K** searches commands, lists and words from anywhere.
 - **Unknown Words manager.** Every word you did not know, across all lists,
   with the lists each belongs to.
 - **Import PDF and JSON**, several files at once, into new or existing lists,
   with a preview of what is new before anything is written.
-- **Export** a list, its unknown words, all unknown words or a selection — as
-  PDF, CSV or JSON. JSON exports import back unchanged.
+- **Export with a preview** of a list, its unknown words, all unknown words or a
+  selection — as PDF, CSV or JSON, alphabetically or by CEFR level. JSON exports
+  import back unchanged.
 - **Oxford 3000 and 5000** parsed with part of speech and CEFR level.
 - **Safe upgrades.** A version 0.1 database is upgraded automatically, with a
   backup, keeping every answer.
@@ -97,7 +102,7 @@ file is kept in the data folder (`vocabulary.v1-backup-<date>.db`).
 
 ### Importing
 
-**Import** in the app bar, or **File → Import…** (`Ctrl+O`). Choose one or more
+**Import** in the app bar (`Ctrl+O`). Choose one or more
 PDF or JSON files. Each file gets a preview: the detected format, how many
 words it has, how many are new, any problems, and where the words should go —
 a new list named from the file, any existing lists, or both.
@@ -123,18 +128,23 @@ answer again or press R.
 
 ### Reviewing as a list
 
-Switch to **List** (`Ctrl+2`). Search, filter by status, sort by any column,
-select rows (`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. Looking at
-a word never marks it — only an action does.
+Switch to **List** (`Ctrl+2`). Search, filter by status or CEFR level (click
+A1, B2… to combine levels), sort by any column, select rows
+(`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. The **details panel**
+on the right follows the current row: definition, note, example, lists and
+source. Looking at a word never marks it — only an action does.
 
 ![List mode with a selection](docs/screenshots/list-mode.png)
 
-**Copy to** and **Move to** send the selection to another list in one step —
+Selecting words brings up a bar floating over the bottom of the table, so
+the rows never move. **Copy to** and **Move to** send the selection to another
+list in one step —
 the menu lists every list that can take the words, plus New List. Copying
 keeps the words here too; moving takes them out of this list, never out of
 your vocabulary. The result appears briefly at the bottom with **Undo**. The
 **Also In** column shows which other lists each word is in. Right-click a row
 for every action, or press **C** / **M** to pick a list from the keyboard.
+Export and Remove are under **More** on the bar.
 **Add Words…** types words in by hand; **List Actions** in the header edits,
 exports or deletes the list.
 
@@ -149,18 +159,32 @@ export them.
 
 ### Exporting
 
-**File → Export…** (`Ctrl+E`) offers what fits where you are: the current list,
-its unknown words, your selection, or all unknown words. Choose PDF for a
-printable study sheet, CSV for spreadsheets or Anki, JSON to edit and import
-again.
+**Export…** (`Ctrl+E`, or the **⋯** menu) offers what fits where you are: the
+current list, its unknown words, your selection, or all unknown words. The
+window shows the file before you save it — the real first page of the PDF, or
+the first lines of the CSV or JSON — and follows any change you make: format,
+and order (A → Z, CEFR level, or as in the list). A PDF in CEFR order starts
+each level with a heading, and shows each word's note under its definition.
+Press **Enter** to keep the defaults and choose where to save.
+
+![Export with a live preview](docs/screenshots/export-preview.png)
 
 <p align="center">
   <img src="docs/screenshots/export-pdf.png" alt="A page of an exported PDF" width="560">
 </p>
 
+### Search and commands
+
+**Ctrl+K**, or the search box in the app bar, finds a command (with what it
+does and its shortcut), a list, or a word — choosing a word opens it in List
+mode with its details. Everything else the app can do is in the **⋯** menu.
+
+![Command palette](docs/screenshots/command-palette.png)
+
 ### Keyboard shortcuts
 
-**Help → Keyboard Shortcuts** (`F1`) lists them in the app.
+**Keyboard Shortcuts** (`F1`, also in `Ctrl+K` and the **⋯** menu) lists every
+key in one place, with a filter. Shortcuts are not printed around the app.
 
 | Where | Key | Action |
 | --- | --- | --- |
@@ -172,14 +196,16 @@ again.
 | | `R` | Reset the word on screen to Not Reviewed |
 | Tables | `K` / `U` / `R` | Mark the selection Known / Unknown / Not Reviewed |
 | | `Ctrl+A`, `Shift`+arrows | Select |
-| | `Enter` | Word details |
+| | `Enter` | Open the details panel |
 | | `C` / `M` | Copy / move the selection to another list |
 | | Right-click, `Menu` key | Every action for the selection |
 | | `Delete` | Remove the selection from this list (asks first) |
 | | `Ctrl+Z` | Undo a copy or move while its message shows |
 | | `Ctrl+F` | Search |
 | Home | Arrow keys, `Enter` | Move between lists, open one |
-| Everywhere | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
+| Everywhere | `Ctrl+K` | Search commands, lists and words |
+| | `F1` | Keyboard Shortcuts |
+| | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
 | | `Alt+H` / `Alt+R` / `Alt+U` | Home / Review / Unknown Words |
 | | `Ctrl+L` | Switch list |
 | | `Ctrl+1` / `Ctrl+2` | Flashcard / List mode |
@@ -191,7 +217,7 @@ again.
 | Format | Parser | What it extracts |
 | --- | --- | --- |
 | Oxford 3000 / 5000 "by CEFR level" PDF | `OxfordParser` | Word, part of speech, CEFR level; English |
-| LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, example, language; list name, language, description, source |
+| LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, example, note, language; list name, language, description, source |
 | Any other text-based PDF | `GenericTextParser` | Every distinct word, nothing else |
 
 The JSON format is documented in
@@ -202,6 +228,10 @@ required; a typical file looks like:
 ```json
 { "name": "German A1", "language": "de", "words": ["Haus", "gehen", "kommen"] }
 ```
+
+Importing a JSON file into a list whose words you already have fills in the
+details they lack — a file of definitions for an Oxford list adds the
+definitions and changes nothing you have answered.
 
 Limitations: the Oxford PDFs contain no definitions or examples; the generic
 parser cannot tell headwords from inflected forms; scanned PDFs are detected
@@ -251,7 +281,7 @@ lexitrack/
 examples/            JSON word lists to try
 tools/               screenshot and design-mockup generators
 docs/                architecture, decisions, status, log, TODO, formats, design
-tests/               323 tests
+tests/               343 tests
 data/                your database and exports (created at runtime, not committed)
 pdfs/                put your PDFs here (not committed)
 ```
@@ -263,7 +293,7 @@ pytest
 ruff check lexitrack tests tools
 ```
 
-323 tests. Tests that need the real Oxford PDFs skip when `pdfs/` does not
+343 tests. Tests that need the real Oxford PDFs skip when `pdfs/` does not
 contain them; the rest of the suite still runs.
 
 ## Adding a parser

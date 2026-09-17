@@ -22,14 +22,23 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 os.environ["LEXITRACK_DATA_DIR"] = tempfile.mkdtemp(prefix="lexitrack-screenshots-")
 
+from dataclasses import replace  # noqa: E402
+
 import pymupdf  # noqa: E402
 from design_mockups import build_sample  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
+from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from lexitrack.database.connection import Database  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
 from lexitrack.ui.components.cards import ModeSwitch  # noqa: E402
+from lexitrack.ui.export_dialog import (  # noqa: E402
+    ExportDialog,
+    ExportOrder,
+    ExportScope,
+    order_words,
+)
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
 from lexitrack.ui.main_window import HOME, UNKNOWN, MainWindow  # noqa: E402
 from lexitrack.ui.theme import ThemeManager, ThemeName  # noqa: E402
@@ -104,9 +113,38 @@ def main() -> int:
             grab(dialog, "import-preview")
             dialog.close()
 
-    pdf = service.export(
-        service.export_content_for_unknown(current), data / "unknown.pdf", "pdf"
+            window.show_page(HOME)
+            palette = window.open_palette()
+            palette.search.setText("ex")
+            app.processEvents()
+            shot = window.grab()
+            painter = QPainter(shot)
+            painter.drawPixmap(palette.geometry().topLeft() - window.geometry().topLeft(),
+                               palette.grab())
+            painter.end()
+            shot.save(str(OUT / "command-palette.png"))
+            print("wrote docs/screenshots/command-palette.png")
+            palette.close()
+
+            export = ExportDialog(
+                service,
+                [ExportScope("Unknown words in this list",
+                             lambda: service.export_content_for_unknown(current))],
+                parent=window,
+            )
+            export._order_buttons[ExportOrder.CEFR].setChecked(True)
+            export.resize(980, 680)
+            export.show()
+            app.processEvents()
+            export._render_preview()
+            grab(export, "export-preview")
+            export.reject()
+
+    content = service.export_content_for_unknown(current)
+    content = replace(
+        content, words=order_words(content.words, ExportOrder.CEFR), group_by_level=True
     )
+    pdf = service.export(content, data / "unknown.pdf", "pdf")
     document = pymupdf.open(pdf)
     document[0].get_pixmap(dpi=110).save(str(OUT / "export-pdf.png"))
     document.close()

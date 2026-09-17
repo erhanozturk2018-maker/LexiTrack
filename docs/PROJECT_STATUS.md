@@ -1,6 +1,6 @@
 # Project Status
 
-**Last updated:** 16 September 2026
+**Last updated:** 17 September 2026
 **Version:** 0.2.0 · schema version 2
 
 ---
@@ -29,7 +29,11 @@ Existing version 0.1 databases upgrade automatically.
 | Three design directions explored | Done — A chosen and implemented |
 | Light and dark themes for every new component | Done |
 | Arrow-key navigation, one-step copy/move with Undo | Done |
-| Tests | 323 passing |
+| Export preview with A → Z / CEFR order | Done |
+| Floating selection bar, details panel, CEFR filters | Done |
+| Ctrl+K palette, Keyboard Shortcuts window, no menu bar | Done |
+| Word notes; definitions in the PDF with CEFR headings | Done |
+| Tests | 343 passing |
 | Documentation | Updated |
 
 ---
@@ -59,6 +63,10 @@ Existing version 0.1 databases upgrade automatically.
 - Each file commits in one transaction; failure part-way writes nothing.
 - Exports by scope — list, unknown in list, all unknown, selection — to PDF,
   CSV or JSON. JSON exports import back identically.
+- Export window with a live preview (first PDF page or first lines), order
+  A → Z / CEFR / list, remembered settings; Enter saves with the defaults.
+- PDF definition column shows the note under the definition; CEFR order adds a
+  heading per level. CSV has a Note column; JSON reads and writes `note`.
 
 ### Review
 
@@ -68,9 +76,10 @@ Existing version 0.1 databases upgrade automatically.
   explicitly.
 - Flashcard card shows provenance as "Source: …", a status badge and a history
   banner when looking back.
-- List mode: search, status filter, sorting, multi-select, bulk Known /
-  Unknown / Reset, copy or move to another list, remove from list, export selection,
-  word details. K / U / R on the selection.
+- List mode: search, status and CEFR level filters, sorting, multi-select,
+  a floating selection bar (Known / Unknown / Reset, Copy to, Move to, More:
+  Export, Remove), and a details panel following the current row. K / U / R on
+  the selection.
 - Switching mode keeps the list and the session history.
 - ← / → move back and forward through the session; only K, U and R change
   status.
@@ -83,12 +92,18 @@ Existing version 0.1 databases upgrade automatically.
 ### Interface
 
 - Tabs: Home · Review · Unknown Words (Alt+H / Alt+R / Alt+U).
-- Home: continue learning, overview totals, list cards with context menus.
+- App bar: Search or run a command (Ctrl+K), Import, theme icon, "⋯" menu. No
+  native menu bar; commands, the "⋯" menu and Keyboard Shortcuts share one
+  command list.
+- Home: continue learning, overview totals (the Unknown tile opens Unknown
+  Words), list cards with context menus.
 - Review: list switcher in the context strip, List Actions menu, mode switch,
   per-list stats bar.
-- Unknown Words: every unknown word with the lists it belongs to, list filter,
-  bulk Known / Reset, copy to a list, export.
-- Dialogs: import, export, new/edit list, add words, word details; a type-to-filter list picker.
+- Unknown Words: every unknown word with the lists it belongs to (no status
+  column), list filter, bulk Known / Reset, copy to a list, export.
+- Dialogs: import, export with preview, new/edit list, add words, Keyboard
+  Shortcuts (scrollable, filterable); a type-to-filter list picker.
+- Shortcuts are not printed around the app; F1 and Ctrl+K list them.
 - Status always shown as symbol plus word. Two-tone progress bars.
 - Current list and mode remembered between runs; app opens into Review when a
   list is part-way through.
@@ -149,7 +164,7 @@ pytest
 ruff check lexitrack tests tools
 ```
 
-**323 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
+**343 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
 when the files are absent.
 
 | File | Tests | Covers |
@@ -161,11 +176,11 @@ when the files are absent.
 | `test_database.py` | 21 | Schema, constraints, rollback, review queue |
 | `test_migrations.py` | 17 | v1 → v2: ids, statuses, timestamps, lists, backup, parity with fresh schema, failure rollback, newer-version refusal |
 | `test_lists.py` | 29 | Lists, membership, language identity, orphan deletion, bulk status |
-| `test_json.py` | 35 | Valid and invalid JSON, skipped items, metadata, export, round trip |
+| `test_json.py` | 36 | Valid and invalid JSON, skipped items, metadata, export, round trip |
 | `test_import_workflow.py` | 20 | Preview, targets, multi-list, re-import, language resolution, atomic rollback |
 | `test_review_session.py` | 18 | Multi-step Backspace, forward, explicit changes, reset, Enter |
-| `test_vocabulary_service.py` | 29 | 0.1 behaviour: import, review, resume, re-import, export |
-| `test_ui.py` | 71 | Flashcard keys, table search/filter/sort/selection, pages, persistence, dialogs, import dialog, themes |
+| `test_vocabulary_service.py` | 31 | 0.1 behaviour: import, review, resume, re-import, export, PDF level headings |
+| `test_ui.py` | 88 | Flashcard keys, table search/filter/sort/selection, floating bar, details panel, CEFR chips, export preview and order, palette, shortcuts window, pages, persistence, dialogs, themes |
 
 ### What has genuinely been verified
 
@@ -190,7 +205,7 @@ when the files are absent.
 1. **Edit word details** (see TODO). Add `VocabularyService.update_word`,
    write to the manual source's `word_sources` row, and change the flattening
    in `WordRepository._SELECT_WORD` so `parser_type = 'manual'` wins. Add an
-   Edit button to `WordDialog`.
+   Edit button to the details panel (`WordPanel`).
 2. **CEFR filter for flashcards.** Optional `levels` on
    `WordRepository.next_unreviewed` and `ReviewSession`; a small combo in the
    Review context strip.
@@ -203,7 +218,7 @@ when the files are absent.
 1. Read this file.
 2. Read [ARCHITECTURE.md](ARCHITECTURE.md) — especially §3 (word, source, list,
    status) and §8 (navigation versus status).
-3. Read [DECISIONS.md](DECISIONS.md) 23–36 before changing lists, identity,
+3. Read [DECISIONS.md](DECISIONS.md) 23–41 before changing lists, identity,
    review or migrations.
 4. Read the latest [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) entry.
 5. Set up and test:

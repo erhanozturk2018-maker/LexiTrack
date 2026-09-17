@@ -560,3 +560,68 @@ and several unused helpers and palette tokens.
 **Reason.** Unused code is still read, maintained and worked around, and it
 suggests to the next developer that it matters. Git history keeps it if a
 future parser needs it.
+
+---
+
+## 37. Shortcuts live in one place
+
+**Decision.** No shortcut hints are printed in the interface — not under the
+flashcard, not on the answer buttons. Every key is listed in Keyboard
+Shortcuts (F1) and next to its command in the Ctrl+K palette; tooltips still
+name them.
+
+**Reason.** Hints repeated on screen are read once and then become clutter on
+the screen used most. The old shortcuts window was a message box too tall for
+the screen. One scrollable, filterable window, built from the same command
+list as the palette, cannot disagree with the app.
+
+---
+
+## 38. Commands are declared once; no menu bar
+
+**Decision.** `MainWindow.commands()` lists every command with a description
+and shortcut. The Ctrl+K palette, the "⋯" menu and Keyboard Shortcuts are all
+built from it. The native menu bar is gone.
+
+**Reason.** The menu bar took a row above the app bar and duplicated it. A
+palette is faster for keyboard users and explains each command; the "⋯" menu
+keeps everything reachable with the mouse.
+
+---
+
+## 39. The selection bar floats
+
+**Decision.** The bar that appears with a selection floats over the bottom of
+the table instead of being a row in the layout. Export and Remove moved under
+More; Unknown Words has no status column.
+
+**Reason.** A bar inserted above the table pushed every row down the moment a
+row was clicked, so the next click landed on a different word. Seven
+equal-weight buttons also put Remove beside Known. Every row on Unknown Words
+said "Unknown".
+
+---
+
+## 40. Export shows the file before it is saved
+
+**Decision.** The export window renders the file the settings produce — the
+first page of the PDF, the first lines of CSV or JSON — and asks where to save
+only after. Ordering is applied by the dialog to the words it passes on, so it
+applies to every format.
+
+**Reason.** The user wanted to choose alphabetical or CEFR order and to see
+the result, while someone who wants the defaults presses Enter. Rendering a
+real export of the first 40 words keeps the preview honest and fast.
+
+---
+
+## 41. Notes are metadata, not a column
+
+**Decision.** A word's note is stored in `word_sources.metadata` (`note`, or
+the Oxford parser's `sense`) and flattened like other details, not added as a
+column.
+
+**Reason.** Oxford senses were already stored there. Reading both keys gave
+notes to 873 existing words with no migration, and a JSON import of notes or
+definitions fills in words that lack them without touching status — which is
+how the definitions for the user's 6,825 words were delivered.
