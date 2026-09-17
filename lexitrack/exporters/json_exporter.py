@@ -46,7 +46,7 @@ def build_json_document(
     items: list[Any] = []
     for word in words:
         item: dict[str, str] = {"word": word.word}
-        for field in ("part_of_speech", "cefr_level", "definition", "example"):
+        for field in ("part_of_speech", "cefr_level", "definition", "example", "note"):
             value = getattr(word, field)
             if value:
                 item[field] = value

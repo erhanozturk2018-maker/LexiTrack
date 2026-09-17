@@ -68,6 +68,7 @@ All optional except `word`.
 | `cefr_level` | `cefr`, `level` | text (`A1`…`C2` are normalised to upper case) |
 | `definition` | `meaning`, `translation` | text |
 | `example` | — | text |
+| `note` | `notes` | text: a sense, a UK/US variant, an opposite |
 | `language` | — | text; overrides the list's `language` for this word |
 
 Unknown fields are ignored, so a file produced by another tool with extra

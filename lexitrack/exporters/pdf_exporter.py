@@ -5,6 +5,10 @@ layout: a titled, paginated table designed to be printed and worked through.
 It takes ``StoredWord`` objects and knows nothing about which parser produced
 them, so a list built from a novel exports exactly as well as one built from
 Oxford — the columns it cannot fill simply show a dash.
+
+The definition column carries the word's note (a sense, a UK/US variant) under
+the definition. Exported in CEFR order, the sheet can start each level with a
+heading, so a printed list reads A1, then A2, and so on.
 """
 
 from __future__ import annotations
@@ -50,11 +54,16 @@ def export_words_pdf(
     path: Path,
     title: str = "Unknown Words",
     subtitle: str | None = None,
+    group_by_level: bool = False,
 ) -> Path:
-    """Write ``words`` to ``path`` as a printable PDF and return the path."""
+    """Write ``words`` to ``path`` as a printable PDF and return the path.
+
+    With ``group_by_level`` a heading starts each run of words sharing a CEFR
+    level; pass the words already in level order.
+    """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        _build(words, path, title, subtitle)
+        _build(words, path, title, subtitle, group_by_level)
     except ExportError:
         raise
     except Exception as exc:
@@ -66,7 +75,11 @@ def export_words_pdf(
 
 
 def _build(
-    words: Sequence[StoredWord], path: Path, title: str, subtitle: str | None
+    words: Sequence[StoredWord],
+    path: Path,
+    title: str,
+    subtitle: str | None,
+    group_by_level: bool = False,
 ) -> None:
     generated = datetime.now().strftime("%d %B %Y")
     footer_text = f"LexiTrack  ·  {title}  ·  {generated}"
@@ -100,7 +113,16 @@ def _build(
     story.append(Paragraph(caption, styles["subtitle"]))
     story.append(Spacer(1, 8 * mm))
 
-    if words:
+    if words and group_by_level:
+        for index, (level, run) in enumerate(_level_runs(words)):
+            if index:
+                story.append(Spacer(1, 6 * mm))
+            count = len(run)
+            heading = f"{level or 'No level'}  <font size=10 color='#6B7280'>" \
+                f"{count:,} {'word' if count == 1 else 'words'}</font>"
+            story.append(Paragraph(heading, styles["level"]))
+            story.append(_word_table(run, styles, document.width))
+    elif words:
         story.append(_word_table(words, styles, document.width))
     else:
         story.append(Paragraph("There are no words to export.", styles["empty"]))
@@ -166,6 +188,24 @@ def _styles() -> dict[str, ParagraphStyle]:
             leading=12,
             textColor=_MUTED,
         ),
+        "level": ParagraphStyle(
+            "LexiLevel",
+            parent=base,
+            fontName="Helvetica-Bold",
+            fontSize=15,
+            leading=19,
+            textColor=_INK,
+            spaceAfter=4,
+            keepWithNext=True,
+        ),
+        "note": ParagraphStyle(
+            "LexiNote",
+            parent=base,
+            fontName="Helvetica-Oblique",
+            fontSize=8.5,
+            leading=11,
+            textColor=_MUTED,
+        ),
         "empty": ParagraphStyle(
             "LexiEmpty",
             parent=base,
@@ -189,7 +229,7 @@ def _word_table(
                 Paragraph(_escape(word.word), styles["word"]),
                 _cell(word.part_of_speech, styles),
                 _cell(word.cefr_level, styles),
-                _cell(word.definition, styles),
+                _definition_cell(word, styles),
             ]
         )
 
@@ -214,6 +254,29 @@ def _word_table(
         )
     )
     return table
+
+
+def _level_runs(words: Sequence[StoredWord]) -> list[tuple[str | None, list[StoredWord]]]:
+    """Split ``words`` wherever the CEFR level changes."""
+    runs: list[tuple[str | None, list[StoredWord]]] = []
+    for word in words:
+        if runs and runs[-1][0] == word.cefr_level:
+            runs[-1][1].append(word)
+        else:
+            runs.append((word.cefr_level, [word]))
+    return runs
+
+
+def _definition_cell(word: StoredWord, styles: dict[str, ParagraphStyle]) -> object:
+    """The definition, with the note under it; a dash when there is neither."""
+    if not word.definition and not word.note:
+        return Paragraph(PLACEHOLDER, styles["muted"])
+    parts: list[Paragraph] = []
+    if word.definition:
+        parts.append(Paragraph(_escape(word.definition), styles["cell"]))
+    if word.note:
+        parts.append(Paragraph(_escape(word.note), styles["note"]))
+    return parts
 
 
 def _cell(value: str | None, styles: dict[str, ParagraphStyle]) -> Paragraph:

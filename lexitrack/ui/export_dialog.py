@@ -308,7 +308,13 @@ class ExportDialog(QDialog):
         if index not in self._contents:
             self._contents[index] = self._scopes[index].content()
         content = self._contents[index]
-        return replace(content, words=order_words(content.words, self.selected_order()))
+        order = self.selected_order()
+        return replace(
+            content,
+            words=order_words(content.words, order),
+            # A PDF in level order gets a heading for each level.
+            group_by_level=order is ExportOrder.CEFR,
+        )
 
     # -- preview -----------------------------------------------------------
 

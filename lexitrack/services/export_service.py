@@ -64,6 +64,9 @@ class ExportContent:
     name: str | None = None
     language: str | None = None
     description: str | None = None
+    #: PDF only: a heading before each CEFR level. The words must already be
+    #: in level order; the heading appears wherever the level changes.
+    group_by_level: bool = False
 
     @property
     def suggested_filename(self) -> str:
@@ -133,7 +136,11 @@ class ExportService:
     def write(self, content: ExportContent, path: Path, file_format: ExportFormat) -> Path:
         if file_format is ExportFormat.PDF:
             return export_words_pdf(
-                content.words, path, title=content.title, subtitle=content.subtitle
+                content.words,
+                path,
+                title=content.title,
+                subtitle=content.subtitle,
+                group_by_level=content.group_by_level,
             )
         if file_format is ExportFormat.CSV:
             return export_words_csv(content.words, path)

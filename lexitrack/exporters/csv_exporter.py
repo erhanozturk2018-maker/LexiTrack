@@ -17,7 +17,7 @@ from ..repositories.word_repository import StoredWord
 
 log = logging.getLogger(__name__)
 
-COLUMNS = ("Word", "Part of Speech", "CEFR", "Definition", "Example", "Sources")
+COLUMNS = ("Word", "Part of Speech", "CEFR", "Definition", "Example", "Note", "Sources")
 
 
 def export_words_csv(words: Sequence[StoredWord], path: Path) -> Path:
@@ -39,6 +39,7 @@ def export_words_csv(words: Sequence[StoredWord], path: Path) -> Path:
                         word.cefr_level or "",
                         word.definition or "",
                         word.example or "",
+                        word.note or "",
                         ", ".join(word.sources),
                     ]
                 )

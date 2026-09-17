@@ -387,3 +387,33 @@ def test_every_scope_exports_to_json(service: VocabularyService, tmp_path: Path)
         "all_unknown": ["ability"],
         "selection": ["abandon"],
     }
+
+
+def test_notes_import_export_and_fill_in_a_word_that_had_none(
+    service: VocabularyService, write_json, tmp_path: Path
+) -> None:
+    lst = service.create_list("English", "en")
+    word, _ = service.add_word(lst.id, "crisps")
+    assert service.get_word(word.id).note is None
+
+    notes = write_json(
+        {
+            "name": "English",
+            "language": "en",
+            "words": [
+                {"word": "crisps", "definition": "thin fried potato slices",
+                 "note": "UK; chips in US"},
+                {"word": "chips", "notes": "US; crisps in UK"},
+            ],
+        },
+        name="notes.json",
+    )
+    service.import_document(notes)
+
+    crisps = service.get_word(word.id)
+    assert (crisps.definition, crisps.note) == ("thin fried potato slices", "UK; chips in US")
+    document = build_json_document(service.list_words(lst.id), name="English", language="en")
+    assert document["words"] == [
+        {"word": "crisps", "definition": "thin fried potato slices", "note": "UK; chips in US"},
+        {"word": "chips", "note": "US; crisps in UK"},
+    ]

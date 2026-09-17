@@ -35,6 +35,9 @@ class StoredWord:
     cefr_level: str | None = None
     definition: str | None = None
     example: str | None = None
+    #: A short note: a sense (``money`` for *bank*), a UK/US variant, an
+    #: opposite. From a JSON ``note`` or an Oxford-format sense in brackets.
+    note: str | None = None
     sources: tuple[str, ...] = ()
     language: str = UNDETERMINED
     lists: tuple[str, ...] = ()
@@ -348,6 +351,12 @@ SELECT
     (SELECT ws.example FROM word_sources ws
       WHERE ws.word_id = w.id AND ws.example IS NOT NULL
       ORDER BY ws.source_id LIMIT 1) AS example,
+    (SELECT COALESCE(json_extract(ws.metadata, '$.note'), json_extract(ws.metadata, '$.sense'))
+       FROM word_sources ws
+      WHERE ws.word_id = w.id AND ws.metadata IS NOT NULL
+        AND COALESCE(json_extract(ws.metadata, '$.note'),
+                     json_extract(ws.metadata, '$.sense')) IS NOT NULL
+      ORDER BY ws.source_id LIMIT 1) AS note,
     (SELECT GROUP_CONCAT(s.name, '|') FROM word_sources ws
       JOIN sources s ON s.id = ws.source_id
       WHERE ws.word_id = w.id) AS source_names,
@@ -371,6 +380,7 @@ def _row_to_word(row: sqlite3.Row) -> StoredWord:
         cefr_level=row["cefr_level"],
         definition=row["definition"],
         example=row["example"],
+        note=row["note"],
         sources=tuple(dict.fromkeys(sources.split("|"))) if sources else (),
         language=row["language"],
         lists=tuple(sorted(dict.fromkeys(lists.split("|")), key=str.casefold)) if lists else (),

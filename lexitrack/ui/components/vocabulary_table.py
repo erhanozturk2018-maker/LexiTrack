@@ -158,10 +158,12 @@ class VocabularyTableModel(QAbstractTableModel):
         if role == SORT_ROLE:
             return self._sort_key(word, column, index.row())
         if role == Qt.ItemDataRole.ToolTipRole:
-            if column is Column.WORD and (word.definition or word.sources):
+            if column is Column.WORD and (word.definition or word.note or word.sources):
                 parts = []
                 if word.definition:
                     parts.append(word.definition)
+                if word.note:
+                    parts.append(word.note)
                 if word.sources:
                     parts.append(f"Source: {word.source_label}")
                 return "\n".join(parts)
@@ -252,7 +254,11 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
             return False
         if not self._search:
             return True
-        haystack = (word.normalized_word, (word.definition or "").casefold())
+        haystack = (
+            word.normalized_word,
+            (word.definition or "").casefold(),
+            (word.note or "").casefold(),
+        )
         return any(self._search in text for text in haystack)
 
     def lessThan(  # noqa: N802

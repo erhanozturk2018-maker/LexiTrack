@@ -480,6 +480,8 @@ QScrollArea#PanelScroll, QScrollArea#PanelScroll > QWidget > QWidget {{
     color: {p.text};
 }}
 #PanelExample {{ color: {p.text_muted}; font-style: italic; }}
+#PanelNote {{ color: {p.text_muted}; }}
+#NoteLabel {{ color: {p.text_faint}; font-size: 13px; }}
 
 QPushButton[variant="danger"] {{
     color: {p.danger};

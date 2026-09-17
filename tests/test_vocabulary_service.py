@@ -261,7 +261,9 @@ def test_csv_export_has_the_expected_columns(reviewed: VocabularyService, tmp_pa
     target = reviewed.export_unknown_csv(tmp_path / "unknown.csv")
     with target.open(encoding="utf-8-sig", newline="") as handle:
         header = next(csv.reader(handle))
-    assert header == ["Word", "Part of Speech", "CEFR", "Definition", "Example", "Sources"]
+    assert header == [
+        "Word", "Part of Speech", "CEFR", "Definition", "Example", "Note", "Sources",
+    ]
 
 
 def test_pdf_export_contains_only_unknown_words(reviewed: VocabularyService, tmp_path) -> None:
@@ -355,3 +357,23 @@ def test_a_real_import_produces_reviewable_words_with_metadata(
     assert word.part_of_speech
     assert word.cefr_level in {"A1", "A2", "B1", "B2"}
     assert word.sources == ("Oxford 3000",)
+
+
+def test_pdf_export_can_start_each_level_with_a_heading(
+    service: VocabularyService, tmp_path
+) -> None:
+    from dataclasses import replace
+
+    lst = service.create_list("Levels", "en")
+    service.add_word(lst.id, "apple", cefr_level="A1", definition="a round fruit")
+    service.add_word(lst.id, "abandon", cefr_level="B2")
+    content = service.export_content_for_list(lst.id)
+    grouped = replace(content, group_by_level=True)
+
+    target = service.export(grouped, tmp_path / "levels.pdf", "pdf")
+
+    with pymupdf.open(target) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert "A1  1 word" in text.replace("\n", "  ") or ("A1" in text and "1 word" in text)
+    assert text.index("apple") < text.index("B2") < text.index("abandon")
+    assert "a round fruit" in text

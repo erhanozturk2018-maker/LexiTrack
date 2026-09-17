@@ -59,6 +59,7 @@ WORD_FIELDS: dict[str, tuple[str, ...]] = {
     "cefr_level": ("cefr_level", "cefr", "level"),
     "definition": ("definition", "meaning", "translation"),
     "example": ("example",),
+    "note": ("note", "notes"),
     "language": ("language",),
 }
 
@@ -288,6 +289,7 @@ def _entry(
         cefr_level=level,
         definition=values["definition"],
         example=values["example"],
+        metadata={"note": values["note"]} if values["note"] else {},
         language=language,
     )
 

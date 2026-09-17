@@ -1243,3 +1243,33 @@ def test_the_unknown_tile_opens_unknown_words(qtbot, window) -> None:
     window.show_page(HOME)
     qtbot.mouseClick(window.home.unknown_tile, Qt.MouseButton.LeftButton)
     assert window.current_page == UNKNOWN
+
+
+def test_notes_show_in_the_panel_and_on_the_card(qtbot, table) -> None:
+    table.model.set_words([word(id=9, word="crisps", normalized_word="crisps",
+                                note="UK; chips in US")])
+    table.select_ids([9])
+    assert not table.panel.note.isHidden()
+    assert table.panel.note.text() == "UK; chips in US"
+    table.search.setText("chips in us")
+    assert visible_words(table) == ["crisps"]
+
+    card = ReviewWidget()
+    qtbot.addWidget(card)
+    card.show_item(item(note="UK; chips in US"), can_go_back=False)
+    assert card._note_label.text() == "UK; chips in US"
+    card.show_item(item(), can_go_back=False)
+    assert card._note_label.isHidden()
+
+
+def test_cefr_order_asks_the_pdf_for_level_headings(qapp, loaded) -> None:
+    from lexitrack.ui.export_dialog import ExportDialog, ExportOrder, ExportScope
+
+    list_id = loaded.lists()[0].id
+    scope = ExportScope("All", lambda: loaded.export_content_for_list(list_id))
+    dialog = ExportDialog(loaded, [scope])
+    dialog._order_buttons[ExportOrder.CEFR].setChecked(True)
+    assert dialog._content().group_by_level
+    dialog._order_buttons[ExportOrder.ALPHABETICAL].setChecked(True)
+    assert not dialog._content().group_by_level
+
