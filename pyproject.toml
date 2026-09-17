@@ -48,8 +48,11 @@ lexitrack = ["database/*.sql", "ui/theme/icons/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not slow'"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "slow: a full-year workload simulation; run with `pytest -m slow`",
+]
 
 [tool.ruff]
 line-length = 100

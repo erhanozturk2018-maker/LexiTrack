@@ -390,6 +390,12 @@ class CardRepository:
         ).fetchall()
         return [_to_log(row) for row in rows]
 
+    def count_logs_on(self, local_date: str) -> int:
+        row = self._db.connection.execute(
+            "SELECT COUNT(*) AS n FROM review_logs WHERE reviewed_on = ?", (local_date,)
+        ).fetchone()
+        return int(row["n"])
+
     def logs_for_word(self, word_id: int, limit: int = 50) -> list[ReviewLogEntry]:
         rows = self._db.connection.execute(
             "SELECT * FROM review_logs WHERE word_id = ? ORDER BY reviewed_at DESC, id DESC "

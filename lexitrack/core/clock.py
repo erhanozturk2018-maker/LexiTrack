@@ -81,9 +81,19 @@ class DayClock:
     def tzinfo(self) -> tzinfo:
         return self._tz
 
-    def with_settings(self, timezone_name: str, day_start_hour: int) -> DayClock:
-        """A clock like this one but configured differently."""
-        return type(self)(timezone_name, day_start_hour)
+    def configure(self, timezone_name: str, day_start_hour: int) -> DayClock:
+        """Re-point this clock at new settings, in place.
+
+        Deliberately a mutation rather than a new instance. The clock is
+        shared: the service, the Telegram thread and the Study page all hold
+        the same object, and handing back a copy when the Settings window
+        saved would leave every other holder on the old one — which in tests
+        showed up as a frozen clock that stopped advancing.
+        """
+        self._timezone_name = (timezone_name or DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
+        self._tz = resolve_timezone(self._timezone_name)
+        self._day_start_hour = min(max(int(day_start_hour), 0), 23)
+        return self
 
     # -- now ---------------------------------------------------------------
 
@@ -207,9 +217,6 @@ class FrozenClock(DayClock):
         day = _as_date(self.local_date(self._moment)) + timedelta(days=max(int(days), 1))
         self._moment = self.day_start(day)
         return self._moment
-
-    def with_settings(self, timezone_name: str, day_start_hour: int) -> FrozenClock:
-        return FrozenClock(self._moment, timezone_name, day_start_hour)
 
 
 # -- storage format --------------------------------------------------------
