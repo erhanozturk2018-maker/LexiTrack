@@ -21,6 +21,9 @@ from enum import StrEnum
 DEFAULT_SETTINGS: dict[str, str] = {
     # -- daily workload
     "new_words_per_day": "25",
+    # Words are introduced from the Unknown pool. A freshly imported list is
+    # "not reviewed" rather than "unknown", so this lets those words in too.
+    "new_words_include_not_reviewed": "false",
     "review_capacity_per_day": "250",
     # -- the day
     "day_start_hour": "0",
@@ -53,6 +56,7 @@ class Setting(StrEnum):
     """Names of the settings, so callers do not pass raw strings around."""
 
     NEW_WORDS_PER_DAY = "new_words_per_day"
+    NEW_WORDS_INCLUDE_NOT_REVIEWED = "new_words_include_not_reviewed"
     REVIEW_CAPACITY_PER_DAY = "review_capacity_per_day"
     DAY_START_HOUR = "day_start_hour"
     TIMEZONE = "timezone"
@@ -80,6 +84,7 @@ class LearningSettings:
     """
 
     new_words_per_day: int = 25
+    new_words_include_not_reviewed: bool = False
     review_capacity_per_day: int = 250
     day_start_hour: int = 0
     timezone: str = "Europe/Istanbul"
@@ -125,6 +130,7 @@ class LearningSettings:
         plan = str(merged[Setting.ACTIVE_PLAN_ID]).strip()
         return cls(
             new_words_per_day=max(integer(Setting.NEW_WORDS_PER_DAY), 0),
+            new_words_include_not_reviewed=flag(Setting.NEW_WORDS_INCLUDE_NOT_REVIEWED),
             review_capacity_per_day=max(integer(Setting.REVIEW_CAPACITY_PER_DAY), 0),
             day_start_hour=min(max(integer(Setting.DAY_START_HOUR), 0), 23),
             timezone=str(merged[Setting.TIMEZONE]).strip() or "Europe/Istanbul",
