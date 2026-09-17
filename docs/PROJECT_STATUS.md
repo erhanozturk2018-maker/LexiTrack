@@ -200,6 +200,17 @@ when the files are absent.
 
 ---
 
+## Next: the learning engine (0.3)
+
+The design for study plans, FSRS scheduling, the daily 25-new-word intake and
+the Telegram client is written up in
+[LEARNING_ENGINE.md](LEARNING_ENGINE.md), with the decisions already settled
+(one card per word, explicit acquisition step, 00:00 Europe/Istanbul day
+boundary, Telegram as a thread inside the app, no FastAPI or Docker). Nothing
+of it is implemented yet.
+
+---
+
 ## Next Exact Steps
 
 1. **Edit word details** (see TODO). Add `VocabularyService.update_word`,

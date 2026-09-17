@@ -325,6 +325,7 @@ For a non-PDF, non-JSON format, add a document class and set `document_types`.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The architecture as built |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Why each significant choice was made |
 | [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) | Chronological technical log |
+| [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md) | Design for 0.3: study plans, FSRS scheduling, daily queue, Telegram (not implemented yet) |
 | [docs/TODO.md](docs/TODO.md) | Next, later, ideas |
 | [docs/formats/json-import-export.md](docs/formats/json-import-export.md) | The JSON format |
 | [docs/design/](docs/design) | The three design directions explored for 0.2 |
