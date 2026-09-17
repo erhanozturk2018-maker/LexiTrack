@@ -185,11 +185,26 @@ class ListCard(QFrame):
 
 
 class StatTile(QFrame):
-    """A number with a label under it."""
+    """A number with a label under it. A tile with somewhere to go is a button."""
 
-    def __init__(self, label: str, tone: str | None = None, parent: QWidget | None = None):
+    clicked = Signal()
+
+    def __init__(
+        self,
+        label: str,
+        tone: str | None = None,
+        parent: QWidget | None = None,
+        link: str | None = None,
+    ):
         super().__init__(parent)
         self.setObjectName("StatTile")
+        if link:
+            self.setProperty("clickable", True)
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self.setToolTip(link)
+            self.setAccessibleName(f"{label}: {link}")
+            label = f"{label}  \u2192"
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         m = METRICS
         layout = QVBoxLayout(self)
@@ -206,6 +221,19 @@ class StatTile(QFrame):
 
     def set_value(self, value: int) -> None:
         self.value_label.setText(f"{value:,}")
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self.property("clickable") and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self.property("clickable") and event.key() in (
+            Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space
+        ):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class ModeSwitch(QFrame):

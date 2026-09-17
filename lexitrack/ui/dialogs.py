@@ -1,4 +1,4 @@
-"""The small dialogs: create/edit a list, add a word, word details.
+"""The small dialogs: create or edit a list, and add words.
 
 Every dialog reports problems inline, next to the field, and keeps what the
 user typed. A dialog that closes on a validation error and throws away the
@@ -25,14 +25,10 @@ from PySide6.QtWidgets import (
 
 from ..core.errors import LexiTrackError
 from ..models.language import LANGUAGE_NAMES, UNDETERMINED, language_name
-from ..models.user_word_state import ReviewStatus
 from ..models.vocabulary_list import VocabularyList
 from ..models.word_entry import CEFR_ORDER
-from ..repositories.word_repository import StoredWord
 from ..services.vocabulary_service import VocabularyService
-from .components.status import StatusBadge
 from .theme.palette import METRICS
-from .widgets import WrappedLabel
 
 #: Offered in the part-of-speech box; anything else can still be typed.
 COMMON_PARTS_OF_SPEECH = (
@@ -278,111 +274,6 @@ class AddWordDialog(QDialog):
             field.clear()
         self.pos_field.setCurrentIndex(0)
         self.word_field.setFocus()
-
-
-# -- word details ----------------------------------------------------------
-
-
-class WordDialog(QDialog):
-    """Everything about one word, with explicit status buttons."""
-
-    status_changed = Signal(int)
-
-    def __init__(
-        self,
-        service: VocabularyService,
-        word: StoredWord,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._service = service
-        self._word = word
-        m = METRICS
-        self.setWindowTitle(word.word)
-        self.setMinimumWidth(460)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(m.space_5, m.space_5, m.space_5, m.space_5)
-        layout.setSpacing(m.space_3)
-
-        top = QHBoxLayout()
-        title = QLabel(word.word)
-        title.setObjectName("PageTitle")
-        title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        top.addWidget(title)
-        top.addStretch(1)
-        self.badge = StatusBadge(word.status)
-        top.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addLayout(top)
-
-        meta = "  ·  ".join(p for p in (word.part_of_speech, word.cefr_level) if p)
-        if meta:
-            layout.addWidget(_label(meta, "Muted"))
-        if word.definition:
-            layout.addWidget(WrappedLabel(word.definition, width=420))
-        if word.example:
-            example = WrappedLabel(f"“{word.example}”", width=420)
-            example.setObjectName("Muted")
-            layout.addWidget(example)
-
-        details = QFormLayout()
-        details.setSpacing(m.space_2)
-        details.addRow(_label("Language", "Faint"), _label(language_name(word.language)))
-        details.addRow(_label("Lists", "Faint"), _wrapped(word.list_label or "—"))
-        details.addRow(_label("Source", "Faint"), _wrapped(word.source_label or "—"))
-        layout.addSpacing(m.space_2)
-        layout.addLayout(details)
-
-        layout.addSpacing(m.space_2)
-        actions = QHBoxLayout()
-        self._buttons: dict[ReviewStatus, QPushButton] = {}
-        for status, text in (
-            (ReviewStatus.KNOWN, "✓  Known"),
-            (ReviewStatus.UNKNOWN, "?  Unknown"),
-            (ReviewStatus.NOT_REVIEWED, "Reset"),
-        ):
-            button = QPushButton(text)
-            button.setProperty("size", "small")
-            button.clicked.connect(lambda _c=False, s=status: self._set(s))
-            actions.addWidget(button)
-            self._buttons[status] = button
-        actions.addStretch(1)
-        close = QPushButton("Close")
-        close.setDefault(True)
-        close.clicked.connect(self.accept)
-        actions.addWidget(close)
-        layout.addLayout(actions)
-        self._sync()
-
-    def _set(self, status: ReviewStatus) -> None:
-        try:
-            self._service.set_status([self._word.id], status)
-        except LexiTrackError as exc:
-            QMessageBox.warning(self, "Could not change status", exc.user_message)
-            return
-        refreshed = self._service.get_word(self._word.id)
-        if refreshed is not None:
-            self._word = refreshed
-        self._sync()
-        self.status_changed.emit(self._word.id)
-
-    def _sync(self) -> None:
-        self.badge.set_status(self._word.status)
-        for status, button in self._buttons.items():
-            button.setEnabled(status is not self._word.status)
-
-
-def _label(text: str, name: str | None = None) -> QLabel:
-    label = QLabel(text)
-    if name:
-        label.setObjectName(name)
-    return label
-
-
-def _wrapped(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setWordWrap(True)
-    return label
 
 
 def confirm(

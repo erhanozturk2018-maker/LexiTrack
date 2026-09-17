@@ -30,7 +30,6 @@ from ..services.export_service import ExportFormat
 from ..services.vocabulary_service import VocabularyService
 from .components.toast import Toast
 from .components.vocabulary_table import Column, VocabularyTable
-from .dialogs import WordDialog
 from .empty_state import EmptyState
 from .export_dialog import ExportDialog, ExportScope
 from .theme.palette import METRICS
@@ -71,7 +70,8 @@ class UnknownPage(QWidget):
         layout.addWidget(self.stack, 1)
 
         self.table = VocabularyTable(
-            columns=(Column.WORD, Column.STATUS, Column.PART_OF_SPEECH, Column.CEFR, Column.LISTS),
+            # No status column: every row here is Unknown by definition.
+            columns=(Column.WORD, Column.PART_OF_SPEECH, Column.CEFR, Column.LISTS),
             allow_remove=False,
             # Words here come from every list, so there is no single list to
             # move them out of; copying is the only transfer that makes sense.
@@ -81,8 +81,7 @@ class UnknownPage(QWidget):
         # Every row here is Unknown by definition; filtering by status or
         # marking Unknown again would only be noise.
         self.table.status_filter.setVisible(False)
-        self.table.mark_unknown_button.setVisible(False)
-        self.table.reset_button.setText("Reset to Not Reviewed")
+        self.table.hide_status_action(ReviewStatus.UNKNOWN)
 
         self.list_filter = QComboBox()
         self.list_filter.setAccessibleName("Filter by list")
@@ -96,7 +95,6 @@ class UnknownPage(QWidget):
             lambda ids: [(lst.id, lst.name) for lst in self.transfer.targets(ids, None)]
         )
         self.table.export_requested.connect(lambda ids: self.export(ids))
-        self.table.open_requested.connect(self._open_word)
         self.stack.addWidget(self.table)
 
         self.empty = EmptyState(
@@ -107,6 +105,7 @@ class UnknownPage(QWidget):
         self.stack.addWidget(self.empty)
 
         self.toast = Toast(self)
+        self.toast.avoid(self.table.selection_bar)
         self.transfer = WordTransfer(self._service, self.toast, self)
         self.transfer.changed.connect(self._reload_keeping_selection)
 
@@ -169,14 +168,6 @@ class UnknownPage(QWidget):
         ids = self.table.selected_ids()
         if ids and kind == "copy":
             self.transfer.pick_and_copy(ids, None, self.table.view)
-
-    def _open_word(self, word_id: int) -> None:
-        word = self._service.get_word(word_id)
-        if word is None:
-            return
-        dialog = WordDialog(self._service, word, parent=self)
-        dialog.exec()
-        self.refresh()
 
     def export(self, selected_ids: list[int] | None = None) -> None:
         scopes: list[ExportScope] = []

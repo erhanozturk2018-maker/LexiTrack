@@ -13,20 +13,27 @@ page can show stale numbers after another page changed something.
 
 The pages do not know how they are navigated to. Changing the navigation
 (say, to a sidebar) means changing this file, not the pages.
+
+Everything the app can do is declared once, in :meth:`MainWindow.commands`:
+the Ctrl+K palette lists those commands, the "⋯" menu in the app bar offers
+them, and the Keyboard Shortcuts window is built from them. There is no
+separate menu bar to keep in step.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtCore import QSettings, QSize, Qt, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QStackedWidget,
@@ -35,13 +42,16 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import paths
+from ..repositories.word_repository import StoredWord
 from ..services.vocabulary_service import VocabularyService
+from .command_palette import Command, CommandPalette
 from .components.cards import ModeSwitch
 from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
 from .home_page import HomePage
 from .list_actions import ListActions
 from .review_page import ReviewPage
+from .shortcuts_dialog import FLASHCARD_KEYS, HOME_KEYS, TABLE_KEYS, ShortcutsDialog
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
 from .unknown_page import UnknownPage
@@ -53,45 +63,7 @@ HOME, REVIEW, UNKNOWN = "home", "review", "unknown"
 _SETTINGS_LIST = "review/list_id"
 _SETTINGS_MODE = "review/mode"
 
-SHORTCUTS_TEXT = """
-<h3>Keyboard shortcuts</h3>
-<p><b>Flashcards</b></p>
-<table cellspacing="6">
-<tr><td><b>K</b></td><td>I Know</td></tr>
-<tr><td><b>U</b></td><td>I Don't Know</td></tr>
-<tr><td><b>←</b> or <b>Backspace</b></td><td>Previous word. Its status is not changed.</td></tr>
-<tr><td><b>→</b></td><td>Next word, when you have gone back. Its status is not changed.</td></tr>
-<tr><td><b>Enter</b> / <b>Space</b></td><td>Repeat your last answer. On an earlier word:
-move forward without changing it.</td></tr>
-<tr><td><b>R</b></td><td>Reset the word on screen to Not Reviewed</td></tr>
-</table>
-<p><b>List mode and Unknown Words</b></p>
-<table cellspacing="6">
-<tr><td><b>↑ ↓</b>, <b>Shift</b>+arrows</td><td>Move and extend the selection</td></tr>
-<tr><td><b>Ctrl+A</b></td><td>Select all visible words</td></tr>
-<tr><td><b>K</b> / <b>U</b> / <b>R</b></td>
-<td>Mark the selection Known / Unknown / Not Reviewed</td></tr>
-<tr><td><b>C</b> / <b>M</b></td><td>Copy / move the selection to another list</td></tr>
-<tr><td><b>Right-click</b> or <b>Menu key</b></td><td>All actions for the selection</td></tr>
-<tr><td><b>Enter</b></td><td>Open word details</td></tr>
-<tr><td><b>Delete</b></td><td>Remove the selection from this list (asks first)</td></tr>
-<tr><td><b>Ctrl+F</b></td><td>Search</td></tr>
-<tr><td><b>Esc</b></td><td>Clear the selection</td></tr>
-<tr><td><b>Ctrl+Z</b></td><td>Undo a copy or move while its message is showing</td></tr>
-</table>
-<p><b>Everywhere</b></p>
-<table cellspacing="6">
-<tr><td><b>Ctrl+Tab</b> / <b>Ctrl+Shift+Tab</b></td><td>Next / previous page</td></tr>
-<tr><td><b>Alt+H</b> / <b>Alt+R</b> / <b>Alt+U</b></td><td>Home / Review / Unknown Words</td></tr>
-<tr><td><b>Ctrl+L</b></td><td>Switch list</td></tr>
-<tr><td><b>Arrows</b> on Home</td><td>Move between lists; Enter opens</td></tr>
-<tr><td><b>Ctrl+1</b> / <b>Ctrl+2</b></td><td>Flashcard / List mode</td></tr>
-<tr><td><b>Ctrl+O</b></td><td>Import</td></tr>
-<tr><td><b>Ctrl+N</b></td><td>New list</td></tr>
-<tr><td><b>Ctrl+E</b></td><td>Export</td></tr>
-<tr><td><b>Ctrl+T</b></td><td>Switch between light and dark</td></tr>
-</table>
-"""
+_ICONS = Path(__file__).with_name("theme") / "icons"
 
 
 class MainWindow(QMainWindow):
@@ -119,7 +91,7 @@ class MainWindow(QMainWindow):
         self.actions.focus_list.connect(self._focus_list)
         self.actions.deleted.connect(self._on_list_deleted)
 
-        self._build_menu()
+        self._build_actions()
         self._build_body()
         for keys, step in (("Ctrl+Tab", 1), ("Ctrl+Shift+Tab", -1), ("Ctrl+Backtab", -1)):
             QShortcut(QKeySequence(keys), self, activated=lambda s=step: self.cycle_page(s))
@@ -128,47 +100,91 @@ class MainWindow(QMainWindow):
 
     # -- construction ------------------------------------------------------
 
-    def _build_menu(self) -> None:
-        bar = self.menuBar()
+    def commands(self) -> list[Command]:
+        """Everything the user can do from anywhere, in the order it is offered."""
+        going_dark = self._theme.current is ThemeName.LIGHT
+        return [
+            Command("Go to Home", "Continue learning, see your progress and your lists",
+                    lambda: self.show_page(HOME), "Alt+H", "start overview"),
+            Command("Go to Review", "Review the current list as flashcards or a table",
+                    lambda: self.show_page(REVIEW), "Alt+R", "study flashcards"),
+            Command("Go to Unknown Words", "Every word you marked unknown, across all lists",
+                    lambda: self.show_page(UNKNOWN), "Alt+U", "difficult"),
+            Command("Switch List\u2026", "Choose which list to review", self.switch_list,
+                    "Ctrl+L", "change list open"),
+            Command("Flashcard Mode", "Review the current list one word at a time",
+                    lambda: self.open_review(mode=ModeSwitch.FLASHCARD), "Ctrl+1", "cards"),
+            Command("List Mode", "See the current list as a table you can search and filter",
+                    lambda: self.open_review(mode=ModeSwitch.LIST), "Ctrl+2", "table"),
+            Command("Import\u2026", "Add words from PDF or JSON files",
+                    lambda: self.actions.import_into(None), "Ctrl+O", "open pdf json add"),
+            Command("New List\u2026", "Create an empty list and add words to it",
+                    self.actions.create_list, "Ctrl+N", "create"),
+            Command("Export\u2026", "Save words as PDF, CSV or JSON, with a preview first",
+                    self.export, "Ctrl+E", "save pdf csv json print"),
+            Command("Switch to Dark Mode" if going_dark else "Switch to Light Mode",
+                    "Change between the light and dark themes", self.toggle_theme, "Ctrl+T",
+                    "theme appearance"),
+            Command("Keyboard Shortcuts", "Every key LexiTrack understands, in one place",
+                    self.show_shortcuts, "F1", "keys help"),
+            Command("Open Data Folder", "Where your vocabulary and exports are stored",
+                    self._open_data_folder, None, "files location"),
+            Command("Reset All Progress\u2026", "Mark every word in every list as not reviewed",
+                    self.reset_progress, None, "clear start over"),
+            Command("About LexiTrack", "Version and where your data lives", self._show_about),
+        ]
 
-        file_menu = bar.addMenu("&File")
-        self._action(file_menu, "&Import…", QKeySequence.StandardKey.Open,
-                     lambda: self.actions.import_into(None))
-        self._action(file_menu, "&New List…", QKeySequence.StandardKey.New,
-                     self.actions.create_list)
-        file_menu.addSeparator()
-        self._action(file_menu, "&Export…", "Ctrl+E", self.export)
-        file_menu.addSeparator()
-        self._action(file_menu, "Reset All Progress…", None, self.reset_progress)
-        self._action(file_menu, "Open &Data Folder", None, self._open_data_folder)
-        file_menu.addSeparator()
-        self._action(file_menu, "&Quit", QKeySequence.StandardKey.Quit, self.close)
+    def _build_actions(self) -> None:
+        """Window-wide shortcuts. The tabs carry Alt+H / Alt+R / Alt+U themselves."""
+        self._shortcut_actions: list[QAction] = []
+        for keys, slot in (
+            ("Ctrl+K", self.open_palette),
+            ("Ctrl+L", self.switch_list),
+            ("Ctrl+1", lambda: self.open_review(mode=ModeSwitch.FLASHCARD)),
+            ("Ctrl+2", lambda: self.open_review(mode=ModeSwitch.LIST)),
+            ("Ctrl+O", lambda: self.actions.import_into(None)),
+            ("Ctrl+N", self.actions.create_list),
+            ("Ctrl+E", self.export),
+            ("Ctrl+T", self.toggle_theme),
+            ("F1", self.show_shortcuts),
+            ("Ctrl+Q", self.close),
+        ):
+            action = QAction(self)
+            action.setShortcut(QKeySequence(keys))
+            action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            action.triggered.connect(slot)
+            self.addAction(action)
+            self._shortcut_actions.append(action)
 
-        view_menu = bar.addMenu("&View")
-        self._action(view_menu, "&Home", None, lambda: self.show_page(HOME))
-        self._action(view_menu, "&Review", None, lambda: self.show_page(REVIEW))
-        self._action(view_menu, "&Unknown Words", None, lambda: self.show_page(UNKNOWN))
-        self._action(view_menu, "Switch &List\u2026", "Ctrl+L", self.switch_list)
-        view_menu.addSeparator()
-        self._action(view_menu, "&Flashcard Mode", "Ctrl+1",
-                     lambda: self.open_review(mode=ModeSwitch.FLASHCARD))
-        self._action(view_menu, "&List Mode", "Ctrl+2",
-                     lambda: self.open_review(mode=ModeSwitch.LIST))
-        view_menu.addSeparator()
-        self._theme_action = self._action(view_menu, "", "Ctrl+T", self.toggle_theme)
-
-        help_menu = bar.addMenu("&Help")
-        self._action(help_menu, "&Keyboard Shortcuts", QKeySequence.StandardKey.HelpContents,
-                     self._show_shortcuts)
-        self._action(help_menu, "&About LexiTrack", None, self._show_about)
-
-    def _action(self, menu, text, shortcut, slot) -> QAction:
-        action = QAction(text, self)
-        if shortcut is not None:
-            action.setShortcut(QKeySequence(shortcut))
-        action.triggered.connect(slot)
-        menu.addAction(action)
-        return action
+    def _fill_app_menu(self) -> None:
+        """The "⋯" menu: the commands, grouped, with their shortcuts."""
+        menu = self.app_menu
+        menu.clear()
+        groups = (
+            ("Import\u2026", "New List\u2026", "Export\u2026"),
+            ("Switch List\u2026", "Flashcard Mode", "List Mode"),
+            ("Switch to Dark Mode", "Switch to Light Mode", "Keyboard Shortcuts"),
+            ("Open Data Folder", "Reset All Progress\u2026", "About LexiTrack"),
+        )
+        by_title = {command.title: command for command in self.commands()}
+        search = menu.addAction("Search Commands\u2026", self.open_palette)
+        search.setShortcut(QKeySequence("Ctrl+K"))
+        for group in groups:
+            menu.addSeparator()
+            for title in group:
+                command = by_title.get(title)
+                if command is None:
+                    continue
+                action = menu.addAction(command.title, command.run)
+                action.setToolTip(command.description)
+                if command.shortcut:
+                    action.setShortcut(QKeySequence(command.shortcut))
+                    # Shown in the menu; the window-wide action does the work.
+                    action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        menu.addSeparator()
+        quit_action = menu.addAction("Quit", self.close)
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
 
     def _build_body(self) -> None:
         central = QWidget()
@@ -230,6 +246,15 @@ class MainWindow(QMainWindow):
             layout.addWidget(tab, 0, Qt.AlignmentFlag.AlignBottom)
 
         layout.addStretch(1)
+        self.palette_button = QPushButton("Search or run a command")
+        self.palette_button.setObjectName("CommandButton")
+        self.palette_button.setToolTip("Search commands, lists and words (Ctrl+K)")
+        self.palette_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.palette_button.setIconSize(QSize(15, 15))
+        self.palette_button.clicked.connect(self.open_palette)
+        layout.addWidget(self.palette_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addSpacing(m.space_2)
+
         import_button = QPushButton("Import")
         import_button.setProperty("size", "small")
         import_button.setToolTip("Import PDF or JSON files (Ctrl+O)")
@@ -237,11 +262,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(import_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.theme_button = QPushButton()
-        self.theme_button.setProperty("variant", "ghost")
-        self.theme_button.setProperty("size", "small")
-        self.theme_button.setToolTip("Switch between Light and Dark (Ctrl+T)")
+        self.theme_button.setObjectName("IconButton")
+        self.theme_button.setIconSize(QSize(18, 18))
+        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_button.clicked.connect(self.toggle_theme)
         layout.addWidget(self.theme_button, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.menu_button = QPushButton()
+        self.menu_button.setObjectName("IconButton")
+        self.menu_button.setIconSize(QSize(18, 18))
+        self.menu_button.setToolTip("More")
+        self.menu_button.setAccessibleName("More")
+        self.menu_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.app_menu = QMenu(self.menu_button)
+        self.app_menu.aboutToShow.connect(self._fill_app_menu)
+        self.menu_button.setMenu(self.app_menu)
+        layout.addWidget(self.menu_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self._update_theme_labels()
         bar.setMinimumHeight(54)
         return bar
@@ -394,11 +430,14 @@ class MainWindow(QMainWindow):
 
     def _update_theme_labels(self) -> None:
         going_dark = self._theme.current is ThemeName.LIGHT
-        self.theme_button.setText("Dark" if going_dark else "Light")
-        if hasattr(self, "_theme_action"):
-            self._theme_action.setText(
-                "Switch to &Dark Mode" if going_dark else "Switch to &Light Mode"
-            )
+        tone = self._theme.current.value
+        label = "Switch to dark mode" if going_dark else "Switch to light mode"
+        icon = "moon" if going_dark else "sun"
+        self.theme_button.setIcon(QIcon(str(_ICONS / f"{icon}-{tone}.svg")))
+        self.theme_button.setAccessibleName(label)
+        self.theme_button.setToolTip(f"{label} (Ctrl+T)")
+        self.menu_button.setIcon(QIcon(str(_ICONS / f"more-{tone}.svg")))
+        self.palette_button.setIcon(QIcon(str(_ICONS / f"search-{tone}.svg")))
 
     def show_migration_notice(self, backup_name: str) -> None:
         QMessageBox.information(
@@ -415,12 +454,58 @@ class MainWindow(QMainWindow):
     def _open_data_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.ensure_data_dirs())))
 
-    def _show_shortcuts(self) -> None:
-        box = QMessageBox(self)
-        box.setWindowTitle("Keyboard Shortcuts")
-        box.setTextFormat(Qt.TextFormat.RichText)
-        box.setText(SHORTCUTS_TEXT)
-        box.exec()
+    def shortcut_sections(self):
+        everywhere = [
+            ("Ctrl+K", "Search commands, lists and words"),
+            ("Ctrl+Tab / Ctrl+Shift+Tab", "Next / previous page"),
+        ]
+        everywhere += [
+            (c.shortcut, c.title.rstrip("\u2026")) for c in self.commands() if c.shortcut
+        ]
+        everywhere.append(("Ctrl+Q", "Quit"))
+        return [FLASHCARD_KEYS, TABLE_KEYS, HOME_KEYS, ("Everywhere", everywhere)]
+
+    def show_shortcuts(self) -> None:
+        ShortcutsDialog(self.shortcut_sections(), parent=self).exec()
+
+    def open_palette(self) -> CommandPalette:
+        lists = []
+        for lst in self._service.lists():
+            percent = int(lst.progress.percent_complete)
+            detail = f"{lst.progress.total:,} words \u00b7 {percent}% reviewed"
+            lists.append((lst.name, detail, lambda i=lst.id: self.open_review(i)))
+        palette = CommandPalette(
+            self.commands(), lists, self._all_words, self.reveal_word, parent=self
+        )
+        palette.popup()
+        return palette
+
+    def _all_words(self) -> list[StoredWord]:
+        seen: dict[int, StoredWord] = {}
+        for lst in self._service.lists():
+            for word in self._service.list_words(lst.id):
+                seen.setdefault(word.id, word)
+        return list(seen.values())
+
+    def reveal_word(self, word: StoredWord) -> None:
+        """Open ``word`` in List mode, selected, with its details showing."""
+        ids = {lst.name: lst.id for lst in self._service.lists()}
+        current = self._service.get_list(self._current_list_id) if self._current_list_id else None
+        if current is not None and current.name in word.lists:
+            list_id = current.id
+        else:
+            list_id = next((ids[name] for name in word.lists if name in ids), None)
+        if list_id is None:
+            return
+        self.open_review(list_id, ModeSwitch.LIST)
+        table = self.review.table
+        table.search.clear()
+        table.status_filter.setCurrentIndex(0)
+        for chip in table.level_chips.values():
+            chip.setChecked(False)
+        table.select_ids([word.id])
+        table.show_details(True)
+        table.view.setFocus()
 
     def _show_about(self) -> None:
         QMessageBox.about(

@@ -69,6 +69,12 @@ class Palette:
     # Feedback.
     danger: str
 
+    # Inverted chrome floating over the page: the selection bar and toasts.
+    inverse: str
+    inverse_text: str
+    inverse_muted: str
+    inverse_hover: str
+
 
 LIGHT = Palette(
     name=ThemeName.LIGHT,
@@ -96,6 +102,10 @@ LIGHT = Palette(
     unknown_soft="#FBF0E1",
     unknown_text="#8A4E07",
     danger="#C03030",
+    inverse="#16191F",
+    inverse_text="#F4F6F9",
+    inverse_muted="#8B94A1",
+    inverse_hover="#2C323C",
 )
 
 DARK = Palette(
@@ -124,6 +134,10 @@ DARK = Palette(
     unknown_soft="#332818",
     unknown_text="#F0C489",
     danger="#E06767",
+    inverse="#E7ECF3",
+    inverse_text="#14171C",
+    inverse_muted="#6C7686",
+    inverse_hover="#CDD4DE",
 )
 
 PALETTES: dict[ThemeName, Palette] = {

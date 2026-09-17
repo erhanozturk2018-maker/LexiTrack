@@ -3,8 +3,8 @@
 Three blocks, in order of how often they are wanted:
 
 1. **Continue learning** — the current list, its progress and one button.
-2. **Overview** — four numbers for the whole vocabulary, and the way into the
-   Unknown Words manager.
+2. **Overview** — four numbers for the whole vocabulary; the Unknown tile
+   opens the Unknown Words manager.
 3. **Your lists** — a card per list. Click to make it current, double-click or
    Enter to open it, right-click (or the Menu key / Shift+F10) for everything
    else. Arrow keys move between cards; Up from the top row returns to
@@ -113,21 +113,15 @@ class HomePage(QWidget):
         layout.addWidget(self.continue_panel)
 
         # 2. overview
-        overview_header = QHBoxLayout()
-        overview_header.addWidget(_label("OVERVIEW", "SectionTitle"))
-        overview_header.addStretch(1)
-        unknown_link = QPushButton("Manage Unknown Words  →")
-        unknown_link.setProperty("variant", "ghost")
-        unknown_link.setCursor(Qt.CursorShape.PointingHandCursor)
-        unknown_link.clicked.connect(self.show_unknown.emit)
-        overview_header.addWidget(unknown_link)
-        layout.addLayout(overview_header)
+        layout.addSpacing(m.space_2)
+        layout.addWidget(_label("OVERVIEW", "SectionTitle"))
 
         tiles = QHBoxLayout()
         tiles.setSpacing(m.space_3)
         self.total_tile = StatTile("Total words")
         self.known_tile = StatTile("Known", "known")
-        self.unknown_tile = StatTile("Unknown", "unknown")
+        self.unknown_tile = StatTile("Unknown", "unknown", link="Open Unknown Words")
+        self.unknown_tile.clicked.connect(self.show_unknown.emit)
         self.remaining_tile = StatTile("Not reviewed")
         for tile in (self.total_tile, self.known_tile, self.unknown_tile, self.remaining_tile):
             tiles.addWidget(tile)

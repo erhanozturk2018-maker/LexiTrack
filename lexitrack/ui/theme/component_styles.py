@@ -146,15 +146,13 @@ QPushButton#ModeButton:checked {{
     background-color: {p.accent_soft};
 }}
 
-/* The label already ends in an arrow; Qt's own indicator would be a second. */
-QPushButton#MenuButton::menu-indicator {{ image: none; width: 0; }}
 
 /* Transfer result with Undo: an inverted chip that floats over the page. */
 #Toast {{
-    background-color: {p.text};
+    background-color: {p.inverse};
     border-radius: {m.radius_md}px;
 }}
-#ToastText {{ color: {p.surface}; font-size: 13px; }}
+#ToastText {{ color: {p.inverse_text}; font-size: 13px; }}
 QPushButton#ToastAction {{
     background: transparent;
     border: none;
@@ -164,6 +162,22 @@ QPushButton#ToastAction {{
     min-height: 0;
 }}
 QPushButton#ToastAction:hover {{ text-decoration: underline; }}
+
+/* Export: settings on the left, the file as it will be on the right. */
+#ExportSettings {{
+    background-color: {p.surface};
+    border-right: 1px solid {p.border};
+}}
+#ExportPreview {{ background-color: {p.surface_sunken}; }}
+QScrollArea#PreviewScroll, QScrollArea#PreviewScroll > QWidget > QWidget {{
+    background: transparent;
+}}
+#PreviewPage {{ background: transparent; }}
+QPlainTextEdit#PreviewText {{
+    font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 12px;
+    background-color: {p.surface};
+}}
 
 #ListPicker {{
     background-color: {p.surface_raised};
@@ -189,6 +203,56 @@ QPushButton#ToastAction:hover {{ text-decoration: underline; }}
     letter-spacing: 0.5px;
 }}
 
+/* -------------------------------------------------------------- app bar */
+
+/* Ctrl+K: looks like a search field, opens the command palette. */
+QPushButton#CommandButton {{
+    background-color: {p.surface_sunken};
+    border: 1px solid {p.border};
+    border-radius: {m.radius_sm}px;
+    color: {p.text_faint};
+    padding: 6px 14px 6px 10px;
+    min-width: 220px;
+    text-align: left;
+    font-size: 13px;
+}}
+QPushButton#CommandButton:hover {{ border-color: {p.border_strong}; color: {p.text_muted}; }}
+QPushButton#IconButton {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {m.radius_sm}px;
+    padding: 7px;
+    min-height: 0;
+}}
+QPushButton#IconButton:hover {{ background-color: {p.surface_sunken}; }}
+QPushButton#IconButton::menu-indicator {{ image: none; width: 0; }}
+
+#CommandPalette {{
+    background-color: {p.surface_raised};
+    border: 1px solid {p.border_strong};
+    border-radius: {m.radius_lg}px;
+}}
+QLineEdit#PaletteSearch {{
+    font-size: 16px;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid {p.border};
+    border-radius: 0;
+    background: transparent;
+}}
+QListWidget#PaletteResults {{ border: none; background: transparent; padding: 0; }}
+
+#KeyCap {{
+    background-color: {p.surface_sunken};
+    border: 1px solid {p.border_strong};
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    color: {p.text};
+    padding: 1px 7px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+
 /* ------------------------------------------------------------ stat tiles */
 
 #StatTile {{
@@ -205,6 +269,8 @@ QPushButton#ToastAction:hover {{ text-decoration: underline; }}
 #StatTileValue[tone="known"] {{ color: {p.known}; }}
 #StatTileValue[tone="unknown"] {{ color: {p.unknown}; }}
 #StatTileLabel {{ font-size: 12px; color: {p.text_muted}; }}
+#StatTile[clickable="true"]:hover {{ border-color: {p.unknown}; }}
+#StatTile[clickable="true"]:focus {{ border: 2px solid {p.focus_ring}; }}
 
 /* --------------------------------------------------------- status badges */
 
@@ -338,11 +404,82 @@ QHeaderView::section {{
 QHeaderView::section:hover {{ color: {p.text}; }}
 QTableCornerButton::section {{ background-color: {p.surface}; border: none; }}
 
+/* The selection bar floats over the table: an inverted pill, so it reads as
+   a temporary tool rather than part of the page. */
 #SelectionBar {{
+    background-color: {p.inverse};
+    border-radius: 21px;
+}}
+#SelectionCount {{ font-weight: 600; color: {p.inverse_text}; background: transparent; }}
+#BarDivider {{ background-color: {p.inverse_muted}; margin: 0 6px; }}
+QPushButton#BarButton {{
+    background: transparent;
+    border: none;
+    border-radius: 15px;
+    color: {p.inverse_text};
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    min-height: 18px;
+}}
+QPushButton#BarButton:hover, QPushButton#BarButton:focus {{
+    background-color: {p.inverse_hover};
+    outline: none;
+}}
+QPushButton#BarButton::menu-indicator {{ image: none; width: 0; }}
+
+/* CEFR filter chips beside the search. */
+QPushButton#LevelChip {{
+    background: transparent;
+    border: 1px solid {p.border_strong};
+    border-radius: 13px;
+    color: {p.text_muted};
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 18px;
+}}
+QPushButton#LevelChip:hover {{ color: {p.text}; border-color: {p.text_faint}; }}
+QPushButton#LevelChip:checked {{
     background-color: {p.accent_soft};
+    border-color: {p.accent};
+    color: {p.accent};
+}}
+QPushButton#DetailsToggle:checked {{
+    background-color: {p.accent_soft};
+    border-color: {p.accent};
+    color: {p.text};
+}}
+
+/* The table's frame; the view inside draws no border of its own. */
+#TableFrame {{
+    background-color: {p.surface};
+    border: 1px solid {p.border};
     border-radius: {m.radius_md}px;
 }}
-#SelectionCount {{ font-weight: 600; color: {p.text}; }}
+#TableFrame QTableView {{ border: none; border-radius: 0; }}
+QPushButton#PanelStatusButton {{
+    padding: 6px 4px;
+    font-size: 13px;
+    min-height: 16px;
+}}
+
+/* Word details beside the table. */
+#WordPanel {{
+    background-color: {p.surface};
+    border: 1px solid {p.border};
+    border-radius: {m.radius_md}px;
+}}
+QScrollArea#PanelScroll, QScrollArea#PanelScroll > QWidget > QWidget {{
+    background: transparent;
+}}
+#PanelWord {{
+    font-family: {DISPLAY_FONT_STACK};
+    font-size: 26px;
+    font-weight: 600;
+    color: {p.text};
+}}
+#PanelExample {{ color: {p.text_muted}; font-style: italic; }}
 
 QPushButton[variant="danger"] {{
     color: {p.danger};

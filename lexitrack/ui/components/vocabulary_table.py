@@ -10,6 +10,10 @@ and sorting, so filtering thousands of words never touches the database.
 Actions on a selection live in three places that always agree: the selection
 bar, the right-click menu, and single keys on the table (K, U, R, C, M,
 Delete). The table only asks; the page that owns it does the work.
+
+The selection bar floats over the bottom of the table instead of taking a row
+in the layout, so selecting a word never pushes the rows under the pointer
+down. The details panel beside the table shows the current row.
 """
 
 from __future__ import annotations
@@ -19,10 +23,13 @@ from enum import IntEnum
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QEvent,
     QItemSelectionModel,
     QModelIndex,
+    QObject,
     QPersistentModelIndex,
     QPoint,
+    QSettings,
     QSortFilterProxyModel,
     Qt,
     Signal,
@@ -50,6 +57,7 @@ from ...models.word_entry import CEFR_ORDER
 from ...repositories.word_repository import StoredWord
 from ..theme.palette import METRICS
 from .status import STATUS_NAMES, STATUS_ROLE, STATUS_SORT_ORDER, StatusDelegate, status_text
+from .word_panel import WordPanel
 
 #: Sort-key role, so text columns sort naturally and CEFR sorts A1 < C1.
 SORT_ROLE = Qt.ItemDataRole.UserRole + 21
@@ -57,6 +65,10 @@ SORT_ROLE = Qt.ItemDataRole.UserRole + 21
 WORD_ID_ROLE = Qt.ItemDataRole.UserRole + 22
 
 _PLACEHOLDER = "—"
+#: Remembered between runs: whether the details panel is open.
+_SETTINGS_DETAILS = "table/details"
+#: Space between the floating selection bar and the bottom of the table.
+_BAR_MARGIN = 14
 
 
 class Column(IntEnum):
@@ -209,6 +221,7 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
         super().__init__(parent)
         self._search = ""
         self._status: ReviewStatus | None = None
+        self._levels: frozenset[str] = frozenset()
         self.setSortRole(SORT_ROLE)
         self.setDynamicSortFilter(False)
 
@@ -221,6 +234,11 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
         self._status = ReviewStatus(status) if status else None
         self.invalidateFilter()
 
+    def set_levels(self, levels: set[str] | frozenset[str]) -> None:
+        """Show only these CEFR levels; an empty set shows every level."""
+        self._levels = frozenset(levels)
+        self.invalidateFilter()
+
     def filterAcceptsRow(  # noqa: N802
         self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex
     ) -> bool:
@@ -229,6 +247,8 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
             return True
         word = model.word_at(source_row)
         if self._status is not None and word.status != self._status:
+            return False
+        if self._levels and word.cefr_level not in self._levels:
             return False
         if not self._search:
             return True
@@ -250,7 +270,7 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
 
 
 class VocabularyTable(QWidget):
-    """Search, filter, table and a selection toolbar."""
+    """Search and filters, the table, a floating selection bar and a details panel."""
 
     #: The user asked to set a status on these word ids.
     status_requested = Signal(list, object)
@@ -264,8 +284,6 @@ class VocabularyTable(QWidget):
     remove_requested = Signal(list)
     #: "Export selection…" for these word ids.
     export_requested = Signal(list)
-    #: A row was opened (double-click or Enter).
-    open_requested = Signal(int)
     #: The visible row count changed (after filtering or loading).
     count_changed = Signal(int, int)
 
@@ -304,7 +322,7 @@ class VocabularyTable(QWidget):
         self.search.setObjectName("SearchField")
         self.search.setPlaceholderText("Search words and definitions")
         self.search.setClearButtonEnabled(True)
-        self.search.setMinimumWidth(240)
+        self.search.setMinimumWidth(200)
         self.search.textChanged.connect(self._on_search)
         filters.addWidget(self.search, 2)
 
@@ -321,65 +339,32 @@ class VocabularyTable(QWidget):
         self.extra_filters.setSpacing(m.space_2)
         filters.addLayout(self.extra_filters)
 
+        # CEFR level chips, one per level present in the words shown.
+        self.level_chips: dict[str, QPushButton] = {}
+        self._levels_row = QHBoxLayout()
+        self._levels_row.setSpacing(4)
+        filters.addSpacing(m.space_1)
+        filters.addLayout(self._levels_row)
+
         filters.addStretch(1)
         self.count_label = QLabel()
         self.count_label.setObjectName("Faint")
         filters.addWidget(self.count_label)
+
+        self.details_button = QPushButton("Details")
+        self.details_button.setObjectName("DetailsToggle")
+        self.details_button.setCheckable(True)
+        self.details_button.setProperty("size", "small")
+        self.details_button.setToolTip("Show or hide word details")
+        self.details_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.details_button.toggled.connect(self._on_details_toggled)
+        filters.addWidget(self.details_button)
         layout.addLayout(filters)
 
-        # Selection bar, visible only with a selection
-        self.selection_bar = QFrame()
-        self.selection_bar.setObjectName("SelectionBar")
-        bar = QHBoxLayout(self.selection_bar)
-        bar.setContentsMargins(m.space_3, m.space_2, m.space_2, m.space_2)
-        bar.setSpacing(m.space_2)
-        self.selection_count = QLabel()
-        self.selection_count.setObjectName("SelectionCount")
-        bar.addWidget(self.selection_count)
-        bar.addSpacing(m.space_2)
+        # Table and details panel
+        body = QHBoxLayout()
+        body.setSpacing(m.space_3)
 
-        self.mark_known_button = _small_button("✓  Known", "Mark selected as Known (K)")
-        self.mark_unknown_button = _small_button("?  Unknown", "Mark selected as Unknown (U)")
-        self.reset_button = _small_button("Reset", "Reset selected to Not Reviewed (R)")
-        self.mark_known_button.clicked.connect(lambda: self._request_status(ReviewStatus.KNOWN))
-        self.mark_unknown_button.clicked.connect(
-            lambda: self._request_status(ReviewStatus.UNKNOWN)
-        )
-        self.reset_button.clicked.connect(lambda: self._request_status(ReviewStatus.NOT_REVIEWED))
-        for button in (self.mark_known_button, self.mark_unknown_button, self.reset_button):
-            bar.addWidget(button)
-
-        bar.addSpacing(m.space_2)
-        self.copy_button = _small_button(
-            "Copy to  \u25be", "Copy the selection to another list (C)"
-        )
-        self.copy_button.setObjectName("MenuButton")
-        self.copy_button.setMenu(self._target_menu(self.copy_button, self.copy_requested))
-        bar.addWidget(self.copy_button)
-        self.move_button = _small_button(
-            "Move to  \u25be", "Move the selection to another list (M)"
-        )
-        self.move_button.setObjectName("MenuButton")
-        self.move_button.setMenu(self._target_menu(self.move_button, self.move_requested))
-        self.move_button.setVisible(self._allow_move)
-        bar.addWidget(self.move_button)
-        self.remove_button = _small_button("Remove", "Remove the selection from this list (Delete)")
-        self.remove_button.clicked.connect(lambda: self._emit_selection(self.remove_requested))
-        self.remove_button.setVisible(self._allow_remove)
-        bar.addWidget(self.remove_button)
-        self.export_button = _small_button("Export\u2026", "Export the selection")
-        self.export_button.clicked.connect(lambda: self._emit_selection(self.export_requested))
-        bar.addWidget(self.export_button)
-
-        bar.addStretch(1)
-        clear = _small_button("Clear Selection", "Clear selection (Esc)")
-        clear.setProperty("variant", "ghost")
-        clear.clicked.connect(self.clear_selection)
-        bar.addWidget(clear)
-        self.selection_bar.setVisible(False)
-        layout.addWidget(self.selection_bar)
-
-        # Table
         self.model = VocabularyTableModel(self)
         self.proxy = VocabularyFilterProxy(self)
         self.proxy.setSourceModel(self.model)
@@ -405,8 +390,8 @@ class VocabularyTable(QWidget):
         header.setStretchLastSection(True)
 
         widths = {
-            Column.ORDER: 56, Column.WORD: 190, Column.PART_OF_SPEECH: 170, Column.CEFR: 70,
-            Column.STATUS: 150, Column.LISTS: 220, Column.LANGUAGE: 100,
+            Column.ORDER: 56, Column.WORD: 210, Column.PART_OF_SPEECH: 160, Column.CEFR: 64,
+            Column.STATUS: 130, Column.LISTS: 120, Column.LANGUAGE: 100,
         }
         for column in Column:
             self.view.setColumnHidden(column, column not in self._columns)
@@ -416,6 +401,7 @@ class VocabularyTable(QWidget):
             header.moveSection(header.visualIndex(column), position)
 
         self.view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.view.selectionModel().currentRowChanged.connect(self._on_current_changed)
         self.view.doubleClicked.connect(self._on_open)
         self.view.key_status.connect(self._request_status)
         self.view.key_open.connect(lambda: self._on_open(self.view.currentIndex()))
@@ -423,17 +409,98 @@ class VocabularyTable(QWidget):
         self.view.key_pick.connect(self._on_key_pick)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.view, 1)
+        # The table sits in a frame with room at the bottom that opens while
+        # the selection bar floats there, so no row is ever hidden under it.
+        self.table_frame = QFrame()
+        self.table_frame.setObjectName("TableFrame")
+        self.table_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        frame_layout = QVBoxLayout(self.table_frame)
+        frame_layout.setContentsMargins(1, 1, 1, 1)
+        frame_layout.setSpacing(0)
+        frame_layout.addWidget(self.view, 1)
+        self._bar_space = QWidget()
+        self._bar_space.setObjectName("PanelBody")
+        self._bar_space.setFixedHeight(0)
+        frame_layout.addWidget(self._bar_space)
+        body.addWidget(self.table_frame, 1)
+
+        self.panel = WordPanel()
+        self.panel.status_requested.connect(
+            lambda word_id, status: self.status_requested.emit([word_id], status)
+        )
+        body.addWidget(self.panel)
+        layout.addLayout(body, 1)
+
+        self._build_selection_bar()
+        self.table_frame.installEventFilter(self)
 
         QShortcut(QKeySequence("Ctrl+F"), self, activated=self.search.setFocus)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self.view, activated=self.clear_selection)
+
+        visible = QSettings().value(_SETTINGS_DETAILS, True) in (True, "true", "1", 1)
+        self.details_button.setChecked(visible)
+        self.panel.setVisible(visible)
+
+    def _build_selection_bar(self) -> None:
+        """The floating bar: count · status · transfer · more · close."""
+        self.selection_bar = QFrame(self)
+        self.selection_bar.setObjectName("SelectionBar")
+        self.selection_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        bar = QHBoxLayout(self.selection_bar)
+        bar.setContentsMargins(18, 6, 6, 6)
+        bar.setSpacing(2)
+        self.selection_count = QLabel()
+        self.selection_count.setObjectName("SelectionCount")
+        bar.addWidget(self.selection_count)
+        bar.addSpacing(8)
+        bar.addWidget(_divider())
+
+        self.mark_known_button = _bar_button("✓  Known", "Mark Known (K)")
+        self.mark_unknown_button = _bar_button("?  Unknown", "Mark Unknown (U)")
+        self.reset_button = _bar_button("↺  Reset", "Reset to Not Reviewed (R)")
+        self.mark_known_button.clicked.connect(lambda: self._request_status(ReviewStatus.KNOWN))
+        self.mark_unknown_button.clicked.connect(
+            lambda: self._request_status(ReviewStatus.UNKNOWN)
+        )
+        self.reset_button.clicked.connect(lambda: self._request_status(ReviewStatus.NOT_REVIEWED))
+        for button in (self.mark_known_button, self.mark_unknown_button, self.reset_button):
+            bar.addWidget(button)
+        bar.addWidget(_divider())
+
+        self.copy_button = _bar_button("Copy to  ▾", "Copy to another list (C)")
+        self.copy_button.setMenu(self._target_menu(self.copy_button, self.copy_requested))
+        bar.addWidget(self.copy_button)
+        self.move_button = _bar_button("Move to  ▾", "Move to another list (M)")
+        self.move_button.setMenu(self._target_menu(self.move_button, self.move_requested))
+        self.move_button.setVisible(self._allow_move)
+        bar.addWidget(self.move_button)
+
+        self.more_button = _bar_button("More  ▾", "Export or remove the selection")
+        more = QMenu(self.more_button)
+        self.export_action = more.addAction(
+            "Export Selection…", lambda: self._emit_selection(self.export_requested)
+        )
+        self.remove_action = more.addAction(
+            "Remove from This List…", lambda: self._emit_selection(self.remove_requested)
+        )
+        self.remove_action.setVisible(self._allow_remove)
+        self.more_button.setMenu(more)
+        bar.addWidget(self.more_button)
+
+        self.clear_button = _bar_button("✕", "Clear selection (Esc)")
+        self.clear_button.setAccessibleName("Clear selection")
+        self.clear_button.clicked.connect(self.clear_selection)
+        bar.addWidget(self.clear_button)
+        self.selection_bar.hide()
 
     # -- content -----------------------------------------------------------
 
     def set_words(self, words: Sequence[StoredWord]) -> None:
         self.model.set_words(words)
         self._fit_order_column()
+        self._rebuild_level_chips()
         self._update_counts()
+        self._on_current_changed()
 
     def _fit_order_column(self) -> None:
         """Size the # column to its widest number.
@@ -447,18 +514,55 @@ class VocabularyTable(QWidget):
         needed = self.view.fontMetrics().horizontalAdvance(widest) + order_cell_margin(self.view)
         self.view.setColumnWidth(Column.ORDER, max(needed, 56))
 
+    def _rebuild_level_chips(self) -> None:
+        present = {w.cefr_level for w in self.model.words if w.cefr_level in CEFR_ORDER}
+        levels = [level for level in CEFR_ORDER if level in present]
+        if len(levels) < 2:
+            levels = []
+        if levels == list(self.level_chips):
+            self._on_levels()
+            return
+        checked = {level for level, chip in self.level_chips.items() if chip.isChecked()}
+        for chip in self.level_chips.values():
+            self._levels_row.removeWidget(chip)
+            chip.deleteLater()
+        self.level_chips = {}
+        # A single level filters nothing, so chips appear only when there is a choice.
+        for level in levels:
+            chip = QPushButton(level)
+            chip.setObjectName("LevelChip")
+            chip.setCheckable(True)
+            chip.setChecked(level in checked)
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setToolTip(f"Show only {level} words. Choose more levels to combine them.")
+            chip.toggled.connect(self._on_levels)
+            self._levels_row.addWidget(chip)
+            self.level_chips[level] = chip
+        self._on_levels()
+
     def refresh_words(self, words: Sequence[StoredWord]) -> None:
         """Update rows in place, keeping selection and scroll position."""
         self.model.update_words(words)
         self._update_counts()
+        self._on_current_changed()
 
     def remove_word_ids(self, word_ids: Sequence[int]) -> None:
         self.model.remove_ids(set(word_ids))
         self._update_counts()
+        self._on_current_changed()
 
     def set_remove_allowed(self, allowed: bool) -> None:
         self._allow_remove = allowed
-        self.remove_button.setVisible(allowed)
+        self.remove_action.setVisible(allowed)
+
+    def hide_status_action(self, status: ReviewStatus) -> None:
+        """Leave out a status action that means nothing where the table is used."""
+        {
+            ReviewStatus.KNOWN: self.mark_known_button,
+            ReviewStatus.UNKNOWN: self.mark_unknown_button,
+            ReviewStatus.NOT_REVIEWED: self.reset_button,
+        }[status].setVisible(False)
+        self.panel.hide_status(status)
 
     def set_target_provider(self, provider: Callable[[list[int]], list[tuple[int, str]]]) -> None:
         """Tell the table which lists the selection may be copied or moved to."""
@@ -484,6 +588,7 @@ class VocabularyTable(QWidget):
         wanted = set(word_ids)
         selection = self.view.selectionModel()
         selection.clearSelection()
+        first = None
         for row in range(self.proxy.rowCount()):
             index = self.proxy.index(row, Column.WORD)
             if index.data(WORD_ID_ROLE) in wanted:
@@ -492,6 +597,14 @@ class VocabularyTable(QWidget):
                     QItemSelectionModel.SelectionFlag.Select
                     | QItemSelectionModel.SelectionFlag.Rows,
                 )
+                if first is None:
+                    first = index
+        if first is not None:
+            selection.setCurrentIndex(first, QItemSelectionModel.SelectionFlag.NoUpdate)
+            self.view.scrollTo(first)
+
+    def show_details(self, visible: bool = True) -> None:
+        self.details_button.setChecked(visible)
 
     # -- internals ---------------------------------------------------------
 
@@ -501,6 +614,12 @@ class VocabularyTable(QWidget):
 
     def _on_status_filter(self) -> None:
         self.proxy.set_status(self.status_filter.currentData())
+        self._update_counts()
+
+    def _on_levels(self, *_args) -> None:
+        self.proxy.set_levels(
+            {level for level, chip in self.level_chips.items() if chip.isChecked()}
+        )
         self._update_counts()
 
     def _update_counts(self) -> None:
@@ -514,8 +633,49 @@ class VocabularyTable(QWidget):
 
     def _on_selection_changed(self, *_args) -> None:
         count = len(self.view.selectionModel().selectedRows())
-        self.selection_bar.setVisible(count > 0)
         self.selection_count.setText(f"{count:,} selected")
+        showing = count > 0
+        self.selection_bar.setVisible(showing)
+        if showing:
+            self._place_selection_bar()
+        # Keep the last rows reachable above the bar instead of under it.
+        self._bar_space.setFixedHeight(
+            self.selection_bar.sizeHint().height() + 2 * _BAR_MARGIN if showing else 0
+        )
+
+    def _place_selection_bar(self) -> None:
+        bar = self.selection_bar
+        bar.adjustSize()
+        area = self.table_frame.geometry()
+        x = area.left() + (area.width() - bar.width()) // 2
+        # In a narrow window the bar may be wider than the table; keep it on screen.
+        x = min(max(x, 0), max(self.width() - bar.width(), 0))
+        y = area.bottom() - bar.height() - _BAR_MARGIN + 1
+        bar.move(x, max(y, 0))
+        bar.raise_()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self.table_frame and event.type() in (
+            QEvent.Type.Resize, QEvent.Type.Move
+        ):
+            if not self.selection_bar.isHidden():
+                self._place_selection_bar()
+        return super().eventFilter(watched, event)
+
+    def _on_current_changed(self, *_args) -> None:
+        index = self.view.currentIndex()
+        if not index.isValid():
+            rows = self.view.selectionModel().selectedRows()
+            index = rows[0] if rows else index
+        if not index.isValid():
+            self.panel.show_word(None)
+            return
+        source = self.proxy.mapToSource(index)
+        self.panel.show_word(self.model.word_at(source.row()))
+
+    def _on_details_toggled(self, visible: bool) -> None:
+        self.panel.setVisible(visible)
+        QSettings().setValue(_SETTINGS_DETAILS, visible)
 
     def _request_status(self, status: ReviewStatus) -> None:
         ids = self.selected_ids()
@@ -524,7 +684,7 @@ class VocabularyTable(QWidget):
 
     def _on_open(self, index: QModelIndex) -> None:
         if index.isValid():
-            self.open_requested.emit(int(index.data(WORD_ID_ROLE)))
+            self.show_details(True)
 
     def _on_key_remove(self) -> None:
         ids = self.selected_ids()
@@ -558,7 +718,7 @@ class VocabularyTable(QWidget):
         if not targets:
             menu.addAction("No other list can take these words").setEnabled(False)
         menu.addSeparator()
-        menu.addAction("New List\u2026", lambda: signal.emit(self.selected_ids(), NEW_LIST_ID))
+        menu.addAction("New List…", lambda: signal.emit(self.selected_ids(), NEW_LIST_ID))
 
     def _show_context_menu(self, pos: QPoint) -> None:
         index = self.view.indexAt(pos)
@@ -577,11 +737,15 @@ class VocabularyTable(QWidget):
 
     def build_context_menu(self) -> QMenu:
         menu = QMenu(self.view)
-        for status, text, key in (
-            (ReviewStatus.KNOWN, "Mark Known", "K"),
-            (ReviewStatus.UNKNOWN, "Mark Unknown", "U"),
-            (ReviewStatus.NOT_REVIEWED, "Reset to Not Reviewed", "R"),
+        for status, text, key, button in (
+            (ReviewStatus.KNOWN, "Mark Known", "K", self.mark_known_button),
+            (ReviewStatus.UNKNOWN, "Mark Unknown", "U", self.mark_unknown_button),
+            (ReviewStatus.NOT_REVIEWED, "Reset to Not Reviewed", "R", self.reset_button),
         ):
+            # isHidden is the button's own flag: switched off for this table,
+            # regardless of whether the bar around it is showing.
+            if button.isHidden():
+                continue
             action = menu.addAction(text, lambda s=status: self._request_status(s))
             action.setShortcut(QKeySequence(key))
         menu.addSeparator()
@@ -594,15 +758,13 @@ class VocabularyTable(QWidget):
             )
         if self._allow_remove:
             remove = menu.addAction(
-                "Remove from This List\u2026", lambda: self._emit_selection(self.remove_requested)
+                "Remove from This List…", lambda: self._emit_selection(self.remove_requested)
             )
             remove.setShortcut(QKeySequence(Qt.Key.Key_Delete))
-        menu.addAction("Export\u2026", lambda: self._emit_selection(self.export_requested))
+        menu.addAction("Export…", lambda: self._emit_selection(self.export_requested))
         if len(self.selected_ids()) == 1:
             menu.addSeparator()
-            details = menu.addAction(
-                "Word Details", lambda: self._on_open(self.view.currentIndex())
-            )
+            details = menu.addAction("Word Details", lambda: self.show_details(True))
             details.setShortcut(QKeySequence(Qt.Key.Key_Return))
         return menu
 
@@ -660,9 +822,17 @@ class _KeyboardTableView(QTableView):
         super().keyPressEvent(event)
 
 
-def _small_button(text: str, tooltip: str) -> QPushButton:
+def _bar_button(text: str, tooltip: str) -> QPushButton:
     button = QPushButton(text)
-    button.setProperty("size", "small")
+    button.setObjectName("BarButton")
     button.setToolTip(tooltip)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
     return button
+
+
+def _divider() -> QFrame:
+    line = QFrame()
+    line.setObjectName("BarDivider")
+    line.setFixedSize(1, 18)
+    return line

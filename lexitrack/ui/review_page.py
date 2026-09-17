@@ -3,7 +3,7 @@
 The strip across the top always answers "which list am I reviewing?" — the
 list's name is the largest text on it, and it doubles as the control for
 switching lists. Where the words came from is not shown here; that is
-provenance, and it lives on the card ("Source: …") and in word details.
+provenance, and it lives on the card ("Source: …") and in the details panel.
 
 Switching between Flashcard and List never changes the list, and never loses
 the flashcard session's Backspace history: the session belongs to the page,
@@ -36,7 +36,7 @@ from ..services.vocabulary_service import VocabularyService
 from .components.cards import ModeSwitch
 from .components.toast import Toast
 from .components.vocabulary_table import Column, VocabularyTable
-from .dialogs import WordDialog, confirm
+from .dialogs import confirm
 from .empty_state import EmptyState
 from .list_actions import ListActions
 from .progress_widget import StatsBar
@@ -188,11 +188,11 @@ class ReviewPage(QWidget):
         self.table.set_target_provider(self._transfer_targets)
         self.table.remove_requested.connect(self._remove_from_list)
         self.table.export_requested.connect(self._export_selection)
-        self.table.open_requested.connect(self._open_word)
         holder_layout.addWidget(self.table)
         self.modes.addWidget(holder)
 
         self.toast = Toast(holder)
+        self.toast.avoid(self.table.selection_bar)
         self.transfer = WordTransfer(self._service, self.toast, self)
         self.transfer.changed.connect(self._after_transfer)
 
@@ -365,17 +365,6 @@ class ReviewPage(QWidget):
     def _export_selection(self, word_ids: list[int]) -> None:
         if self.list_id is not None:
             self._actions.export_list(self.list_id, word_ids)
-
-    def _open_word(self, word_id: int) -> None:
-        word = self._service.get_word(word_id)
-        if word is None:
-            return
-        dialog = WordDialog(self._service, word, parent=self)
-        dialog.status_changed.connect(
-            lambda wid: self.table.refresh_words(self._service.get_words([wid]))
-        )
-        dialog.exec()
-        self._after_change()
 
     def _after_change(self, reload: bool = False) -> None:
         if self.list_id is not None:

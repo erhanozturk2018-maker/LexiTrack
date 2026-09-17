@@ -8,8 +8,9 @@ around one question: how fast can someone answer a word and see the next one?
   It is labelled "Source" on purpose — the *list* being reviewed is shown by
   the page around the card, and the two are never presented as the same thing.
 * Two answer buttons of equal size and weight. Neither is the "right" answer.
-* A keyboard path for everything, printed where it is used. Arrows move;
-  letters act — so an arrow key can never change an answer by accident:
+* A keyboard path for everything. Arrows move; letters act — so an arrow key
+  can never change an answer by accident. The keys are listed in Keyboard
+  Shortcuts (F1) and the Ctrl+K palette rather than printed under the card:
 
   ======================  ==============================================
   K                       I Know
@@ -181,14 +182,6 @@ class ReviewWidget(QWidget):
         centred.addWidget(card, 10)
         centred.addStretch(1)
         outer.addLayout(centred)
-
-        self._hint_label = QLabel(
-            "K — I Know     ·     U — I Don't Know     ·     "
-            "← → previous / next     ·     Enter — repeat     ·     R — reset"
-        )
-        self._hint_label.setObjectName("ShortcutHint")
-        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(self._hint_label)
         outer.addStretch(1)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -217,7 +210,7 @@ class ReviewWidget(QWidget):
         if item.is_history:
             steps = "1 word back" if item.steps_back == 1 else f"{item.steps_back} words back"
             self._history_banner.setText(
-                f"Earlier word · {steps} · → moves on without changing it"
+                f"Earlier word · {steps} · its answer is kept unless you change it"
             )
             self._history_banner.setVisible(True)
             self._position_label.setText("Reviewing an earlier answer")
@@ -284,7 +277,7 @@ class ReviewWidget(QWidget):
 
 
 def _answer_button(text: str, shortcut_key: str, variant: str) -> QPushButton:
-    button = QPushButton(f"{text}    {shortcut_key}")
+    button = QPushButton(text)
     button.setProperty("variant", variant)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(f"{text}  (shortcut: {shortcut_key})")

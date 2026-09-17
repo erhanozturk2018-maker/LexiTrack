@@ -488,15 +488,6 @@ def test_a_deleted_current_list_falls_back_to_another(window, loaded) -> None:
     assert window.review.list_button.text().startswith("Other")
 
 
-def test_the_theme_button_names_the_theme_it_switches_to(window) -> None:
-    window._theme.apply(ThemeName.LIGHT)
-    window._update_theme_labels()
-    assert window.theme_button.text() == "Dark"
-    window.toggle_theme()
-    assert window._theme.current is ThemeName.DARK
-    assert window.theme_button.text() == "Light"
-
-
 # -- dialogs ---------------------------------------------------------------
 
 
@@ -716,19 +707,6 @@ def test_declining_the_delete_keeps_the_list(window, loaded, monkeypatch) -> Non
     monkeypatch.setattr(list_actions, "confirm", lambda *a: False)
     assert not window.actions.delete_list(loaded.lists()[0].id)
     assert len(loaded.lists()) == 1
-
-
-def test_word_dialog_changes_status_explicitly(qapp, loaded) -> None:
-    from lexitrack.ui.dialogs import WordDialog
-
-    target = loaded.list_words(loaded.lists()[0].id)[0]
-    dialog = WordDialog(loaded, target)
-    assert not dialog._buttons[ReviewStatus.NOT_REVIEWED].isEnabled()
-
-    dialog._buttons[ReviewStatus.UNKNOWN].click()
-
-    assert loaded.get_word(target.id).status is ReviewStatus.UNKNOWN
-    assert dialog.badge.text().endswith("Unknown")
 
 
 def test_order_numbers_are_never_cut_off(qtbot, theme) -> None:
@@ -1018,3 +996,250 @@ def test_ctrl_l_switches_list_from_the_keyboard(window, loaded, monkeypatch) -> 
 
     assert window.current_page == REVIEW
     assert window.review.list_id == other.id
+
+
+# -- export preview ----------------------------------------------------------
+
+
+def test_export_orders_words_alphabetically_or_by_cefr(
+    qapp, service, tmp_path, monkeypatch
+) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from lexitrack.services.export_service import ExportFormat
+    from lexitrack.ui.export_dialog import ExportDialog, ExportOrder, ExportScope
+
+    target = service.create_list("Levels", "en")
+    for text, level in (("zebra", "A1"), ("apple", "B2"), ("mango", "A1")):
+        service.add_word(target.id, text, cefr_level=level)
+    out = tmp_path / "levels.json"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(out), ""))
+    )
+    scope = ExportScope("All", lambda: service.export_content_for_list(target.id))
+
+    def exported(order: ExportOrder) -> list[str]:
+        dialog = ExportDialog(service, [scope])
+        dialog._format_buttons[ExportFormat.JSON].click()
+        dialog._order_buttons[order].setChecked(True)
+        dialog._export()
+        words = json.loads(out.read_text(encoding="utf-8"))["words"]
+        return [w["word"] if isinstance(w, dict) else w for w in words]
+
+    assert exported(ExportOrder.LIST) == ["zebra", "apple", "mango"]
+    assert exported(ExportOrder.ALPHABETICAL) == ["apple", "mango", "zebra"]
+    assert exported(ExportOrder.CEFR) == ["mango", "zebra", "apple"]
+
+
+def test_export_preview_shows_the_file_before_saving(qtbot, loaded) -> None:
+    from lexitrack.services.export_service import ExportFormat
+    from lexitrack.ui.export_dialog import ExportDialog, ExportScope
+
+    list_id = loaded.lists()[0].id
+    scope = ExportScope("All", lambda: loaded.export_content_for_list(list_id))
+    dialog = ExportDialog(loaded, [scope])
+    qtbot.addWidget(dialog)
+
+    dialog._render_preview()
+    assert dialog.selected_format() is ExportFormat.PDF
+    assert not dialog.page_view.pixmap().isNull()
+    assert dialog.summary.text().startswith("5 words")
+
+    dialog._format_buttons[ExportFormat.CSV].click()
+    dialog._render_preview()
+    assert dialog.text_view.toPlainText().startswith("Word,")
+    assert dialog.written is None
+
+
+def test_export_remembers_format_and_order(qapp, loaded, tmp_path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from lexitrack.services.export_service import ExportFormat
+    from lexitrack.ui.export_dialog import ExportDialog, ExportOrder, ExportScope
+
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(tmp_path / "out.csv"), "")),
+    )
+    list_id = loaded.lists()[0].id
+    scope = ExportScope("All", lambda: loaded.export_content_for_list(list_id))
+    first = ExportDialog(loaded, [scope])
+    first._format_buttons[ExportFormat.CSV].click()
+    first._order_buttons[ExportOrder.CEFR].setChecked(True)
+    first._export()
+
+    second = ExportDialog(loaded, [scope])
+    assert second.selected_format() is ExportFormat.CSV
+    assert second.selected_order() is ExportOrder.CEFR
+
+
+def test_export_reports_the_result_in_a_toast(window, loaded, tmp_path, monkeypatch) -> None:
+    from PySide6.QtWidgets import QFileDialog
+
+    from lexitrack.ui.components.toast import Toast
+    from lexitrack.ui.export_dialog import ExportDialog, ExportScope
+
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(tmp_path / "out.pdf"), "")),
+    )
+    list_id = loaded.lists()[0].id
+    scope = ExportScope("All", lambda: loaded.export_content_for_list(list_id))
+    ExportDialog(loaded, [scope], parent=window)._export()
+
+    toasts = [t for t in window.findChildren(Toast) if t.property("window_toast")]
+    assert toasts and "Exported 5 words" in toasts[0].message.text()
+    assert toasts[0].undo_button.text() == "Open Folder"
+
+
+# -- floating selection bar, level chips, details panel ----------------------
+
+
+def test_the_selection_bar_floats_instead_of_pushing_the_rows(qtbot, table) -> None:
+    table.resize(1200, 500)
+    table.show()
+    qtbot.waitExposed(table)
+    top_before = table.view.mapTo(table, table.view.rect().topLeft()).y()
+
+    table.select_ids([1])
+
+    assert table.selection_bar.parentWidget() is table
+    assert table.view.mapTo(table, table.view.rect().topLeft()).y() == top_before
+    assert table._bar_space.height() > 0
+    bar = table.selection_bar.geometry()
+    assert table.table_frame.geometry().contains(bar)
+    table.clear_selection()
+    assert table._bar_space.height() == 0
+
+
+def test_level_chips_filter_by_cefr(table) -> None:
+    assert list(table.level_chips) == ["A2", "B2", "C1"]
+    table.level_chips["A2"].setChecked(True)
+    assert visible_words(table) == ["ability", "able"]
+    table.level_chips["C1"].setChecked(True)
+    assert visible_words(table) == ["ability", "able", "absorb"]
+    table.level_chips["A2"].setChecked(False)
+    table.level_chips["C1"].setChecked(False)
+    assert len(visible_words(table)) == 4
+
+
+def test_details_panel_follows_the_current_row(qtbot, table) -> None:
+    table.show_details(True)
+    table.select_ids([1])
+    assert table.panel.title.text() == "abandon"
+    assert table.panel.definition.text() == "to leave"
+    assert not table.panel.buttons[ReviewStatus.KNOWN].isEnabled()
+
+    requested: list = []
+    table.status_requested.connect(lambda ids, status: requested.append((ids, status)))
+    table.panel.buttons[ReviewStatus.UNKNOWN].click()
+    assert requested == [([1], ReviewStatus.UNKNOWN)]
+
+    table.select_ids([3])
+    assert table.panel.title.text() == "able"
+    assert table.panel.definition.text() == "No definition yet"
+
+
+def test_enter_opens_the_details_panel(qtbot, table) -> None:
+    table.show_details(False)
+    table.select_ids([2])
+    table.view.setCurrentIndex(table.proxy.index(1, Column.WORD))
+    qtbot.keyClick(table.view, Qt.Key.Key_Return)
+    assert table.details_button.isChecked()
+    assert not table.panel.isHidden()
+
+
+def test_details_panel_changes_status_through_the_page(window, loaded) -> None:
+    list_id = loaded.lists()[0].id
+    window.open_review(list_id, ModeSwitch.LIST)
+    table = window.review.table
+    target = table.model.words[0]
+    table.select_ids([target.id])
+
+    table.panel.buttons[ReviewStatus.UNKNOWN].click()
+
+    assert loaded.get_word(target.id).status is ReviewStatus.UNKNOWN
+    assert table.panel.badge.text().endswith("Unknown")
+
+
+def test_unknown_words_has_no_status_column_or_unknown_action(window) -> None:
+    table = window.unknown.table
+    assert table.view.isColumnHidden(Column.STATUS)
+    assert table.mark_unknown_button.isHidden()
+    assert table.panel.buttons[ReviewStatus.UNKNOWN].isHidden()
+    assert table.reset_button.text().endswith("Reset")
+
+
+# -- app bar, command palette, shortcuts -------------------------------------
+
+
+def test_there_is_no_separate_menu_bar(window) -> None:
+    from PySide6.QtWidgets import QMenuBar
+
+    assert window.findChild(QMenuBar) is None
+    window._fill_app_menu()
+    titles = [a.text() for a in window.app_menu.actions() if a.text()]
+    assert "Export…" in titles and "Keyboard Shortcuts" in titles and "Quit" in titles
+
+
+def test_the_theme_button_says_which_theme_it_switches_to(window) -> None:
+    window._theme.apply(ThemeName.LIGHT)
+    window._update_theme_labels()
+    assert window.theme_button.accessibleName() == "Switch to dark mode"
+    window.toggle_theme()
+    assert window._theme.current is ThemeName.DARK
+    assert window.theme_button.accessibleName() == "Switch to light mode"
+
+
+def test_command_palette_runs_a_command(window, monkeypatch) -> None:
+    ran: list[str] = []
+    monkeypatch.setattr(window, "show_shortcuts", lambda: ran.append("shortcuts"))
+    palette = window.open_palette()
+    palette.search.setText("keyboard")
+    item = palette.results.currentItem()
+    assert item.text() == "Keyboard Shortcuts"
+    palette._run_item(item)
+    assert ran == ["shortcuts"]
+
+
+def test_command_palette_finds_a_word_and_opens_it(window, loaded) -> None:
+    window.show_page(HOME)
+    palette = window.open_palette()
+    palette.search.setText("gamm")
+    item = palette.results.currentItem()
+    assert item.text() == "gamma"
+    palette._run_item(item)
+
+    assert window.current_page == REVIEW
+    assert window.review.mode == ModeSwitch.LIST
+    table = window.review.table
+    assert [table.model.word_at(i).word for i in range(table.model.rowCount())
+            if table.model.word_at(i).id in table.selected_ids()] == ["gamma"]
+    assert table.panel.title.text() == "gamma"
+
+
+def test_shortcuts_window_fits_the_screen_and_filters(qtbot, window) -> None:
+    from lexitrack.ui.shortcuts_dialog import ShortcutsDialog
+
+    dialog = ShortcutsDialog(window.shortcut_sections(), parent=window)
+    qtbot.addWidget(dialog)
+    available = dialog.screen().availableGeometry().height()
+    assert dialog.height() <= available * 0.8 + 1
+
+    dialog.filter.setText("export")
+    visible = [text.text() for _caps, text, _h in dialog._rows if not text.isHidden()]
+    assert visible == ["Export"]
+    keys = {keys for _title, entries in window.shortcut_sections() for keys, _ in entries}
+    assert {"Ctrl+K", "Ctrl+E", "F1", "K"} <= keys
+
+
+def test_the_flashcard_prints_no_shortcut_line(qapp) -> None:
+    widget = ReviewWidget()
+    assert not hasattr(widget, "_hint_label")
+    assert widget._known_button.text() == "I Know"
+
+
+def test_the_unknown_tile_opens_unknown_words(qtbot, window) -> None:
+    window.show_page(HOME)
+    qtbot.mouseClick(window.home.unknown_tile, Qt.MouseButton.LeftButton)
+    assert window.current_page == UNKNOWN

@@ -129,12 +129,6 @@ QToolTip {{
     background: transparent;
 }}
 
-#ShortcutHint {{
-    font-size: 12px;
-    color: {p.text_faint};
-    background: transparent;
-}}
-
 /* --------------------------------------------------------- empty states */
 
 #EmptyTitle {{
