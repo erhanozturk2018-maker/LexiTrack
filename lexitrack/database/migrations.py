@@ -25,10 +25,11 @@ from datetime import datetime
 from pathlib import Path
 
 from ..core.errors import StorageError
+from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class MigrationError(StorageError):
@@ -276,8 +277,105 @@ def _migrate_1_to_2(connection: sqlite3.Connection) -> None:
         raise MigrationError("Upgrade changed review progress; it was rolled back.")
 
 
+
+
+# -- version 2 -> 3 ----------------------------------------------------------
+#
+# Version 3 adds the learning engine: study plans, SRS cards, review logs and
+# the settings both the UI and the Telegram thread read. It changes nothing
+# that already exists — no column is added to words, lists or user_word_state
+# — so the upgrade is the DDL in learning.sql plus two conveniences:
+#
+#   * the settings table is seeded with its defaults, and
+#   * the user's existing vocabulary becomes a study plan, so the app opens
+#     with something to study instead of an empty plan editor.
+#
+# The plan is built from the largest existing list, not from all of them: a
+# plan is a deliberate scope, and "everything at once" is rarely what someone
+# means by "what am I studying now". Other lists are one click away.
+
+_LEARNING_SCHEMA = Path(__file__).with_name("learning.sql")
+
+
+def _migrate_2_to_3(connection: sqlite3.Connection) -> None:
+    _run_sql(connection, _LEARNING_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+    _create_initial_plan(connection)
+
+
+def _run_sql(connection: sqlite3.Connection, script: str) -> None:
+    """Execute a .sql file statement by statement, inside the open transaction.
+
+    ``executescript`` commits whatever transaction is open before it runs, so
+    it cannot be used here: the step must stay atomic and roll back as a unit.
+    """
+    statement = ""
+    for line in script.splitlines():
+        if line.strip().startswith("--"):
+            continue
+        statement += line + "\n"
+        if sqlite3.complete_statement(statement):
+            if statement.strip():
+                connection.execute(statement)
+            statement = ""
+    if statement.strip():
+        connection.execute(statement)
+
+
+def _create_initial_plan(connection: sqlite3.Connection) -> None:
+    """Make the largest existing list into the active study plan."""
+    row = connection.execute(
+        """
+        SELECT l.id, l.name, l.language, COUNT(lw.word_id) AS words
+        FROM lists l
+        LEFT JOIN list_words lw ON lw.list_id = l.id
+        GROUP BY l.id
+        ORDER BY words DESC, l.id
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return
+
+    name = f"{row['name']} Study Plan"
+    cursor = connection.execute(
+        """
+        INSERT INTO study_plans (name, language, description, is_active)
+        VALUES (?, ?, ?, 1)
+        """,
+        (
+            name,
+            row["language"],
+            "Created when LexiTrack upgraded to version 0.3.",
+        ),
+    )
+    plan_id = int(cursor.lastrowid)
+    connection.execute(
+        "INSERT INTO study_plan_lists (plan_id, list_id, position) VALUES (?, ?, 0)",
+        (plan_id, row["id"]),
+    )
+    connection.execute(
+        "UPDATE app_settings SET value = ?, updated_at = datetime('now') WHERE key = ?",
+        (str(plan_id), "active_plan_id"),
+    )
+    log.info("Created study plan %r from list %r", name, row["name"])
+
+
+def seed_settings(connection: sqlite3.Connection) -> None:
+    """Insert any setting that is missing, leaving existing values alone.
+
+    Called when a database is created and after every upgrade, so a setting
+    added in a later version appears without its own migration step, and a
+    value the user changed is never overwritten.
+    """
+    connection.executemany(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+        list(DEFAULT_SETTINGS.items()),
+    )
+
 _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
+    2: _migrate_2_to_3,
 }
 
 

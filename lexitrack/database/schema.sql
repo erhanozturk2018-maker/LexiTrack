@@ -1,4 +1,4 @@
--- LexiTrack schema, version 2.
+-- LexiTrack schema, version 3.
 --
 -- This file creates a *new* database. An existing database is never run
 -- through it; it is upgraded step by step by migrations.py instead, and a test
@@ -12,6 +12,22 @@
 --   lists             what the user has chosen to study
 --   list_words        which words belong to which list (many-to-many)
 --   user_word_state   what the user knows, per word, independent of lists
+--
+-- Version 3 adds the learning engine on top, without changing any of the
+-- above:
+--
+--   study_plans       what the user is actively learning right now
+--   study_plan_lists  which lists a plan draws its words from
+--   srs_cards         the schedule of a word that has been introduced
+--   review_logs       every rating ever given: the learning history
+--   review_sessions   one sitting, so a Telegram session can be resumed
+--   telegram_updates  handled callback ids, so one tap is one review
+--   app_settings      settings both the UI and the bot must agree on
+--   runtime_state     what the app knows about its own last run
+--
+-- Known/Unknown (user_word_state) and the schedule (srs_cards) are separate on
+-- purpose: the first is the user's broad judgement of a word, the second only
+-- exists for words that entered an active study plan.
 --
 -- "Oxford 3000" can be both a source and a list. They are still different
 -- rows with different meanings: the source records where words came from, the

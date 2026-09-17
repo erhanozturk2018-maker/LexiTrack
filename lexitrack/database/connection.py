@@ -16,11 +16,16 @@ from pathlib import Path
 
 from ..core import paths
 from ..core.errors import StorageError
-from .migrations import SCHEMA_VERSION, migrate, read_version
+from .migrations import SCHEMA_VERSION, migrate, read_version, seed_settings
 
 log = logging.getLogger(__name__)
 
-_SCHEMA_FILE = Path(__file__).with_name("schema.sql")
+#: Run in order for a new database. ``learning.sql`` is also run by the
+#: version 2 → 3 migration, so both paths produce the same tables.
+_SCHEMA_FILES = (
+    Path(__file__).with_name("schema.sql"),
+    Path(__file__).with_name("learning.sql"),
+)
 
 
 class Database:
@@ -106,10 +111,14 @@ class Database:
 
         if version is None:
             try:
-                self._connection.executescript(_SCHEMA_FILE.read_text(encoding="utf-8"))
+                for schema_file in _SCHEMA_FILES:
+                    self._connection.executescript(
+                        schema_file.read_text(encoding="utf-8")
+                    )
                 self._connection.execute(
                     "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
                 )
+                seed_settings(self._connection)
             except (sqlite3.Error, OSError) as exc:
                 log.exception("Schema creation failed for %s", self.path)
                 raise StorageError(

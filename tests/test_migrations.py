@@ -78,7 +78,7 @@ def rows(db: Database, sql: str, params=()) -> list[tuple]:
 
 
 def test_a_version_1_database_is_upgraded_on_open(migrated: Database) -> None:
-    assert read_version(migrated.connection) == SCHEMA_VERSION == 2
+    assert read_version(migrated.connection) == SCHEMA_VERSION == 3
 
 
 def test_a_backup_is_taken_before_upgrading(v1_path: Path, migrated: Database) -> None:
@@ -314,3 +314,84 @@ def test_duplicate_source_names_get_distinct_list_names(tmp_path: Path) -> None:
     finally:
         db.close()
     assert names == ["Oxford 3000", "Oxford 5000", "Novel", "novel (2)"]
+
+
+# -- version 2 -> 3: the learning engine ------------------------------------
+
+
+def test_the_learning_tables_are_created_by_the_upgrade(migrated: Database) -> None:
+    tables = {
+        row[0]
+        for row in migrated.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    assert {
+        "study_plans", "study_plan_lists", "srs_cards", "review_logs",
+        "review_sessions", "telegram_updates", "app_settings", "runtime_state",
+    } <= tables
+
+
+def test_settings_are_seeded_with_their_defaults(migrated: Database) -> None:
+    from lexitrack.models.settings import DEFAULT_SETTINGS
+
+    stored = dict(rows(migrated, "SELECT key, value FROM app_settings"))
+    # active_plan_id is set by the upgrade itself; everything else is a default.
+    assert set(stored) == set(DEFAULT_SETTINGS)
+    assert stored["new_words_per_day"] == "25"
+    assert stored["review_capacity_per_day"] == "250"
+    assert stored["telegram_enabled"] == "false"
+    assert stored["developer_mode"] == "false" and stored["debug_logging"] == "false"
+
+
+def test_reopening_keeps_a_changed_setting(v1_path: Path, migrated: Database) -> None:
+    with migrated.transaction() as conn:
+        conn.execute("UPDATE app_settings SET value = '10' WHERE key = 'new_words_per_day'")
+    migrated.close()
+
+    reopened = Database(v1_path)
+    reopened.connect()
+    try:
+        stored = dict(rows(reopened, "SELECT key, value FROM app_settings"))
+        assert stored["new_words_per_day"] == "10"
+    finally:
+        reopened.close()
+
+
+def test_the_upgrade_creates_one_active_plan_from_the_largest_list(
+    migrated: Database,
+) -> None:
+    plans = rows(migrated, "SELECT name, is_active FROM study_plans")
+    assert plans == [("Oxford 3000 Study Plan", 1)]
+
+    selected = rows(
+        migrated,
+        """
+        SELECT l.name FROM study_plan_lists pl
+        JOIN lists l ON l.id = pl.list_id
+        JOIN study_plans p ON p.id = pl.plan_id
+        WHERE p.is_active = 1
+        """,
+    )
+    assert selected == [("Oxford 3000",)]
+
+    active = rows(migrated, "SELECT value FROM app_settings WHERE key = 'active_plan_id'")
+    plan_id = rows(migrated, "SELECT id FROM study_plans")[0][0]
+    assert active == [(str(plan_id),)]
+
+
+def test_the_upgrade_schedules_nothing(migrated: Database) -> None:
+    """Upgrading must not decide that 6,825 words are suddenly being learned."""
+    assert rows(migrated, "SELECT COUNT(*) FROM srs_cards") == [(0,)]
+    assert rows(migrated, "SELECT COUNT(*) FROM review_logs") == [(0,)]
+
+
+def test_an_empty_database_gets_no_plan(tmp_path: Path) -> None:
+    db = Database(tmp_path / "empty.db")
+    db.connect()
+    try:
+        assert rows(db, "SELECT COUNT(*) FROM study_plans") == [(0,)]
+        active = rows(db, "SELECT value FROM app_settings WHERE key = 'active_plan_id'")
+        assert active == [("",)]
+    finally:
+        db.close()
