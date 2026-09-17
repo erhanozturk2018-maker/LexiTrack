@@ -583,6 +583,7 @@ backup job reuses it rather than copying files while they are open.
 | --- | --- | --- |
 | Telegram thread blocking the UI | A long query on the bot thread could freeze the window | Services are called off the UI thread; writes are single rows; the existing write lock serializes them |
 | App closed means no bot | The daily message stops arriving | Close to tray instead of quitting; optional start-with-Windows; a headless mode later |
+| Two instances polling Telegram | Telegram rejects one poller and updates are lost | Single-instance lock file; a second launch raises the existing window |
 | Review backlog | A cap of 75 would silently accumulate work | Default 250, overdue-first ordering, seven-day forecast in the UI |
 | Day boundary at 00:00 | A session at 00:30 counts as the new day, so that day's 25 unlock immediately | Accepted, and `day_start_hour` is a setting if it turns out to be annoying |
 | FSRS library upgrade | Card state shape may change | Store state as JSON with `scheduler_version`; never silently reinterpret |
@@ -624,6 +625,58 @@ Scheduled online backups with retention, `telegram_updates` pruning, a
 database integrity check on startup.
 
 **Not planned:** FastAPI, Docker, PostgreSQL, Redis, a web UI. See §L.
+
+---
+
+## Process lifecycle: window, bot and autostart
+
+Three switches, deliberately independent. Mixing them is what makes
+background apps feel out of control.
+
+| Switch | Where | Stored in | Meaning |
+| --- | --- | --- | --- |
+| The application is running | Tray menu: Quit | — (a process) | Everything stops, including the bot |
+| The bot is on | Tray menu or Settings → Learning | `app_settings.telegram_enabled` | Polling and notifications; survives restarts |
+| Start with Windows | Settings → Data | A shortcut in the Startup folder | Whether the app comes back after a reboot |
+
+```text
+Tray icon menu
+├─ Open LexiTrack            show the window
+├─ Today: 25 new · 140 due   read-only summary, click to open Today
+├─ Telegram bot  [on/off]    toggles app_settings.telegram_enabled
+├─ Start with Windows [x]    creates/removes the Startup shortcut
+├─ Settings…
+└─ Quit LexiTrack            ends the process; nothing runs afterwards
+```
+
+Rules that follow from this:
+
+- **Closing the window does not quit.** The X button hides to the tray and
+  the bot keeps working. Quit is an explicit menu item, so the state is never
+  ambiguous.
+- **Turning the bot off is permanent until turned back on.** It is a setting
+  in the database, not a runtime flag: reboot the machine and the app comes
+  back with the bot still off. This is the answer to "I stopped it — will it
+  come back on its own?" It will not.
+- **Turning off Start with Windows is a separate decision.** Bot off means
+  the app runs quietly and sends nothing; autostart off means the app does not
+  run at all until it is opened by hand.
+- **First run needs the window once:** put the token in `.env`, choose the
+  study plan, set the two daily limits, tick Start with Windows. After that
+  the app can live in the tray and never be opened again except to look at
+  statistics.
+- **Headless mode** (`python -m lexitrack --headless`) exists for a machine
+  where no window is wanted at all: same single process, same services, no Qt
+  windows, stopped with Ctrl+C or by ending the process.
+- **Single instance.** The app takes a lock file in the data folder on start.
+  A second launch does not start a second process; it raises the running
+  window instead. This is not cosmetic: two processes polling Telegram with
+  the same token make Telegram reject one of them
+  (`Conflict: terminated by other getUpdates request`), and two processes
+  writing one database is exactly what this design avoids.
+- **Killing the process is safe.** Each review is written in its own
+  transaction, so Task Manager, a power cut or a Windows update loses at most
+  the card currently on screen.
 
 ---
 
@@ -718,5 +771,6 @@ the wall time the suite happens to run at:
 | Day boundary | 00:00 Europe/Istanbul (`day_start_hour` = 0, adjustable) |
 | Morning message | 06:00 local |
 | Settings | Learning settings in the database; UI preferences stay in `QSettings` |
+| Bot lifecycle | Tray icon; closing the window hides it; Quit stops everything; the bot has its own persistent on/off setting; autostart is a separate setting; single instance enforced by a lock file |
 | Telegram | A thread inside the app, not a second process; it never writes directly, it calls services; long polling; runs while the app runs (tray) |
 | FastAPI / Docker | Not in 0.3 |
