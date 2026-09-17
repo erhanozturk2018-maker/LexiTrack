@@ -25,6 +25,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     BaseDocTemplate,
+    CondPageBreak,
     Frame,
     PageTemplate,
     Paragraph,
@@ -115,6 +116,9 @@ def _build(
 
     if words and group_by_level:
         for index, (level, run) in enumerate(_level_runs(words)):
+            # Not keepWithNext: a level's table can be pages long, and keeping
+            # the heading with all of it would leave a blank first page.
+            story.append(CondPageBreak(40 * mm))
             if index:
                 story.append(Spacer(1, 6 * mm))
             count = len(run)
@@ -196,7 +200,6 @@ def _styles() -> dict[str, ParagraphStyle]:
             leading=19,
             textColor=_INK,
             spaceAfter=4,
-            keepWithNext=True,
         ),
         "note": ParagraphStyle(
             "LexiNote",

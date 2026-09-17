@@ -374,6 +374,26 @@ def test_pdf_export_can_start_each_level_with_a_heading(
 
     with pymupdf.open(target) as document:
         text = "\n".join(page.get_text() for page in document)
-    assert "A1  1 word" in text.replace("\n", "  ") or ("A1" in text and "1 word" in text)
-    assert text.index("apple") < text.index("B2") < text.index("abandon")
+    # One heading per level, each counting its words, before that level's rows.
+    assert text.count("1 word") == 2
+    assert text.index("A1") < text.index("apple") < text.index("B2") < text.index("abandon")
     assert "a round fruit" in text
+
+
+def test_a_long_level_does_not_push_its_heading_off_the_first_page(
+    service: VocabularyService, tmp_path
+) -> None:
+    """Regression: keeping a heading with a pages-long table left page one blank."""
+    from dataclasses import replace
+
+    lst = service.create_list("Many", "en")
+    for index in range(150):
+        service.add_word(lst.id, f"word{'abcdefghij'[index // 15]}{'abcdefghijklmno'[index % 15]}",
+                         cefr_level="A1")
+    content = replace(service.export_content_for_list(lst.id), group_by_level=True)
+
+    target = service.export(content, tmp_path / "many.pdf", "pdf")
+
+    with pymupdf.open(target) as document:
+        first_page = document[0].get_text()
+    assert "150 words" in first_page and "worda" in first_page
