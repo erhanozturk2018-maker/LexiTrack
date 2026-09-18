@@ -478,3 +478,19 @@ def test_mark_sent_is_what_due_notifications_reads(database: Database, clock: Fr
     assert due_notifications(clock, settings, runtime) == [Notification.MORNING]
     mark_sent(Notification.MORNING, clock, settings, runtime)
     assert due_notifications(clock, settings, runtime) == []
+
+
+def test_the_token_is_masked_in_every_log_line() -> None:
+    """The Bot API puts the token in the URL; the log must never show it."""
+    import logging
+
+    from lexitrack.core.logging_config import RedactingFormatter, redact
+
+    secret = "123456789:REMOVED-REVOKED-TOKEN"
+    url = f"POST https://api.telegram.org/bot{secret}/getUpdates"
+    assert "AAHf" not in redact(url)
+    assert "123456789:[redacted]" in redact(url)
+    assert redact("08:24:02,726 at 12:30:45") == "08:24:02,726 at 12:30:45"
+
+    record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "HTTP %s", (url,), None)
+    assert "AAHf" not in RedactingFormatter("%(message)s").format(record)
