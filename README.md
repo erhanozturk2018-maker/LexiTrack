@@ -85,6 +85,12 @@ pip install -e ".[dev]"
 > `[WinError 206] The filename or extension is too long`. Clone somewhere
 > shorter, such as `C:\Projects\LexiTrack`, or enable long paths in Windows.
 
+> **Use `pip install -e .`, not `pip install .`** The `-e` (editable) install
+> runs LexiTrack from the clone, which is what keeps your data in the clone's
+> `data/` folder and lets it read the clone's `.env`. A plain `pip install .`
+> copies the code into `site-packages` and LexiTrack then keeps its data in
+> the per-user folder instead (see *Where your files live*).
+
 ## Running
 
 ```bash
@@ -93,6 +99,38 @@ lexitrack
 
 or `python -m lexitrack`, or `.venv\Scripts\lexitrack-gui.exe` to start without
 a console window. The database is created on first launch.
+
+`pip` creates `lexitrack.exe` and `lexitrack-gui.exe` in the environment's
+`Scripts` folder (`.venv\Scripts` above). They are generic launchers without
+an icon of their own. For a proper desktop shortcut with the LexiTrack icon:
+
+```bash
+lexitrack --create-shortcut
+```
+
+This puts `LexiTrack` on the Windows desktop. It starts the app with the same
+Python you ran the command with, so a virtual environment is honoured, and
+without a console window. Run it again after moving the clone.
+
+Other options: `--minimized` starts in the tray without a window (this is what
+*Start with Windows* uses), and `--headless` runs only the Telegram bot,
+without any window, until Ctrl+C.
+
+### Where your files live
+
+| What | From a clone (`pip install -e .`) | Installed copy (`pip install .`) |
+| --- | --- | --- |
+| Database, backups, exports | `<clone>\data` | `%LOCALAPPDATA%\LexiTrack` |
+| Telegram token (`.env`) | `<clone>\.env` or the data folder | `%LOCALAPPDATA%\LexiTrack\.env` |
+| Debug logs (only when turned on) | `<clone>\logs` | `%LOCALAPPDATA%\LexiTrack\logs` |
+
+`%LOCALAPPDATA%` is `C:\Users\<you>\AppData\Local`, the standard place on
+Windows for an application's own data. Setting `LEXITRACK_DATA_DIR` overrides
+the data folder for either kind of install.
+
+Daily backups go to `backups` inside the data folder; the newest ten are kept.
+Logs are written only when *Settings → Advanced → Debug logging* is on, one
+file a day, kept for a week.
 
 **Upgrading from 0.1:** just start the new version. Your database is upgraded
 in place, each document you imported becomes a list, and a copy of the old

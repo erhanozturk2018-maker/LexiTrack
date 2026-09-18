@@ -6,8 +6,9 @@ that gets copied into backups, attached to bug reports and moved between
 machines. It comes from, in order:
 
 1. the environment variable ``LEXITRACK_TELEGRAM_TOKEN``;
-2. a ``.env`` file in the data folder;
-3. a ``.env`` file in the project folder.
+2. a ``.env`` file in the data folder (``%LOCALAPPDATA%\\LexiTrack`` for an
+   installed copy);
+3. a ``.env`` file in the project folder, when running from a clone.
 
 Both ``.env`` locations are ignored by git. If the token ever leaks it is
 revoked in BotFather and replaced in ``.env`` — nothing in the database
@@ -60,7 +61,12 @@ class TelegramConfig:
 
 def env_file_candidates() -> list[Path]:
     """The ``.env`` files that are read, most specific first."""
-    return [paths.data_dir() / ENV_FILE, paths.PROJECT_ROOT / ENV_FILE]
+    candidates = [paths.data_dir() / ENV_FILE]
+    # The clone's own .env only means something in a source checkout; in an
+    # installed copy PROJECT_ROOT is site-packages.
+    if paths.is_source_checkout():
+        candidates.append(paths.PROJECT_ROOT / ENV_FILE)
+    return candidates
 
 
 def load_config() -> TelegramConfig:

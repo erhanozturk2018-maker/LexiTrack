@@ -33,10 +33,14 @@ from ..telegram.runtime import BotState
 from .telegram_controller import TelegramController
 
 APP_ICON = Path(__file__).with_name("theme") / "icons" / "app.svg"
+#: The same icon at fixed sizes, for Windows: the taskbar and the tray pick a
+#: ready-made 16/24/32 px image from it instead of scaling the SVG themselves.
+APP_ICO = APP_ICON.with_suffix(".ico")
 
 
 def app_icon() -> QIcon:
-    return QIcon(str(APP_ICON))
+    icon = QIcon(str(APP_ICO)) if APP_ICO.exists() else QIcon()
+    return icon if not icon.isNull() else QIcon(str(APP_ICON))
 
 
 class Tray(QObject):

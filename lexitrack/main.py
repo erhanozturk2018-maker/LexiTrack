@@ -8,6 +8,8 @@ Run with ``lexitrack`` after installing, or ``python -m lexitrack``.
 ``--headless``
     No window at all: just the Telegram bot, until Ctrl+C. For a machine
     where nobody looks at the screen. Same process model, same database.
+``--create-shortcut``
+    Put a LexiTrack shortcut, with its icon, on the Windows desktop, then exit.
 """
 
 from __future__ import annotations
@@ -42,9 +44,12 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging()
     log.info("Starting LexiTrack %s (data folder: %s)", __version__, paths.data_dir())
 
+    if "--create-shortcut" in args:
+        return _create_shortcut()
     if "--headless" in args:
         return run_headless()
 
+    _set_app_id()
     app = QApplication(args)
     app.setApplicationName("LexiTrack")
     app.setApplicationDisplayName("LexiTrack")
@@ -176,6 +181,35 @@ def _apply_debug_logging(settings) -> None:
     target = set_file_logging(settings.developer_mode and settings.debug_logging)
     if target is not None:
         log.info("Debug logging is on: writing to %s", target)
+
+
+def _create_shortcut() -> int:
+    from .core.shortcut import create_desktop_shortcut
+
+    try:
+        path = create_desktop_shortcut()
+    except OSError as exc:
+        print(f"Could not create the shortcut: {exc}", file=sys.stderr)
+        return 1
+    print(f"Created {path}")
+    return 0
+
+
+def _set_app_id() -> None:
+    """Tell Windows this is LexiTrack, not "Python".
+
+    Without an explicit AppUserModelID the taskbar groups the window under
+    pythonw.exe and shows Python's icon; with one it uses the window's own
+    icon and keeps LexiTrack in its own taskbar button.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("LexiTrack.LexiTrack")
+    except (AttributeError, OSError):  # pragma: no cover - older Windows
+        pass
 
 
 def _enable_high_dpi() -> None:
