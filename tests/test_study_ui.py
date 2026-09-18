@@ -28,9 +28,7 @@ from lexitrack.ui.study_page import DAY, EMPTY, SESSION, _interval  # noqa: E402
 from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
 from lexitrack.ui.theme import ThemeManager, ThemeName  # noqa: E402
 
-WORDS = " ".join(
-    f"{a}{b}word" for a in "abcd" for b in "abcdefghijklmnopqrstuvwxyz"
-)  # 104 words
+WORDS = " ".join(f"{a}{b}word" for a in "abcd" for b in "abcdefghijklmnopqrstuvwxyz")  # 104 words
 
 
 @pytest.fixture(scope="session")
@@ -85,17 +83,13 @@ class TestNavigation:
         assert tabs[0] == STUDY
         assert window.tab_buttons[STUDY].text() == "Study"
 
-    def test_the_window_opens_on_study_when_there_is_work(
-        self, qapp, loaded, engine
-    ) -> None:
+    def test_the_window_opens_on_study_when_there_is_work(self, qapp, loaded, engine) -> None:
         with_plan(engine, loaded)
         win = MainWindow(loaded, ThemeManager(), engine)
         assert win.current_page == STUDY
         win.close()
 
-    def test_without_a_plan_the_window_does_not_open_on_an_empty_study_page(
-        self, window
-    ) -> None:
+    def test_without_a_plan_the_window_does_not_open_on_an_empty_study_page(self, window) -> None:
         assert window.current_page != STUDY
 
 
@@ -104,9 +98,7 @@ class TestDayView:
         window.show_page(STUDY)
         assert window.study._stack.currentWidget() is window.study._pages[EMPTY]
 
-    def test_the_day_lists_the_words_it_asks_you_to_confirm(
-        self, window, engine, loaded
-    ) -> None:
+    def test_the_day_lists_the_words_it_asks_you_to_confirm(self, window, engine, loaded) -> None:
         with_plan(engine, loaded)
         window.show_page(STUDY)
         study = window.study
@@ -129,9 +121,7 @@ class TestDayView:
         assert "introduced today" in window.study.intake_words.text()
         assert messages and "2026-09-18" in messages[0]
 
-    def test_a_finished_day_is_stated_once_not_three_times(
-        self, window, engine, loaded
-    ) -> None:
+    def test_a_finished_day_is_stated_once_not_three_times(self, window, engine, loaded) -> None:
         with_plan(engine, loaded)
         engine.introduce()
         window.show_page(STUDY)
@@ -348,9 +338,7 @@ class TestTelegramController:
         assert states[-1] == BotState.NO_TOKEN.value
         assert controller.enabled is True, "the switch is remembered even without a token"
 
-    def test_the_settings_page_shows_where_to_paste_the_token(
-        self, qapp, engine, loaded
-    ) -> None:
+    def test_the_settings_page_shows_where_to_paste_the_token(self, qapp, engine, loaded) -> None:
         from lexitrack.telegram.config import TelegramConfig
         from lexitrack.ui.telegram_controller import TelegramController
 
@@ -522,3 +510,28 @@ class TestStudyExtras:
         assert labels == ["Today's new words (25)"]
         content = captured["scopes"][0].content()
         assert len(content.words) == 25
+
+
+def test_quit_in_the_menu_really_quits_even_with_the_bot_on(
+    qapp, loaded, engine, monkeypatch
+) -> None:
+    """Quit means quit. Only the window's X hides to the tray."""
+    from PySide6.QtWidgets import QApplication as App
+
+    from lexitrack.telegram.config import TelegramConfig
+    from lexitrack.ui.telegram_controller import TelegramController
+    from lexitrack.ui.tray import Tray
+
+    if not Tray.available():
+        pytest.skip("no system tray on this machine")
+    quits: list[bool] = []
+    monkeypatch.setattr(App, "quit", staticmethod(lambda: quits.append(True)))
+    controller = TelegramController(loaded.database, config=TelegramConfig())
+    controller.set_enabled(True)
+    win = MainWindow(loaded, ThemeManager(), engine, telegram=controller, use_tray=True)
+    win.show()
+    win._fill_app_menu()
+    quit_action = next(a for a in win.app_menu.actions() if a.text() == "Quit")
+    quit_action.trigger()
+    assert quits == [True]
+    assert not win.isVisible()

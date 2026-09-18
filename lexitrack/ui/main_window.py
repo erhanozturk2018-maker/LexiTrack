@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+,", self.open_settings),
             ("Ctrl+T", self.toggle_theme),
             ("F1", self.show_shortcuts),
-            ("Ctrl+Q", self.close),
+            ("Ctrl+Q", self.quit),
         ):
             action = QAction(self)
             action.setShortcut(QKeySequence(keys))
@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
                     # Shown in the menu; the window-wide action does the work.
                     action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
         menu.addSeparator()
-        quit_action = menu.addAction("Quit", self.close)
+        quit_action = menu.addAction("Quit", self.quit)
         quit_action.setShortcut(QKeySequence("Ctrl+Q"))
         quit_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
 
