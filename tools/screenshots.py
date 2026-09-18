@@ -178,7 +178,7 @@ def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
     """Study, a review card, the plan window and Settings, from a week of use."""
     engine.create_plan("Oxford 3000", list_ids=[list_id])
     engine.save_settings(
-        {Setting.NEW_WORDS_PER_DAY: 20, Setting.LEECH_CONSECUTIVE: 2}
+        {Setting.NEW_WORDS_PER_DAY: 25, Setting.LEECH_CONSECUTIVE: 2}
     )
     engine.introduce()
     for _ in range(8):
