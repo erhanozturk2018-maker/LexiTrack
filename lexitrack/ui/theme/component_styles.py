@@ -374,6 +374,40 @@ QListWidget::item {{ padding: 6px 8px; border-radius: 4px; color: {p.text}; }}
 QListWidget::item:hover {{ background-color: {p.surface_sunken}; }}
 QListWidget::item:selected {{ background-color: {p.accent_soft}; color: {p.text}; }}
 
+/* Settings navigation: a sidebar, not a boxed list. */
+QListWidget#SettingsNav {{
+    background-color: {p.surface};
+    border: none;
+    border-right: 1px solid {p.border};
+    border-radius: 0;
+    padding: {m.space_3}px {m.space_2}px;
+}}
+QListWidget#SettingsNav::item {{ padding: 8px 12px; margin-bottom: 2px; }}
+QListWidget#SettingsNav::item:selected {{ color: {p.accent}; font-weight: 600; }}
+
+/* Number fields match the text fields; Fusion's own frame ignores the theme. */
+QSpinBox, QDoubleSpinBox {{
+    background-color: {p.surface};
+    color: {p.text};
+    border: 1px solid {p.border_strong};
+    border-radius: {m.radius_sm}px;
+    padding: 6px 8px;
+    min-height: 20px;
+    selection-background-color: {p.accent};
+    selection-color: {p.text_on_accent};
+}}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border: 1px solid {p.focus_ring}; }}
+QSpinBox:disabled, QDoubleSpinBox:disabled {{
+    color: {p.text_faint};
+    background-color: {p.surface_sunken};
+}}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    width: 18px;
+    border: none;
+    background: transparent;
+}}
+
 /* ----------------------------------------------------------------- tables */
 
 QTableView {{

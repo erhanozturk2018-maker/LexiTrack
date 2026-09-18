@@ -60,7 +60,7 @@ FORECAST_DAYS = 7
 
 
 @dataclass(frozen=True, slots=True)
-class ReviewItem:
+class StudyItem:
     """One card to answer, with the word it belongs to."""
 
     word: StoredWord
@@ -94,6 +94,10 @@ class DailyPlan:
     forecast: tuple[tuple[str, int], ...] = ()
     #: Set when intake was reduced or paused, in words the UI can show.
     intake_note: str | None = None
+    #: True when the workload valve stopped intake, as opposed to the day
+    #: simply being finished. The two look the same — no new words — and mean
+    #: opposite things, so they are not left for the reader to infer.
+    intake_paused: bool = False
 
     @property
     def has_plan(self) -> bool:
@@ -259,7 +263,7 @@ class LearningService:
         introduced_ids = self._cards.introduced_on(today, scope)
         due = self._due_cards(scope, limit=None)
         done = self._reviews_done_today(today)
-        target, note = self._intake_target(len(introduced_ids), len(due))
+        target, note, paused = self._intake_target(len(introduced_ids), len(due))
         offered = (
             self._plans.candidate_word_ids(
                 plan.id,
@@ -283,9 +287,12 @@ class LearningService:
             review_capacity=self._settings.review_capacity_per_day,
             forecast=self.forecast(),
             intake_note=note,
+            intake_paused=paused,
         )
 
-    def _intake_target(self, introduced_today: int, due_today: int) -> tuple[int, str | None]:
+    def _intake_target(
+        self, introduced_today: int, due_today: int
+    ) -> tuple[int, str | None, bool]:
         """How many new words to offer now, and why it is not the full count.
 
         Two subtractions. The first is bookkeeping: words already confirmed
@@ -298,15 +305,15 @@ class LearningService:
         remaining = max(settings.new_words_per_day - introduced_today, 0)
         if remaining == 0:
             if settings.new_words_per_day and introduced_today >= settings.new_words_per_day:
-                return 0, f"Today's {settings.new_words_per_day} new words are done."
-            return 0, None
+                return 0, f"Today's {settings.new_words_per_day} new words are done.", False
+            return 0, None, False
         capacity = settings.review_capacity_per_day
         if capacity and due_today >= capacity:
             return 0, (
                 f"New words are paused: {due_today} reviews are due today, "
                 f"over the {capacity} you set. Clear some and they will come back."
-            )
-        return remaining, None
+            ), True
+        return remaining, None, False
 
     def forecast(self, days: int = FORECAST_DAYS) -> tuple[tuple[str, int], ...]:
         """How many cards fall due on each of the next ``days``.
@@ -369,7 +376,7 @@ class LearningService:
 
     # -- reviewing ---------------------------------------------------------
 
-    def review_queue(self, limit: int | None = None) -> list[ReviewItem]:
+    def review_queue(self, limit: int | None = None) -> list[StudyItem]:
         """Today's due cards, in the order they should be asked.
 
         Struggling words come first, then relearning, then the most overdue.
@@ -385,7 +392,7 @@ class LearningService:
         words = {word.id: word for word in self._words.get_many([c.word_id for c in cards])}
         hide = self._settings.hide_meaning_in_study
         return [
-            ReviewItem(word=words[card.word_id], card=card, hide_meaning=hide)
+            StudyItem(word=words[card.word_id], card=card, hide_meaning=hide)
             for card in cards
             if card.word_id in words
         ]
@@ -510,14 +517,20 @@ class LearningService:
             marked_known=marked_known,
         )
 
-    def preview_intervals(self, word_id: int) -> dict[Rating, str]:
-        """What each answer would schedule, as local dates. Developer Mode."""
+    def preview_intervals(self, word_id: int) -> dict[Rating, int]:
+        """How many days away each answer would put the word.
+
+        Shown under the four answer buttons, so the user can see that Hard and
+        Good are not the same thing, and in Developer Mode for checking the
+        scheduler's behaviour without reading the database.
+        """
         card = self._cards.get(int(word_id))
         if card is None:
             return {}
+        now = self._clock.now_utc()
         return {
-            rating: self._clock.local_date(due)
-            for rating, due in self._scheduler.preview(card, self._clock.now_utc()).items()
+            rating: self._clock.days_between(now, due)
+            for rating, due in self._scheduler.preview(card, now).items()
         }
 
     # -- status --------------------------------------------------------------
@@ -553,7 +566,7 @@ class LearningService:
             resumed += 1
         return resumed
 
-    def struggling_words(self, limit: int | None = None) -> list[ReviewItem]:
+    def struggling_words(self, limit: int | None = None) -> list[StudyItem]:
         """Words the engine has flagged, worst first."""
         plan = self.active_plan()
         if plan is None:
@@ -561,7 +574,7 @@ class LearningService:
         cards = self._cards.struggling(self._plans.word_ids(plan.id), limit=limit)
         words = {word.id: word for word in self._words.get_many([c.word_id for c in cards])}
         return [
-            ReviewItem(word=words[card.word_id], card=card, hide_meaning=False)
+            StudyItem(word=words[card.word_id], card=card, hide_meaning=False)
             for card in cards
             if card.word_id in words
         ]

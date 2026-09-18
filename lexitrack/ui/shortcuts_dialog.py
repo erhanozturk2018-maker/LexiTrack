@@ -62,6 +62,15 @@ TABLE_KEYS: Section = (
     ),
 )
 
+STUDY_KEYS: Section = (
+    "Study reviews",
+    (
+        ("Space", "Show the meaning; once it is showing, answer Good"),
+        ("1 / 2 / 3 / 4", "Again / Hard / Good / Easy"),
+        ("Esc", "End the session and keep what you answered"),
+    ),
+)
+
 HOME_KEYS: Section = (
     "Home",
     (

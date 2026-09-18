@@ -1,9 +1,13 @@
 """The application window: navigation, menus and the current-list context.
 
-Three destinations, reached from tabs in the app bar:
+Four destinations, reached from tabs in the app bar:
 
+* **Study** — today's new words and today's reviews, from the study plan. It
+  comes first because it is the only page that says what to do *now*; the
+  others are places to look things up or to work freely.
 * **Home** — continue learning, overview, your lists.
-* **Review** — the current list, as flashcards or as a table.
+* **Review** — the current list, as flashcards or as a table. Free study: no
+  schedule, no consequences, any list, any time.
 * **Unknown Words** — every unknown word, across lists.
 
 The window owns only what is shared between them: which list is current and
@@ -43,22 +47,29 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..repositories.word_repository import StoredWord
+from ..services.learning_service import LearningService
 from ..services.vocabulary_service import VocabularyService
 from .command_palette import Command, CommandPalette
 from .components.cards import ModeSwitch
+from .components.toast import Toast
 from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
 from .home_page import HomePage
 from .list_actions import ListActions
 from .review_page import ReviewPage
-from .shortcuts_dialog import FLASHCARD_KEYS, HOME_KEYS, TABLE_KEYS, ShortcutsDialog
+from .settings_dialog import SettingsDialog
+from .shortcuts_dialog import FLASHCARD_KEYS, HOME_KEYS, STUDY_KEYS, TABLE_KEYS, ShortcutsDialog
+from .study_page import StudyPage
+from .study_plan_dialog import StudyPlanDialog
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
 from .unknown_page import UnknownPage
 
 log = logging.getLogger(__name__)
 
-HOME, REVIEW, UNKNOWN = "home", "review", "unknown"
+STUDY, HOME, REVIEW, UNKNOWN = "study", "home", "review", "unknown"
+#: Tab order, and the order Ctrl+Tab cycles through.
+PAGE_ORDER = (STUDY, HOME, REVIEW, UNKNOWN)
 
 _SETTINGS_LIST = "review/list_id"
 _SETTINGS_MODE = "review/mode"
@@ -71,11 +82,15 @@ class MainWindow(QMainWindow):
         self,
         service: VocabularyService,
         theme: ThemeManager,
+        engine: LearningService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._service = service
         self._theme = theme
+        # One engine for the whole window, and later for the Telegram thread:
+        # both must read the same settings and the same clock.
+        self._engine = engine or LearningService(service.database)
         self._settings = QSettings()
         self._current_list_id: int | None = self._load_int(_SETTINGS_LIST)
         self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.FLASHCARD))
@@ -96,7 +111,8 @@ class MainWindow(QMainWindow):
         for keys, step in (("Ctrl+Tab", 1), ("Ctrl+Shift+Tab", -1), ("Ctrl+Backtab", -1)):
             QShortcut(QKeySequence(keys), self, activated=lambda s=step: self.cycle_page(s))
         self._ensure_current_list()
-        self.show_page(REVIEW if self._has_resumable_review() else HOME)
+        self._engine.close_stale_sessions()
+        self.show_page(self._opening_page())
 
     # -- construction ------------------------------------------------------
 
@@ -104,6 +120,8 @@ class MainWindow(QMainWindow):
         """Everything the user can do from anywhere, in the order it is offered."""
         going_dark = self._theme.current is ThemeName.LIGHT
         return [
+            Command("Go to Study", "Today's new words and today's reviews",
+                    lambda: self.show_page(STUDY), "Alt+S", "today plan srs due"),
             Command("Go to Home", "Continue learning, see your progress and your lists",
                     lambda: self.show_page(HOME), "Alt+H", "start overview"),
             Command("Go to Review", "Review the current list as flashcards or a table",
@@ -122,6 +140,10 @@ class MainWindow(QMainWindow):
                     self.actions.create_list, "Ctrl+N", "create"),
             Command("Export\u2026", "Save words as PDF, CSV or JSON, with a preview first",
                     self.export, "Ctrl+E", "save pdf csv json print"),
+            Command("Study Plan\u2026", "Choose which lists you are working through",
+                    self.manage_plan, "Ctrl+P", "plan lists schedule"),
+            Command("Settings\u2026", "Daily counts, the day boundary, theme and data",
+                    self.open_settings, "Ctrl+,", "preferences options configure"),
             Command("Switch to Dark Mode" if going_dark else "Switch to Light Mode",
                     "Change between the light and dark themes", self.toggle_theme, "Ctrl+T",
                     "theme appearance"),
@@ -135,7 +157,7 @@ class MainWindow(QMainWindow):
         ]
 
     def _build_actions(self) -> None:
-        """Window-wide shortcuts. The tabs carry Alt+H / Alt+R / Alt+U themselves."""
+        """Window-wide shortcuts. The tabs carry Alt+S / Alt+H / Alt+R / Alt+U themselves."""
         self._shortcut_actions: list[QAction] = []
         for keys, slot in (
             ("Ctrl+K", self.open_palette),
@@ -145,6 +167,8 @@ class MainWindow(QMainWindow):
             ("Ctrl+O", lambda: self.actions.import_into(None)),
             ("Ctrl+N", self.actions.create_list),
             ("Ctrl+E", self.export),
+            ("Ctrl+P", self.manage_plan),
+            ("Ctrl+,", self.open_settings),
             ("Ctrl+T", self.toggle_theme),
             ("F1", self.show_shortcuts),
             ("Ctrl+Q", self.close),
@@ -162,8 +186,9 @@ class MainWindow(QMainWindow):
         menu.clear()
         groups = (
             ("Import\u2026", "New List\u2026", "Export\u2026"),
-            ("Switch List\u2026", "Flashcard Mode", "List Mode"),
-            ("Switch to Dark Mode", "Switch to Light Mode", "Keyboard Shortcuts"),
+            ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
+            ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
+             "Keyboard Shortcuts"),
             ("Open Data Folder", "Reset All Progress\u2026", "About LexiTrack"),
         )
         by_title = {command.title: command for command in self.commands()}
@@ -205,11 +230,24 @@ class MainWindow(QMainWindow):
 
         self.unknown = UnknownPage(self._service)
 
-        self._page_widgets = {HOME: self.home, REVIEW: self.review, UNKNOWN: self.unknown}
+        self.study = StudyPage(self._engine)
+        self.study.manage_plan.connect(self.manage_plan)
+        self.study.data_changed.connect(self._on_data_changed)
+        self.study.notify.connect(self._toast)
+
+        self._page_widgets = {
+            STUDY: self.study,
+            HOME: self.home,
+            REVIEW: self.review,
+            UNKNOWN: self.unknown,
+        }
         for widget in self._page_widgets.values():
             self.pages.addWidget(widget)
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(central)
+        # One toast for the window, so a message from the Study page appears in
+        # the same place as one from a list action.
+        self._toast_widget = Toast(central)
 
     def _build_app_bar(self) -> QWidget:
         m = METRICS
@@ -230,6 +268,7 @@ class MainWindow(QMainWindow):
         # Explicit Alt shortcuts rather than "&" mnemonics, which the Fusion
         # style underlines permanently.
         for key, text, shortcut in (
+            (STUDY, "Study", "Alt+S"),
             (HOME, "Home", "Alt+H"),
             (REVIEW, "Review", "Alt+R"),
             (UNKNOWN, "Unknown Words", "Alt+U"),
@@ -296,7 +335,10 @@ class MainWindow(QMainWindow):
                 page = HOME
         self.tab_buttons[page].setChecked(True)
         self.pages.setCurrentWidget(self._page_widgets[page])
-        if page == HOME:
+        if page == STUDY:
+            self.study.refresh()
+            self.study.setFocus()
+        elif page == HOME:
             self.home.refresh(self._current_list_id, self._mode)
         elif page == REVIEW:
             self.review.set_list(self._current_list_id, self._mode)
@@ -305,8 +347,20 @@ class MainWindow(QMainWindow):
 
     def cycle_page(self, step: int) -> None:
         """Ctrl+Tab / Ctrl+Shift+Tab: next or previous page, wrapping around."""
-        order = [HOME, REVIEW, UNKNOWN]
+        order = list(PAGE_ORDER)
         self.show_page(order[(order.index(self.current_page) + step) % len(order)])
+
+    def _opening_page(self) -> str:
+        """Where the window opens: whatever has work waiting.
+
+        Study first if the plan has something due or new words to confirm —
+        that is the whole point of the page. Otherwise the old behaviour,
+        because a user with no plan should not land on an empty screen.
+        """
+        plan = self._engine.daily_plan()
+        if plan.has_plan and plan.has_work:
+            return STUDY
+        return REVIEW if self._has_resumable_review() else HOME
 
     def switch_list(self) -> None:
         """Ctrl+L: open Review and choose a list from the keyboard."""
@@ -372,6 +426,9 @@ class MainWindow(QMainWindow):
         """Something was written; redraw the page on screen from the database."""
         self._ensure_current_list()
         page = self.current_page
+        if page == STUDY:
+            self.study.refresh()
+            return
         if page == REVIEW and self._current_list_id is not None:
             if self.review.list_id != self._current_list_id:
                 self.review.set_list(self._current_list_id, self._mode)
@@ -403,6 +460,29 @@ class MainWindow(QMainWindow):
             )
         ]
         ExportDialog(self._service, scopes, parent=self).exec()
+
+    def manage_plan(self) -> None:
+        """Ctrl+P: create or change the study plan, then show Study."""
+        dialog = StudyPlanDialog(self._engine, self._service, parent=self)
+        dialog.exec()
+        if dialog.changed:
+            self._engine.refresh_settings()
+            self.show_page(STUDY)
+            self._toast("Study plan saved.")
+
+    def open_settings(self) -> None:
+        """Ctrl+, : the settings window.
+
+        Its changes reach the engine through the service rather than through
+        this window, so the page behind only needs redrawing.
+        """
+        dialog = SettingsDialog(self._engine, self._service, self._theme, parent=self)
+        dialog.changed.connect(self._on_data_changed)
+        dialog.exec()
+
+    def _toast(self, message: str) -> None:
+        """A short message at the bottom of the window."""
+        self._toast_widget.show_message(message)
 
     def reset_progress(self) -> None:
         progress = self._service.get_progress()
@@ -463,7 +543,13 @@ class MainWindow(QMainWindow):
             (c.shortcut, c.title.rstrip("\u2026")) for c in self.commands() if c.shortcut
         ]
         everywhere.append(("Ctrl+Q", "Quit"))
-        return [FLASHCARD_KEYS, TABLE_KEYS, HOME_KEYS, ("Everywhere", everywhere)]
+        return [
+            STUDY_KEYS,
+            FLASHCARD_KEYS,
+            TABLE_KEYS,
+            HOME_KEYS,
+            ("Everywhere", everywhere),
+        ]
 
     def show_shortcuts(self) -> None:
         ShortcutsDialog(self.shortcut_sections(), parent=self).exec()

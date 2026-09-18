@@ -137,6 +137,7 @@ class TestIntroduction:
         assert second.new_words == ()
         assert {word.id for word in second.introduced_today} == first
         assert second.intake_note is not None
+        assert second.intake_paused is False, "the day is finished, not throttled"
 
     def test_confirming_twice_introduces_nothing_the_second_time(
         self, engine: LearningService
@@ -316,7 +317,8 @@ class TestAnswers:
         preview = engine.preview_intervals(word_id)
         assert set(preview) == set(Rating)
         assert len(set(preview.values())) >= 2
-        assert all(day > clock.today() for day in preview.values())
+        assert all(days >= 1 for days in preview.values()), "nothing comes back today"
+        assert preview[Rating.AGAIN] <= preview[Rating.GOOD] <= preview[Rating.EASY]
 
 
 class TestWorkload:
@@ -330,6 +332,7 @@ class TestWorkload:
         plan = engine.daily_plan()
         assert plan.due_count == 10
         assert plan.new_words == ()
+        assert plan.intake_paused is True
         assert plan.intake_note is not None
         assert "paused" in plan.intake_note
 

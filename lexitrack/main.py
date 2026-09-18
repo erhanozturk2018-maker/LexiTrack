@@ -15,6 +15,7 @@ from . import __version__
 from .core import paths
 from .core.errors import LexiTrackError
 from .core.logging_config import configure_logging
+from .services.learning_service import LearningService
 from .services.vocabulary_service import VocabularyService
 from .ui.main_window import MainWindow
 from .ui.theme import ThemeManager
@@ -42,7 +43,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         service = VocabularyService()
-        window = MainWindow(service, theme)
+        # One engine, shared by the window and later by the Telegram thread.
+        engine = LearningService(service.database)
+        window = MainWindow(service, theme, engine)
     except LexiTrackError as exc:
         log.exception("LexiTrack could not start")
         QMessageBox.critical(None, "LexiTrack could not start", exc.user_message)
