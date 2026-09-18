@@ -3,7 +3,12 @@
 Uses the same sample data as ``design_mockups.py`` (the Oxford PDFs when they
 are in ``pdfs/``, plus the lists in ``examples/``), in a temporary data folder
 and a separate settings scope, so a developer's own vocabulary and settings are
-never touched or shown.
+never touched or shown. The Telegram controller is given an empty
+configuration, so a real token in ``.env`` is never read, and no page that
+prints a file path is captured, so no user name appears in an image.
+
+The Study screenshots run the sample plan forward a week on a frozen clock,
+so they show real reviews, a real week ahead and real hard words.
 
 Usage::
 
@@ -23,6 +28,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 os.environ["LEXITRACK_DATA_DIR"] = tempfile.mkdtemp(prefix="lexitrack-screenshots-")
 
 from dataclasses import replace  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
 
 import pymupdf  # noqa: E402
 from design_mockups import build_sample  # noqa: E402
@@ -30,8 +36,13 @@ from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from lexitrack.core.clock import FrozenClock  # noqa: E402
 from lexitrack.database.connection import Database  # noqa: E402
+from lexitrack.models.settings import Setting  # noqa: E402
+from lexitrack.models.srs import Rating  # noqa: E402
+from lexitrack.services.learning_service import LearningService  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
+from lexitrack.telegram.config import TelegramConfig  # noqa: E402
 from lexitrack.ui.components.cards import ModeSwitch  # noqa: E402
 from lexitrack.ui.export_dialog import (  # noqa: E402
     ExportDialog,
@@ -40,7 +51,10 @@ from lexitrack.ui.export_dialog import (  # noqa: E402
     order_words,
 )
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
-from lexitrack.ui.main_window import HOME, UNKNOWN, MainWindow  # noqa: E402
+from lexitrack.ui.main_window import HOME, STUDY, UNKNOWN, MainWindow  # noqa: E402
+from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
+from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
+from lexitrack.ui.telegram_controller import TelegramController  # noqa: E402
 from lexitrack.ui.theme import ThemeManager, ThemeName  # noqa: E402
 
 OUT = ROOT / "docs" / "screenshots"
@@ -62,7 +76,10 @@ def main() -> int:
     current = lists.get("Oxford 3000") or lists["German A1"]
 
     OUT.mkdir(parents=True, exist_ok=True)
-    window = MainWindow(service, theme)
+    clock = FrozenClock(datetime(2026, 9, 17, 5, 0, tzinfo=UTC))
+    engine = LearningService(service.database, clock)
+    telegram = TelegramController(service.database, config=TelegramConfig())
+    window = MainWindow(service, theme, engine, telegram=telegram)
     window.resize(*SIZE)
     window.show()
 
@@ -140,6 +157,8 @@ def main() -> int:
             grab(export, "export-preview")
             export.reject()
 
+    study_screens(app, window, engine, clock, current, theme, grab)
+
     content = service.export_content_for_unknown(current)
     content = replace(
         content, words=order_words(content.words, ExportOrder.CEFR), group_by_level=True
@@ -153,6 +172,51 @@ def main() -> int:
     window.close()
     QSettings().clear()
     return 0
+
+
+def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
+    """Study, a review card, the plan window and Settings, from a week of use."""
+    engine.create_plan("Oxford 3000", list_ids=[list_id])
+    engine.save_settings(
+        {Setting.NEW_WORDS_PER_DAY: 20, Setting.LEECH_CONSECUTIVE: 2}
+    )
+    engine.introduce()
+    for _ in range(8):
+        clock.advance_to_day_start(1)
+        clock.advance(hours=4)
+        engine.introduce()
+        for index, item in enumerate(engine.review_queue()):
+            engine.answer(item.word.id, Rating.AGAIN if index % 6 == 0 else Rating.GOOD)
+    clock.advance_to_day_start(1)
+    clock.advance(hours=4)
+
+    for name in (ThemeName.LIGHT, ThemeName.DARK):
+        theme.apply(name)
+        window._update_theme_labels()
+        suffix = "" if name is ThemeName.LIGHT else "-dark"
+        window.resize(1180, 1060)
+        window.show_page(STUDY)
+        grab(window, f"study{suffix}")
+        window.resize(*SIZE)
+        window.study.start_session()
+        grab(window, f"study-session{suffix}")
+        window.study.end_session()
+
+    theme.apply(ThemeName.LIGHT)
+    window._update_theme_labels()
+    plan = StudyPlanDialog(engine, window._service, parent=window)
+    plan.resize(640, 600)
+    plan.show()
+    app.processEvents()
+    grab(plan, "study-plan")
+    plan.reject()
+
+    settings = SettingsDialog(engine, window._service, theme, parent=window)
+    settings.resize(820, 720)
+    settings.show()
+    app.processEvents()
+    grab(settings, "settings")
+    settings.reject()
 
 
 if __name__ == "__main__":
