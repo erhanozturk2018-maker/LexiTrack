@@ -61,3 +61,6 @@ data/exports/*
 pdfs/*
 !pdfs/.gitkeep
 !pdfs/README.md
+
+# --- Debug logs (only written when Debug logging is on) ---
+logs/

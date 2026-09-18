@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from ..core import autostart, paths
 from ..core.errors import LexiTrackError
+from ..core.logging_config import set_file_logging
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
@@ -430,10 +431,16 @@ class SettingsDialog(QDialog):
         switches.addRow("", self.developer_mode)
         self.debug_logging = QCheckBox("Debug logging")
         self.debug_logging.setToolTip(
-            "Writes every scheduling decision to the log file. Useful for a bug "
-            "report; the file grows quickly."
+            "Writes what LexiTrack does to a file per day in the logs folder, "
+            "kept for a week. Off by default: nothing is written to disk unless "
+            "this is on. Needs Developer mode."
         )
         switches.addRow("", self.debug_logging)
+        self.logs_button = QPushButton("Open Logs Folder")
+        self.logs_button.setProperty("variant", "ghost")
+        self.logs_button.setToolTip(str(paths.logs_dir()))
+        self.logs_button.clicked.connect(self._open_logs)
+        switches.addRow("", self.logs_button)
         layout.addLayout(switches)
 
         self._advanced_box = QFrame()
@@ -552,6 +559,11 @@ class SettingsDialog(QDialog):
         self.theme_combo.setCurrentIndex(max(index, 0))
         self._apply_developer_mode(s.developer_mode)
 
+    def _open_logs(self) -> None:
+        folder = paths.logs_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(_file_url(folder))
+
     def _apply_developer_mode(self, enabled: bool) -> None:
         """Advanced controls are disabled rather than hidden.
 
@@ -561,6 +573,8 @@ class SettingsDialog(QDialog):
         the engine is doing.
         """
         self._advanced_box.setEnabled(enabled)
+        self.debug_logging.setEnabled(enabled)
+        self.logs_button.setEnabled(enabled)
 
     def _save(self) -> None:
         values: dict[str, object] = {
@@ -578,7 +592,11 @@ class SettingsDialog(QDialog):
             Setting.LEECH_TOTAL_LAPSES: self.leech_total.value(),
             Setting.LEECH_WEAK_STABILITY_DAYS: self.leech_weak.value(),
             Setting.DEVELOPER_MODE: self.developer_mode.isChecked(),
-            Setting.DEBUG_LOGGING: self.debug_logging.isChecked(),
+            # Debug logging belongs to Developer mode: leaving Developer mode
+            # turns it off, so no file keeps growing behind a hidden switch.
+            Setting.DEBUG_LOGGING: (
+                self.developer_mode.isChecked() and self.debug_logging.isChecked()
+            ),
             Setting.TELEGRAM_ENABLED: self.telegram_enabled.isChecked(),
         }
         try:
@@ -588,6 +606,8 @@ class SettingsDialog(QDialog):
             return
         if autostart.supported() and self.autostart.isChecked() != autostart.is_enabled():
             autostart.set_enabled(self.autostart.isChecked())
+        saved = self._engine.settings
+        set_file_logging(saved.developer_mode and saved.debug_logging)
         chosen = ThemeName(str(self.theme_combo.currentData()))
         if chosen is not self._theme.current:
             self._theme.apply(chosen)

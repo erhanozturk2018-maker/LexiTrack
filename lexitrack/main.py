@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from . import __version__
 from .core import paths
 from .core.errors import LexiTrackError
-from .core.logging_config import configure_logging
+from .core.logging_config import configure_logging, remove_legacy_logs, set_file_logging
 from .services.learning_service import LearningService
 from .services.maintenance import Maintenance
 from .services.vocabulary_service import VocabularyService
@@ -75,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
         # One engine for the window; the Telegram thread builds its own over
         # the same database, because settings and clock objects are per client.
         engine = LearningService(service.database)
+        # Nothing goes to disk unless Debug logging is on (Developer mode).
+        remove_legacy_logs()
+        _apply_debug_logging(engine.settings)
         window = MainWindow(service, theme, engine, use_tray=use_tray)
     except LexiTrackError as exc:
         log.exception("LexiTrack could not start")
@@ -140,6 +143,8 @@ def run_headless() -> int:
         return 2
     database = Database()
     database.connect()
+    remove_legacy_logs()
+    _apply_debug_logging(LearningService(database).settings)
     maintenance = Maintenance(database)
     maintenance.run_daily()
     stopped = threading.Event()
@@ -164,6 +169,13 @@ def run_headless() -> int:
         database.close()
         instance.close()
     return 0
+
+
+def _apply_debug_logging(settings) -> None:
+    """Open today's log file only when the user turned Debug logging on."""
+    target = set_file_logging(settings.developer_mode and settings.debug_logging)
+    if target is not None:
+        log.info("Debug logging is on: writing to %s", target)
 
 
 def _enable_high_dpi() -> None:

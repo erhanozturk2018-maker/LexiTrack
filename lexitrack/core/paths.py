@@ -56,8 +56,27 @@ def exports_dir() -> Path:
     return data_dir() / "exports"
 
 
-def log_path() -> Path:
-    return data_dir() / "lexitrack.log"
+def logs_dir() -> Path:
+    """Where the daily log files go, when debug logging is on.
+
+    Beside ``data`` rather than inside it: logs describe the program, not the
+    vocabulary, and must never end up in a backup. ``LEXITRACK_LOG_DIR``
+    overrides it; with ``LEXITRACK_DATA_DIR`` set (tests, portable installs)
+    the logs stay inside that folder so nothing leaks into the clone.
+    """
+    override = os.environ.get("LEXITRACK_LOG_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if os.environ.get(_ENV_DATA_DIR):
+        return data_dir() / "logs"
+    if _is_writable(PROJECT_ROOT):
+        return PROJECT_ROOT / "logs"
+    return user_data_dir() / "logs"
+
+
+def log_file(day: str, directory: Path | None = None) -> Path:
+    """The log file for one day, e.g. ``logs/lexitrack-2026-09-18.log``."""
+    return (directory or logs_dir()) / f"lexitrack-{day}.log"
 
 
 def ensure_data_dirs() -> Path:
