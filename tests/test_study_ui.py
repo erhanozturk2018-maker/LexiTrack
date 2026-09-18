@@ -325,3 +325,39 @@ def _key(key: Qt.Key):
     from PySide6.QtGui import QKeyEvent
 
     return QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+
+
+class TestTelegramController:
+    def test_no_token_and_switched_off_is_simply_off(self, qapp, loaded) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.telegram.runtime import BotState
+        from lexitrack.ui.telegram_controller import TelegramController
+
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        assert controller.apply() is BotState.OFF
+
+    def test_switched_on_without_a_token_says_what_is_missing(self, qapp, loaded) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.telegram.runtime import BotState
+        from lexitrack.ui.telegram_controller import TelegramController
+
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        states: list[str] = []
+        controller.state_changed.connect(lambda state, _detail: states.append(state))
+        assert controller.set_enabled(True) is BotState.NO_TOKEN
+        assert states[-1] == BotState.NO_TOKEN.value
+        assert controller.enabled is True, "the switch is remembered even without a token"
+
+    def test_the_settings_page_shows_where_to_paste_the_token(
+        self, qapp, engine, loaded
+    ) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.ui.telegram_controller import TelegramController
+
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        dialog = SettingsDialog(engine, loaded, ThemeManager(), telegram=controller)
+        assert ".env" in dialog.telegram_token.text()
+        assert "/start" in dialog.telegram_chat.text()
+        dialog.telegram_enabled.setChecked(True)
+        dialog._save()
+        assert engine.settings.telegram_enabled is True

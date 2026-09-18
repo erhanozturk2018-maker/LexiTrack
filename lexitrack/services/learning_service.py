@@ -431,6 +431,24 @@ class LearningService:
     def open_session(self, channel: Channel) -> ReviewSession | None:
         return self._sessions.open_session(channel)
 
+    def session(self, session_id: str) -> ReviewSession | None:
+        return self._sessions.get(session_id)
+
+    def show_in_session(
+        self, session_id: str, word_id: int | None, message_id: str | None = None
+    ) -> ReviewSession:
+        """Record which card a session is showing, and in which message.
+
+        The Telegram client asks this before rendering a card, so that a tap
+        on an older card — a message scrolled up, a re-delivered callback —
+        can be recognised as not the card on screen and ignored.
+        """
+        if word_id is None:
+            return self._sessions.update(session_id, message_id=message_id, clear_current=True)
+        return self._sessions.update(
+            session_id, message_id=message_id, current_word_id=int(word_id)
+        )
+
     def finish_session(self, session_id: str) -> ReviewSession:
         return self._sessions.finish(session_id, self._clock.now_utc())
 

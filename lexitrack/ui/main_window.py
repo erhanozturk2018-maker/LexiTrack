@@ -61,6 +61,7 @@ from .settings_dialog import SettingsDialog
 from .shortcuts_dialog import FLASHCARD_KEYS, HOME_KEYS, STUDY_KEYS, TABLE_KEYS, ShortcutsDialog
 from .study_page import StudyPage
 from .study_plan_dialog import StudyPlanDialog
+from .telegram_controller import TelegramController
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
 from .unknown_page import UnknownPage
@@ -83,6 +84,7 @@ class MainWindow(QMainWindow):
         service: VocabularyService,
         theme: ThemeManager,
         engine: LearningService | None = None,
+        telegram: TelegramController | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -91,6 +93,8 @@ class MainWindow(QMainWindow):
         # One engine for the whole window, and later for the Telegram thread:
         # both must read the same settings and the same clock.
         self._engine = engine or LearningService(service.database)
+        self.telegram = telegram or TelegramController(service.database, parent=self)
+        self.telegram.activity.connect(self._on_bot_activity)
         self._settings = QSettings()
         self._current_list_id: int | None = self._load_int(_SETTINGS_LIST)
         self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.FLASHCARD))
@@ -113,6 +117,7 @@ class MainWindow(QMainWindow):
         self._ensure_current_list()
         self._engine.close_stale_sessions()
         self.show_page(self._opening_page())
+        self.telegram.apply()
 
     # -- construction ------------------------------------------------------
 
@@ -476,9 +481,19 @@ class MainWindow(QMainWindow):
         Its changes reach the engine through the service rather than through
         this window, so the page behind only needs redrawing.
         """
-        dialog = SettingsDialog(self._engine, self._service, self._theme, parent=self)
+        dialog = SettingsDialog(
+            self._engine, self._service, self._theme, telegram=self.telegram, parent=self
+        )
         dialog.changed.connect(self._on_data_changed)
         dialog.exec()
+        # The bot switch is saved with the rest; this starts or stops the
+        # thread to match it.
+        self.telegram.apply()
+
+    def _on_bot_activity(self) -> None:
+        """An answer or a confirmation arrived from the phone."""
+        if self.current_page == STUDY and not self.study.in_session:
+            self.study.refresh()
 
     def _toast(self, message: str) -> None:
         """A short message at the bottom of the window."""
@@ -612,5 +627,7 @@ class MainWindow(QMainWindow):
             return None
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        # Stop polling before the database closes under the bot thread.
+        self.telegram.shutdown()
         self._service.close()
         super().closeEvent(event)

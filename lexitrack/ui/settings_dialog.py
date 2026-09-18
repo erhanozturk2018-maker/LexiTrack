@@ -49,12 +49,16 @@ from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
 from ..services.vocabulary_service import VocabularyService
+from ..telegram.config import env_file_candidates
+from ..telegram.runtime import BotState
 from .dialogs import confirm, error_label, show_error
+from .telegram_controller import TelegramController
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
 
-LEARNING, APPEARANCE, DATA, ADVANCED, ABOUT = (
+LEARNING, TELEGRAM, APPEARANCE, DATA, ADVANCED, ABOUT = (
     "Learning",
+    "Telegram",
     "Appearance",
     "Data",
     "Advanced",
@@ -73,12 +77,14 @@ class SettingsDialog(QDialog):
         engine: LearningService,
         service: VocabularyService,
         theme: ThemeManager,
+        telegram: TelegramController | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._engine = engine
         self._service = service
         self._theme = theme
+        self._telegram = telegram
         self._settings = engine.refresh_settings()
 
         self.setWindowTitle("Settings")
@@ -105,6 +111,7 @@ class SettingsDialog(QDialog):
         self.pages = QStackedWidget()
         self._page_widgets: dict[str, QWidget] = {
             LEARNING: self._build_learning(),
+            TELEGRAM: self._build_telegram(),
             APPEARANCE: self._build_appearance(),
             DATA: self._build_data(),
             ADVANCED: self._build_advanced(),
@@ -205,6 +212,113 @@ class SettingsDialog(QDialog):
         )
         layout.addStretch(1)
         return page
+
+    def _build_telegram(self) -> QWidget:
+        page, layout = _page(
+            "Telegram",
+            "Today's words each morning and your reviews on your phone, for as "
+            "long as LexiTrack is running.",
+        )
+        self.telegram_enabled = QCheckBox("Send my daily words and reviews to Telegram")
+        self.telegram_enabled.setToolTip(
+            "Stays as you leave it across restarts. Turning it off stops the bot "
+            "until you turn it on again."
+        )
+        layout.addWidget(self.telegram_enabled)
+
+        form = _form()
+        self.telegram_status = QLabel()
+        self.telegram_status.setObjectName("ContextName")
+        form.addRow("Status", self.telegram_status)
+        self.telegram_token = QLabel()
+        self.telegram_token.setWordWrap(True)
+        self.telegram_token.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow("Token", self.telegram_token)
+        self.telegram_chat = QLabel()
+        self.telegram_chat.setWordWrap(True)
+        form.addRow("Your chat", self.telegram_chat)
+        layout.addLayout(form)
+
+        row = QHBoxLayout()
+        row.setSpacing(METRICS.space_2)
+        open_env = QPushButton("Open .env")
+        open_env.setToolTip("Open the file the token is read from")
+        open_env.clicked.connect(self._open_env)
+        row.addWidget(open_env)
+        reload_env = QPushButton("Reload .env")
+        reload_env.setToolTip("Read the token again, after you have pasted it in")
+        reload_env.clicked.connect(self._reload_env)
+        row.addWidget(reload_env)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        layout.addWidget(_heading("SETTING IT UP"))
+        layout.addWidget(
+            _note(
+                "1.  In Telegram, open @BotFather, send /newbot and follow the two "
+                "questions. It replies with a token.\n"
+                "2.  Open .env, paste the token after LEXITRACK_TELEGRAM_TOKEN= and save.\n"
+                "3.  Press Reload .env, tick the box above and press Save.\n"
+                "4.  Open your new bot in Telegram and send /start. That chat becomes "
+                "the only one the bot answers."
+            )
+        )
+        layout.addWidget(
+            _note(
+                "The token is never stored in the vocabulary database, so it is not "
+                "in your backups. If it leaks, revoke it in @BotFather and paste the "
+                "new one."
+            )
+        )
+        layout.addStretch(1)
+        if self._telegram is not None:
+            self._telegram.state_changed.connect(lambda *_: self._show_telegram_state())
+        return page
+
+    def _show_telegram_state(self) -> None:
+        telegram = self._telegram
+        if telegram is None:
+            self.telegram_status.setText("Unavailable")
+            return
+        state = telegram.state
+        status = state.label
+        if telegram.detail:
+            status = f"{status} · {telegram.detail}"
+        self.telegram_status.setText(status)
+        self.telegram_status.setProperty("tone", "error" if state is BotState.ERROR else "")
+
+        config = telegram.config
+        if config.has_token:
+            where = str(config.source) if config.source else "the environment"
+            self.telegram_token.setText(f"{config.masked_token}  (from {where})")
+        else:
+            target = next(
+                (path for path in env_file_candidates() if path.exists()),
+                env_file_candidates()[-1],
+            )
+            self.telegram_token.setText(f"Not set. Paste it into {target}")
+        owner = telegram.owner_chat()
+        self.telegram_chat.setText(
+            owner if owner else "Not connected yet — send /start to your bot"
+        )
+
+    def _open_env(self) -> None:
+        candidates = env_file_candidates()
+        target = next((path for path in candidates if path.exists()), candidates[-1])
+        if not target.exists():
+            example = target.with_name(".env.example")
+            text = (
+                example.read_text(encoding="utf-8")
+                if example.exists()
+                else "LEXITRACK_TELEGRAM_TOKEN=\nLEXITRACK_TELEGRAM_CHAT_ID=\n"
+            )
+            target.write_text(text, encoding="utf-8")
+        QDesktopServices.openUrl(_file_url(target))
+
+    def _reload_env(self) -> None:
+        if self._telegram is not None:
+            self._telegram.restart()
+        self._show_telegram_state()
 
     def _build_appearance(self) -> QWidget:
         page, layout = _page("Appearance", "The only setting here that is not shared with the bot.")
@@ -395,6 +509,8 @@ class SettingsDialog(QDialog):
         self.leech_weak.setValue(int(s.leech_weak_stability_days))
         self.developer_mode.setChecked(s.developer_mode)
         self.debug_logging.setChecked(s.debug_logging)
+        self.telegram_enabled.setChecked(s.telegram_enabled)
+        self._show_telegram_state()
         index = self.theme_combo.findData(self._theme.current.value)
         self.theme_combo.setCurrentIndex(max(index, 0))
         self._apply_developer_mode(s.developer_mode)
@@ -426,6 +542,7 @@ class SettingsDialog(QDialog):
             Setting.LEECH_WEAK_STABILITY_DAYS: self.leech_weak.value(),
             Setting.DEVELOPER_MODE: self.developer_mode.isChecked(),
             Setting.DEBUG_LOGGING: self.debug_logging.isChecked(),
+            Setting.TELEGRAM_ENABLED: self.telegram_enabled.isChecked(),
         }
         try:
             self._engine.save_settings(values)
