@@ -85,11 +85,10 @@ pip install -e ".[dev]"
 > `[WinError 206] The filename or extension is too long`. Clone somewhere
 > shorter, such as `C:\Projects\LexiTrack`, or enable long paths in Windows.
 
-> **Use `pip install -e .`, not `pip install .`** The `-e` (editable) install
-> runs LexiTrack from the clone, which is what keeps your data in the clone's
-> `data/` folder and lets it read the clone's `.env`. A plain `pip install .`
-> copies the code into `site-packages` and LexiTrack then keeps its data in
-> the per-user folder instead (see *Where your files live*).
+`pip install -e .` runs LexiTrack from the clone and keeps its data in the
+clone's `data/` folder, which suits development. `pip install .` installs a
+regular copy, which keeps its data in your user folder. Both work the same way;
+*Where your files live* below shows where each one stores its files.
 
 ## Running
 
