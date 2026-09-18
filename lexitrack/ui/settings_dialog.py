@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core import paths
+from ..core import autostart, paths
 from ..core.errors import LexiTrackError
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
@@ -341,6 +341,14 @@ class SettingsDialog(QDialog):
 
     def _build_data(self) -> QWidget:
         page, layout = _page("Data", "Where your words live, and how to start over.")
+        self.autostart = QCheckBox("Start LexiTrack when I sign in to Windows")
+        self.autostart.setToolTip(
+            "Starts in the tray, without a window, so the morning message is sent. "
+            "Also in Task Manager → Startup."
+        )
+        self.autostart.setVisible(autostart.supported())
+        self.autostart.setChecked(autostart.is_enabled())
+        layout.addWidget(self.autostart)
         form = _form()
         folder = QLabel(str(paths.data_dir()))
         folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -549,6 +557,8 @@ class SettingsDialog(QDialog):
         except LexiTrackError as exc:
             show_error(self.error, exc.user_message)
             return
+        if autostart.supported() and self.autostart.isChecked() != autostart.is_enabled():
+            autostart.set_enabled(self.autostart.isChecked())
         chosen = ThemeName(str(self.theme_combo.currentData()))
         if chosen is not self._theme.current:
             self._theme.apply(chosen)

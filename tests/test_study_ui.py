@@ -361,3 +361,94 @@ class TestTelegramController:
         dialog.telegram_enabled.setChecked(True)
         dialog._save()
         assert engine.settings.telegram_enabled is True
+
+
+class TestBackgroundLife:
+    """Closing, the tray, a second launch, and Start with Windows."""
+
+    def test_without_the_bot_closing_the_window_quits(self, qapp, loaded, engine) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.ui.telegram_controller import TelegramController
+
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        win = MainWindow(loaded, ThemeManager(), engine, telegram=controller, use_tray=True)
+        win.show()
+        assert win.close() is True
+
+    def test_with_the_bot_on_closing_hides_to_the_tray(self, qapp, loaded, engine) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.ui.telegram_controller import TelegramController
+        from lexitrack.ui.tray import Tray
+
+        if not Tray.available():
+            pytest.skip("no system tray on this machine")
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        controller.set_enabled(True)
+        win = MainWindow(loaded, ThemeManager(), engine, telegram=controller, use_tray=True)
+        win.show()
+        assert win.close() is False, "the close was refused"
+        assert not win.isVisible()
+        win.bring_forward()
+        assert win.isVisible()
+        win._quitting = True
+        assert win.close() is True
+
+    def test_the_tray_menu_reads_the_day_and_the_switches(self, qapp, loaded, engine) -> None:
+        from lexitrack.telegram.config import TelegramConfig
+        from lexitrack.ui.telegram_controller import TelegramController
+        from lexitrack.ui.tray import Tray
+
+        with_plan(engine, loaded)
+        controller = TelegramController(loaded.database, config=TelegramConfig())
+        tray = Tray(engine, controller)
+        tray.refresh()
+        assert tray.today_action.text() == "Today: 25 new · 0 due"
+        assert tray.bot_action.isChecked() is False
+        tray.bot_action.setChecked(True)
+        assert controller.enabled is True
+        assert "no token" in tray.bot_action.text().lower()
+
+    def test_a_second_launch_brings_the_first_forward(self, qapp) -> None:
+        """Two real processes, as in life.
+
+        On Windows the socket is a named pipe, and a client in the same thread
+        as the server cannot complete the exchange — so the second launch is a
+        real second Python process.
+        """
+        import subprocess
+        import sys
+        import time
+
+        from lexitrack.ui.single_instance import InstanceServer, notify_running_instance
+
+        name = f"LexiTrack-test-{time.time_ns()}"
+        server = InstanceServer(name)
+        assert server.listen()
+        seen: list[bool] = []
+        server.show_requested.connect(lambda: seen.append(True))
+        client = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from PySide6.QtCore import QCoreApplication;"
+                "from lexitrack.ui.single_instance import notify_running_instance as n;"
+                f"app = QCoreApplication([]); raise SystemExit(0 if n({name!r}) else 3)",
+            ]
+        )
+        deadline = time.monotonic() + 15
+        while not seen and time.monotonic() < deadline:
+            qapp.processEvents()
+            time.sleep(0.02)
+        assert client.wait(15) == 0
+        server.close()
+        assert seen == [True]
+        assert notify_running_instance(name) is False, "nobody is listening any more"
+
+
+def test_start_with_windows_runs_the_app_minimized_without_a_console() -> None:
+    from lexitrack.core import autostart
+
+    command = autostart.launch_command()
+    assert command.endswith("-m lexitrack --minimized")
+    if autostart.supported():
+        assert "pythonw.exe" in command.lower() or "python" in command.lower()

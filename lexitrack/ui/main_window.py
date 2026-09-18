@@ -32,6 +32,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QSize, Qt, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -64,6 +65,7 @@ from .study_plan_dialog import StudyPlanDialog
 from .telegram_controller import TelegramController
 from .theme import ThemeManager, ThemeName
 from .theme.palette import METRICS
+from .tray import Tray, app_icon
 from .unknown_page import UnknownPage
 
 log = logging.getLogger(__name__)
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
         theme: ThemeManager,
         engine: LearningService | None = None,
         telegram: TelegramController | None = None,
+        use_tray: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -95,6 +98,16 @@ class MainWindow(QMainWindow):
         self._engine = engine or LearningService(service.database)
         self.telegram = telegram or TelegramController(service.database, parent=self)
         self.telegram.activity.connect(self._on_bot_activity)
+        self._quitting = False
+        self._told_about_tray = False
+        self.tray: Tray | None = None
+        if use_tray and Tray.available():
+            self.tray = Tray(self._engine, self.telegram, self)
+            self.tray.open_requested.connect(self.bring_forward)
+            self.tray.settings_requested.connect(self._settings_from_tray)
+            self.tray.quit_requested.connect(self.quit)
+            self.tray.show()
+        self.setWindowIcon(app_icon())
         self._settings = QSettings()
         self._current_list_id: int | None = self._load_int(_SETTINGS_LIST)
         self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.FLASHCARD))
@@ -490,6 +503,26 @@ class MainWindow(QMainWindow):
         # thread to match it.
         self.telegram.apply()
 
+    def bring_forward(self) -> None:
+        """Show the window from the tray or a second launch, on top."""
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if self.current_page == STUDY:
+            self.study.refresh()
+
+    def quit(self) -> None:
+        """Quit for real: the window, the bot and the process."""
+        self._quitting = True
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def _settings_from_tray(self) -> None:
+        self.bring_forward()
+        self.open_settings()
+
     def _on_bot_activity(self) -> None:
         """An answer or a confirmation arrived from the phone."""
         if self.current_page == STUDY and not self.study.in_session:
@@ -627,7 +660,24 @@ class MainWindow(QMainWindow):
             return None
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        """Close hides to the tray while the bot is on; otherwise it quits.
+
+        With the bot off there is nothing to keep running, and an app that
+        lingers in the tray for no reason is an app people learn to kill.
+        """
+        if not self._quitting and self.tray is not None and self.telegram.enabled:
+            event.ignore()
+            self.hide()
+            if not self._told_about_tray:
+                self._told_about_tray = True
+                self.tray.message(
+                    "LexiTrack is still running",
+                    "The Telegram bot keeps working. Quit from the tray icon to stop it.",
+                )
+            return
         # Stop polling before the database closes under the bot thread.
         self.telegram.shutdown()
+        if self.tray is not None:
+            self.tray.hide()
         self._service.close()
         super().closeEvent(event)
