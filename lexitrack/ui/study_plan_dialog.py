@@ -39,6 +39,7 @@ from ..core.errors import LexiTrackError
 from ..models.srs import StudyPlan
 from ..services.learning_service import LearningService
 from ..services.vocabulary_service import VocabularyService
+from .components.cards import SegmentedProgress, repolish
 from .dialogs import confirm, dialog_header, error_label, show_error
 from .theme.palette import METRICS
 
@@ -64,7 +65,7 @@ class StudyPlanDialog(QDialog):
 
         self.setWindowTitle("Study Plan")
         self.setMinimumWidth(560)
-        self.setMinimumHeight(520)
+        self.setMinimumHeight(620)
         self._build()
         self._load_plans()
 
@@ -107,20 +108,25 @@ class StudyPlanDialog(QDialog):
         layout.addWidget(_section("LISTS IN THIS PLAN"))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.StyledPanel)
-        scroll.setObjectName("ListPicker")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         holder = QWidget()
         holder.setObjectName("PanelBody")
         self._list_layout = QVBoxLayout(holder)
-        self._list_layout.setContentsMargins(m.space_3, m.space_3, m.space_3, m.space_3)
+        self._list_layout.setContentsMargins(0, 0, m.space_1, 0)
         self._list_layout.setSpacing(m.space_2)
         scroll.setWidget(holder)
         layout.addWidget(scroll, 1)
 
+        summary_box = QFrame()
+        summary_box.setObjectName("SummaryBox")
+        summary_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        summary_layout = QVBoxLayout(summary_box)
+        summary_layout.setContentsMargins(m.space_4, m.space_3, m.space_4, m.space_3)
         self.summary = QLabel()
-        self.summary.setObjectName("Muted")
+        self.summary.setObjectName("SummaryText")
         self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
+        summary_layout.addWidget(self.summary)
+        layout.addWidget(summary_box)
 
         self.error = error_label()
         layout.addWidget(self.error)
@@ -167,15 +173,10 @@ class StudyPlanDialog(QDialog):
             self._list_layout.addWidget(empty)
             return
         for vocabulary_list in lists:
-            progress = vocabulary_list.progress
-            check = QCheckBox(
-                f"{vocabulary_list.name}   ({progress.total:,} words, "
-                f"{progress.unknown:,} unknown)"
-            )
-            check.setChecked(vocabulary_list.id in selected)
-            check.toggled.connect(self._update_summary)
-            self._checks[vocabulary_list.id] = check
-            self._list_layout.addWidget(check)
+            row = _ListRow(vocabulary_list, vocabulary_list.id in selected)
+            row.check.toggled.connect(self._update_summary)
+            self._checks[vocabulary_list.id] = row.check
+            self._list_layout.addWidget(row)
         self._list_layout.addStretch(1)
 
     def _on_plan_selected(self) -> None:
@@ -276,6 +277,56 @@ class StudyPlanDialog(QDialog):
             return
         self.changed = True
         self._load_plans()
+
+
+class _ListRow(QFrame):
+    """One list to include: a checkbox, its name and counts, its progress.
+
+    The same progress bar as the list cards on Home, so a list looks the same
+    wherever it appears. Clicking anywhere on the row toggles it.
+    """
+
+    def __init__(self, vocabulary_list, selected: bool, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("PlanListRow")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        m = METRICS
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(m.space_3, m.space_2 + 2, m.space_4, m.space_2 + 2)
+        layout.setSpacing(m.space_3)
+        self.check = QCheckBox()
+        self.check.setAccessibleName(vocabulary_list.name)
+        layout.addWidget(self.check)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        name = QLabel(vocabulary_list.name)
+        name.setObjectName("PlanListName")
+        progress = vocabulary_list.progress
+        meta = QLabel(
+            f"{progress.total:,} words \u00b7 {progress.known:,} known \u00b7 "
+            f"{progress.unknown:,} unknown"
+        )
+        meta.setObjectName("PlanListMeta")
+        text.addWidget(name)
+        text.addWidget(meta)
+        layout.addLayout(text, 1)
+        bar = SegmentedProgress()
+        bar.setFixedWidth(120)
+        bar.set_progress(progress)
+        layout.addWidget(bar, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.check.toggled.connect(self._show_selected)
+        self.check.setChecked(selected)
+        self._show_selected(selected)
+
+    def _show_selected(self, selected: bool) -> None:
+        self.setProperty("selected", "true" if selected else "false")
+        repolish(self)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and not self.check.underMouse():
+            self.check.toggle()
+        super().mouseReleaseEvent(event)
 
 
 def _section(text: str) -> QLabel:

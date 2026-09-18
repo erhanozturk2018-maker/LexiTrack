@@ -1,36 +1,36 @@
 """Study: the one screen that answers "what do I do today?".
 
-The page has three faces and shows exactly one of them, because each answers a
-different question and mixing them would make the first thing the user sees a
-layout instead of an instruction:
+The page has three faces and shows exactly one of them:
 
-1. **No plan yet** — one explanation and one button. A study plan is the only
-   thing the engine needs to start, so nothing else is offered here.
-2. **The day** — today's new words, today's reviews, and the week ahead. The
-   two actions are a button each; everything else on the page is a number.
-3. **A review session** — one word at a time and four answers. No navigation
-   chrome: leaving is Escape or the End button, and both are visible.
+1. **No plan yet** — one explanation and one button.
+2. **The day** — built the way Home is built, so the two read as one app:
+   a single *Today* panel at the top that makes the decision for you (the
+   day's two steps, one progress line, one button whose label is the next
+   thing to do), then sections whose titles sit outside their cards — the
+   new words as chips grouped by level, the week as seven day tiles, the
+   words you find hard, and the last thirty days as stat tiles.
+3. **A review session** — the same card as Review's flashcards: the word,
+   a chip for context, four answers inside the card with their keys, and
+   the count in the card's corner.
 
 Two decisions worth knowing:
 
-* **The new words are shown, not just counted.** "25 words to study" with no
-  words is an instruction to go and look somewhere else. The list is right
-  there, and the confirmation button is under it.
-* **The answer buttons say when the word comes back.** Four buttons labelled
-  only Again / Hard / Good / Easy give the user no way to tell Hard from Good.
-  The interval under each label is the actual scheduler's answer for this
-  card, not a guess.
+* **There is one primary button, and its label changes.** Two panels with a
+  button each made the user choose between them; the day has an order —
+  learn the new words, then review — and the button follows it.
+* **The answer buttons say when the word comes back**, and when all four say
+  the same thing they say it once, underneath.
 
-The page holds no learning logic at all: every number comes from one
+The page holds no learning logic: every number comes from one
 :meth:`LearningService.daily_plan` call, and every action is a service method.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import date
-from html import escape
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,30 +39,27 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ..models.srs import Rating
+from ..models.word_entry import CEFR_ORDER
 from ..services.learning_service import DailyPlan, LearningService, StudyItem
-from .components.cards import StatTile
+from .components.cards import StatTile, repolish
+from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
 from .theme import current_palette
 from .theme.palette import METRICS
 from .widgets import WrappedLabel
 
-#: How many of today's new words are listed before the rest are summarised.
-_WORDS_SHOWN = 30
-
-#: Which button style each answer gets. Amber for "not yet", green for "solid":
-#: the same language the flashcard answers already use, so the colours mean the
-#: same thing on both screens.
+#: Which button style each answer gets. Amber for "not yet", green for
+#: "solid", and Easy the solid green: the flashcards' own colour language.
 _ANSWER_STYLE: dict[Rating, tuple[str, str | None]] = {
     Rating.AGAIN: ("1", "unknown"),
     Rating.HARD: ("2", None),
-    Rating.GOOD: ("3", "primary"),
-    Rating.EASY: ("4", "known"),
+    Rating.GOOD: ("3", "known"),
+    Rating.EASY: ("4", "known-solid"),
 }
 
 EMPTY, DAY, SESSION = "empty", "day", "session"
@@ -76,87 +73,142 @@ def _label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
     return label
 
 
-class ForecastBars(QWidget):
-    """The next seven days as bars, with today first.
+def _panel(name: str = "Panel") -> tuple[QFrame, QVBoxLayout]:
+    m = METRICS
+    frame = QFrame()
+    frame.setObjectName(name)
+    frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
+    layout.setSpacing(m.space_3)
+    return frame, layout
 
-    A number per day ("37, 12, 8…") reads as noise; the shape of the week is
-    the thing worth seeing, and it is what tells the user a heavy day is
-    coming before they meet it.
-    """
+
+class _Section(QWidget):
+    """A title outside, content below — Home's OVERVIEW / YOUR LISTS pattern."""
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(METRICS.space_2 + 2)
+        self.header = QHBoxLayout()
+        self.header.setSpacing(METRICS.space_2)
+        self.title = _label(title, "SectionTitle")
+        self.header.addWidget(self.title)
+        self.header.addStretch(1)
+        layout.addLayout(self.header)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(METRICS.space_2)
+        layout.addLayout(self.body)
+
+    def set_title(self, text: str) -> None:
+        self.title.setText(text)
+
+
+class _Step(QWidget):
+    """One line of the Today panel: a mark, what to do, how far along."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._days: tuple[tuple[str, int], ...] = ()
-        self.setMinimumHeight(96)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(METRICS.space_2 + 2)
+        self.glyph = _label("", "StepGlyph")
+        self.glyph.setFixedWidth(18)
+        self.text = _label("", "StepText")
+        self.meta = _label("", "StepMeta")
+        layout.addWidget(self.glyph)
+        layout.addWidget(self.text)
+        layout.addWidget(self.meta)
+        layout.addStretch(1)
 
-    def set_forecast(self, days: tuple[tuple[str, int], ...]) -> None:
-        self._days = days
-        total = sum(count for _, count in days)
-        self.setToolTip(
-            "  ".join(f"{day[5:]}: {count}" for day, count in days) if days else ""
-        )
-        self.setAccessibleName(f"{total} reviews due over the next {len(days)} days")
+    def set_step(self, text: str, meta: str, state: str) -> None:
+        """``state`` is ``done``, ``active`` or ``waiting``."""
+        self.glyph.setText({"done": "✓", "active": "●"}.get(state, "○"))
+        for widget in (self.glyph, self.text):
+            widget.setProperty("state", state)
+            repolish(widget)
+        self.text.setText(text)
+        self.meta.setText(meta)
+        self.meta.setVisible(bool(meta))
+        self.setAccessibleName(f"{text}. {meta}")
+
+
+class _SessionProgress(QWidget):
+    """The thin line along the top edge of the session card."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._share = 0.0
+        self.setFixedHeight(4)
+
+    def set_share(self, share: float) -> None:
+        self._share = min(max(share, 0.0), 1.0)
         self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(420, 96)
-
     def paintEvent(self, _event) -> None:  # noqa: N802
-        if not self._days:
-            return
         palette = current_palette()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setFont(self.font())
-
-        label_height = 18
-        width = self.width()
-        height = self.height() - label_height
-        count = len(self._days)
-        slot = width / count
-        bar_width = min(slot - 8, 42)
-        peak = max(count for _, count in self._days) or 1
-
-        for index, (day, value) in enumerate(self._days):
-            left = index * slot + (slot - bar_width) / 2
-            # A zero day still gets a sliver, so the week reads as seven days
-            # rather than as a gap.
-            bar_height = max(round(height * value / peak), 2) if value else 2
-            top = height - bar_height
-            colour = QColor(palette.accent if index == 0 else palette.accent_soft)
-            if index and value:
-                colour = QColor(palette.accent)
-                colour.setAlpha(110)
-            painter.setBrush(colour)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(int(left), int(top), int(bar_width), int(bar_height), 4, 4)
-
-            painter.setPen(QColor(palette.text_faint if index else palette.text_muted))
-            painter.drawText(
-                int(index * slot),
-                height + 2,
-                int(slot),
-                label_height,
-                Qt.AlignmentFlag.AlignCenter,
-                "Today" if index == 0 else day[8:10],
-            )
-            if value:
-                # A tall bar leaves no room above it, and a number drawn at a
-                # negative y is simply not drawn — so it moves inside the bar.
-                inside = top < 16
-                painter.setPen(
-                    QColor(palette.text_on_accent if inside else palette.text_muted)
-                )
-                painter.drawText(
-                    int(left) - 4,
-                    int(top + 2) if inside else int(top) - 15,
-                    int(bar_width) + 8,
-                    14,
-                    Qt.AlignmentFlag.AlignCenter,
-                    str(value),
-                )
+        painter.setPen(Qt.PenStyle.NoPen)
+        radius = self.height() / 2
+        painter.setBrush(QColor(palette.surface_sunken))
+        painter.drawRoundedRect(self.rect(), radius, radius)
+        width = round(self.width() * self._share)
+        if width:
+            painter.setBrush(QColor(palette.accent))
+            painter.drawRoundedRect(0, 0, width, self.height(), radius, radius)
         painter.end()
+
+
+class _AnswerButton(QPushButton):
+    """An answer: its key, its name and when the word comes back.
+
+    Built from labels inside the button because a QPushButton cannot mix type
+    sizes in its own text, and the key and the interval must be smaller and
+    quieter than the answer itself.
+    """
+
+    def __init__(self, rating: Rating, key: str, variant: str | None) -> None:
+        super().__init__()
+        self.rating = rating
+        self.setObjectName("AnswerButton")
+        if variant:
+            self.setProperty("variant", variant)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(f"{rating.label} ({key})")
+        self.setAccessibleName(rating.label)
+        self.setFixedHeight(60)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(1)
+        layout.addStretch(1)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        top.addStretch(1)
+        self.key = _label(key, "AnswerKey")
+        self.key.setFixedHeight(18)
+        self.key.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title = _label(rating.label, "AnswerTitle")
+        top.addWidget(self.key, 0, Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(self.title, 0, Qt.AlignmentFlag.AlignVCenter)
+        top.addStretch(1)
+        layout.addLayout(top)
+        self.sub = _label("", "AnswerSub")
+        self.sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.sub)
+        layout.addStretch(1)
+        for child in (self.key, self.title, self.sub):
+            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_interval(self, text: str) -> None:
+        self.sub.setText(text)
+        self.sub.setVisible(bool(text))
+
+    def text(self) -> str:  # noqa: D102 - what a reader of the button sees
+        interval = self.sub.text() if not self.sub.isHidden() else ""
+        return f"{self.rating.label}\n{interval}" if interval else self.rating.label
 
 
 class StudyPage(QWidget):
@@ -179,6 +231,8 @@ class StudyPage(QWidget):
         self._session_id: str | None = None
         self._revealed = False
         self._answered = 0
+        self._plan: DailyPlan | None = None
+        self._primary: str | None = None
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -235,7 +289,7 @@ class StudyPage(QWidget):
         page.setObjectName("PanelBody")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(m.space_7, m.space_5, m.space_7, m.space_6)
-        layout.setSpacing(m.space_4)
+        layout.setSpacing(m.space_5)
 
         header = QHBoxLayout()
         header.setSpacing(m.space_3)
@@ -247,160 +301,124 @@ class StudyPage(QWidget):
         header.addLayout(titles, 1)
         self.plan_button = QPushButton("Study Plan…")
         self.plan_button.setProperty("variant", "ghost")
-        self.plan_button.setToolTip("Choose which lists you are working through")
+        self.plan_button.setToolTip("Choose which lists you are working through (Ctrl+P)")
         self.plan_button.clicked.connect(self.manage_plan.emit)
         header.addWidget(self.plan_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
+        layout.addSpacing(-m.space_2)
 
-        layout.addWidget(self._build_intake_panel())
-        layout.addWidget(self._build_review_panel())
-        self._forecast_panel = self._build_forecast_panel()
-        layout.addWidget(self._forecast_panel)
-        self._hard_panel = self._build_hard_panel()
-        layout.addWidget(self._hard_panel)
-        self._stats_panel = self._build_stats_panel()
-        layout.addWidget(self._stats_panel)
+        layout.addWidget(self._build_today())
+        self.words_section = self._build_words()
+        layout.addWidget(self.words_section)
+        self.week_section = self._build_week()
+        layout.addWidget(self.week_section)
+        self.hard_section = self._build_hard()
+        layout.addWidget(self.hard_section)
+        self.stats_section = self._build_stats()
+        layout.addWidget(self.stats_section)
         layout.addStretch(1)
         scroll.setWidget(page)
         return scroll
 
-    def _build_intake_panel(self) -> QWidget:
+    def _build_today(self) -> QWidget:
+        """The decision panel: the day's two steps and one button."""
         m = METRICS
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        layout.setSpacing(m.space_3)
+        panel, layout = _panel()
+        layout.setSpacing(m.space_2)
+        layout.addWidget(_label("TODAY", "SectionTitle"))
+        row = QHBoxLayout()
+        row.setSpacing(m.space_5)
+        steps = QVBoxLayout()
+        steps.setSpacing(m.space_2)
+        self.step_new = _Step()
+        self.step_review = _Step()
+        steps.addWidget(self.step_new)
+        steps.addWidget(self.step_review)
+        steps.addSpacing(m.space_1)
+        self.day_progress = DayProgress()
+        steps.addWidget(self.day_progress)
+        row.addLayout(steps, 1)
 
-        top = QHBoxLayout()
-        top.setSpacing(m.space_3)
-        heading = QVBoxLayout()
-        heading.setSpacing(2)
-        heading.addWidget(_label("NEW WORDS TODAY", "SectionTitle"))
-        self.intake_count = _label("", "StatValue")
-        heading.addWidget(self.intake_count)
-        top.addLayout(heading, 1)
-        self.intake_button = QPushButton("I have studied these")
-        self.intake_button.setProperty("variant", "primary")
-        self.intake_button.setToolTip(
-            "Confirm you have learned today's words. They will be reviewed from tomorrow."
-        )
-        self.intake_button.clicked.connect(self._introduce)
-        top.addWidget(self.intake_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addLayout(top)
+        buttons = QVBoxLayout()
+        buttons.setSpacing(m.space_2)
+        self.primary_button = QPushButton()
+        self.primary_button.setProperty("variant", "primary")
+        self.primary_button.setMinimumWidth(210)
+        self.primary_button.setMinimumHeight(40)
+        self.primary_button.clicked.connect(self._primary_action)
+        buttons.addWidget(self.primary_button)
+        self.secondary_button = QPushButton()
+        self.secondary_button.setProperty("variant", "ghost")
+        self.secondary_button.clicked.connect(self.start_session)
+        buttons.addWidget(self.secondary_button)
+        row.addLayout(buttons)
+        layout.addLayout(row)
 
-        self.intake_words = _label("", "DefinitionLabel", wrap=True)
-        self.intake_words.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.intake_words)
-        tools = QHBoxLayout()
-        tools.setSpacing(METRICS.space_2)
-        self.copy_button = QPushButton("Copy with meanings")
-        self.copy_button.setProperty("variant", "ghost")
-        self.copy_button.setProperty("size", "small")
-        self.copy_button.setToolTip("Copy today's words and their meanings, one per line")
-        self.copy_button.clicked.connect(self._copy_words)
-        tools.addWidget(self.copy_button)
-        self.export_button = QPushButton("Export\u2026")
-        self.export_button.setProperty("variant", "ghost")
-        self.export_button.setProperty("size", "small")
-        self.export_button.setToolTip("Save today's words as PDF, CSV or JSON (Ctrl+E)")
-        self.export_button.clicked.connect(self.export_requested.emit)
-        tools.addWidget(self.export_button)
-        tools.addStretch(1)
-        layout.addLayout(tools)
         self.intake_note = _label("", "WarningText", wrap=True)
         layout.addWidget(self.intake_note)
-        self.intake_pool = _label("", "Faint")
-        layout.addWidget(self.intake_pool)
+        self.pool_label = _label("", "Faint")
+        layout.addWidget(self.pool_label)
         return panel
 
-    def _build_review_panel(self) -> QWidget:
-        m = METRICS
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        layout.setSpacing(m.space_3)
+    def _build_words(self) -> _Section:
+        section = _Section("NEW WORDS")
+        self.copy_button = QPushButton("Copy")
+        self.export_button = QPushButton("Export…")
+        for button, tip in (
+            (self.copy_button, "Copy the words and their meanings, one per line"),
+            (self.export_button, "Save the words as PDF, CSV or JSON (Ctrl+E)"),
+        ):
+            button.setProperty("variant", "ghost")
+            button.setProperty("size", "small")
+            button.setToolTip(tip)
+            section.header.addWidget(button)
+        self.copy_button.clicked.connect(self._copy_words)
+        self.export_button.clicked.connect(self.export_requested.emit)
+        self._level_rows = QVBoxLayout()
+        self._level_rows.setSpacing(METRICS.space_2)
+        section.body.addLayout(self._level_rows)
+        return section
 
-        heading = QVBoxLayout()
-        heading.setSpacing(2)
-        heading.addWidget(_label("REVIEWS DUE", "SectionTitle"))
-        self.due_count = _label("", "StatValue")
-        heading.addWidget(self.due_count)
-        self.done_label = _label("", "Muted")
-        heading.addWidget(self.done_label)
-        layout.addLayout(heading, 1)
+    def _build_week(self) -> _Section:
+        section = _Section("THIS WEEK")
+        self.week = WeekStrip()
+        section.body.addWidget(self.week)
+        self.week_note = _label("", "Faint", wrap=True)
+        section.body.addWidget(self.week_note)
+        return section
 
-        self.review_button = QPushButton("Start reviewing")
-        self.review_button.setProperty("variant", "primary")
-        self.review_button.clicked.connect(self.start_session)
-        layout.addWidget(self.review_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        return panel
-
-    def _build_forecast_panel(self) -> QWidget:
-        m = METRICS
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        layout.setSpacing(m.space_3)
-        layout.addWidget(_label("THE WEEK AHEAD", "SectionTitle"))
-        self.forecast = ForecastBars()
-        layout.addWidget(self.forecast)
-        self.forecast_note = _label("", "Faint", wrap=True)
-        layout.addWidget(self.forecast_note)
-        return panel
-
-    def _build_hard_panel(self) -> QWidget:
-        """Words the engine has flagged. Shown only when there are some.
-
-        Listed by name rather than counted, with how often each has been
-        missed: the point is to look at them, and a number does not help
-        with that.
-        """
-        m = METRICS
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        layout.setSpacing(m.space_2)
-        layout.addWidget(_label("WORDS YOU FIND HARD", "SectionTitle"))
-        self.hard_words = _label("", "DefinitionLabel", wrap=True)
-        self.hard_words.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(self.hard_words)
-        self.hard_note = _label(
-            "They come first in every session until they stick. Writing them in a "
-            "sentence of your own tends to help more than another review.",
-            "Faint",
-            wrap=True,
+    def _build_hard(self) -> _Section:
+        """Words the engine has flagged, by name, with how often they slipped."""
+        section = _Section("WORDS YOU FIND HARD")
+        self.hard_chips = ChipFlow()
+        section.body.addWidget(self.hard_chips)
+        section.body.addWidget(
+            _label(
+                "They come first in every session until they stick. Using one in a "
+                "sentence of your own helps more than another review.",
+                "Faint",
+                wrap=True,
+            )
         )
-        layout.addWidget(self.hard_note)
-        return panel
+        return section
 
-    def _build_stats_panel(self) -> QWidget:
-        m = METRICS
-        panel = QFrame()
-        panel.setObjectName("Panel")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        layout.setSpacing(m.space_3)
-        layout.addWidget(_label("THE LAST 30 DAYS", "SectionTitle"))
+    def _build_stats(self) -> _Section:
+        section = _Section("THE LAST 30 DAYS")
         row = QHBoxLayout()
-        row.setSpacing(m.space_3)
+        row.setSpacing(METRICS.space_3)
         self.stat_reviews = StatTile("reviews")
         self.stat_again = StatTile("answered Again")
         self.stat_introduced = StatTile("new words learned")
         self.stat_long_term = StatTile("in long-term memory", tone="known")
-        for tile in (self.stat_reviews, self.stat_again, self.stat_introduced,
-                     self.stat_long_term):
+        for tile in (
+            self.stat_reviews,
+            self.stat_again,
+            self.stat_introduced,
+            self.stat_long_term,
+        ):
             row.addWidget(tile, 1)
-        layout.addLayout(row)
-        return panel
+        section.body.addLayout(row)
+        return section
 
     def _build_session(self) -> QWidget:
         m = METRICS
@@ -411,87 +429,96 @@ class StudyPage(QWidget):
 
         bar = QHBoxLayout()
         bar.setSpacing(m.space_3)
-        self.session_progress = _label("", "ContextName")
-        bar.addWidget(self.session_progress)
-        self.session_flag = _label("", "HistoryBanner")
-        self.session_flag.setVisible(False)
-        bar.addWidget(self.session_flag)
+        context = QVBoxLayout()
+        context.setSpacing(0)
+        context.addWidget(_label("REVIEWING", "ContextLabel"))
+        self.session_title = _label("", "ContextName")
+        context.addWidget(self.session_title)
+        bar.addLayout(context)
         bar.addStretch(1)
         end_button = QPushButton("End session")
         end_button.setProperty("variant", "ghost")
         end_button.setToolTip("Stop here and keep what you have answered (Esc)")
         end_button.clicked.connect(self.end_session)
-        bar.addWidget(end_button)
+        bar.addWidget(end_button, 0, Qt.AlignmentFlag.AlignTop)
         outer.addLayout(bar)
 
-        column = QVBoxLayout()
-        column.setSpacing(m.space_4)
         card = QFrame()
-        card.setObjectName("ReviewCard")
+        card.setObjectName("SessionCard")
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # Tall enough that the buttons never move between words, but not
-        # stretched: a card given the layout's spare height leaves one word
-        # floating in the middle of an empty page.
-        card.setMinimumHeight(260)
-        card.setMaximumHeight(380)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(m.space_6, m.space_6, m.space_6, m.space_6)
-        card_layout.setSpacing(m.space_3)
-        card_layout.addStretch(1)
+        card.setFixedWidth(600)
+        card_outer = QVBoxLayout(card)
+        card_outer.setContentsMargins(0, 0, 0, 0)
+        card_outer.setSpacing(0)
+
+        body = QVBoxLayout()
+        body.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_4)
+        body.setSpacing(m.space_3)
+        self.session_line = _SessionProgress()
+        body.addWidget(self.session_line)
+        top = QHBoxLayout()
+        self.session_flag = chip("Hard for you", tone="hard")
+        self.session_flag.setToolTip("You have missed this word several times")
+        top.addWidget(self.session_flag)
+        top.addStretch(1)
+        body.addLayout(top)
+        body.addSpacing(m.space_3)
 
         self.word_label = _label("", "WordLabel", wrap=True)
         self.word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.word_label)
+        body.addWidget(self.word_label)
         self.meta_label = _label("", "MetaLabel")
         self.meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.meta_label)
+        body.addWidget(self.meta_label)
 
-        self.reveal_button = QPushButton("Show meaning")
+        meaning = QVBoxLayout()
+        meaning.setSpacing(m.space_1)
+        self.reveal_button = QPushButton("Show meaning   Space")
         self.reveal_button.setProperty("variant", "ghost")
         self.reveal_button.setToolTip("Space")
         self.reveal_button.clicked.connect(self._reveal)
-        card_layout.addWidget(self.reveal_button, 0, Qt.AlignmentFlag.AlignHCenter)
-
+        meaning.addWidget(self.reveal_button, 0, Qt.AlignmentFlag.AlignHCenter)
         self.definition_label = _label("", "DefinitionLabel", wrap=True)
         self.definition_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.definition_label)
+        meaning.addWidget(self.definition_label)
         self.note_label = _label("", "SenseLabel", wrap=True)
         self.note_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(self.note_label)
-        card_layout.addStretch(1)
-        column.addWidget(card)
+        meaning.addWidget(self.note_label)
+        holder = QWidget()
+        holder.setObjectName("PanelBody")
+        holder.setLayout(meaning)
+        # Room for a two-line meaning is reserved, so revealing it does not
+        # push the answer buttons down under the pointer.
+        holder.setMinimumHeight(64)
+        body.addWidget(holder)
+        body.addSpacing(m.space_2)
 
         answers = QHBoxLayout()
         answers.setSpacing(m.space_2)
-        self.answer_buttons: dict[Rating, QPushButton] = {}
+        self.answer_buttons: dict[Rating, _AnswerButton] = {}
         for rating in Rating:
             key, variant = _ANSWER_STYLE[rating]
-            button = QPushButton(f"{rating.label}\n–")
-            button.setObjectName("AnswerButton")
-            if variant:
-                button.setProperty("variant", variant)
-            button.setToolTip(f"{rating.label} ({key})")
-            # Fixed, not minimum: the coloured variants carry more padding in
-            # the stylesheet, and four targets of different heights read as
-            # four different kinds of button.
-            button.setFixedHeight(56)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button = _AnswerButton(rating, key, variant)
             button.clicked.connect(lambda _checked=False, r=rating: self._answer(r))
             answers.addWidget(button, 1)
             self.answer_buttons[rating] = button
-        column.addLayout(answers)
+        body.addLayout(answers)
 
-        self.answer_hint = _label("", "Faint")
+        footer = QHBoxLayout()
+        self.session_progress = _label("", "CardFooter")
+        self.answer_hint = _label("", "CardFooter")
         self.answer_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        column.addWidget(self.answer_hint)
+        escape_hint = _label("Esc to stop", "CardFooter")
+        footer.addWidget(self.session_progress)
+        footer.addStretch(1)
+        footer.addWidget(self.answer_hint)
+        footer.addStretch(1)
+        footer.addWidget(escape_hint)
+        body.addLayout(footer)
+        card_outer.addLayout(body)
 
-        holder = QWidget()
-        # A set width rather than a maximum: without it the column shrinks to
-        # its content and the four answers end up different sizes.
-        holder.setFixedWidth(560)
-        holder.setLayout(column)
         outer.addStretch(1)
-        outer.addWidget(holder, 0, Qt.AlignmentFlag.AlignHCenter)
+        outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
         outer.addStretch(2)
         return page
 
@@ -503,6 +530,7 @@ class StudyPage(QWidget):
             return
         self._engine.refresh_settings()
         plan = self._engine.daily_plan()
+        self._plan = plan
         if not plan.has_plan:
             self._stack.setCurrentWidget(self._pages[EMPTY])
             return
@@ -522,88 +550,183 @@ class StudyPage(QWidget):
         parts.append(_pretty_date(plan.local_date))
         self.plan_label.setText(" · ".join(parts))
 
-        new_count = len(plan.new_words)
-        done_today = len(plan.introduced_today)
-        self.copy_button.setVisible(bool(new_count))
-        self.export_button.setVisible(bool(new_count))
-        if new_count:
-            self.intake_count.setText(f"{new_count}")
-            self.intake_words.setText(_word_list(plan))
-            self.intake_button.setEnabled(True)
-            self.intake_button.setText(
-                f"I have studied these {new_count}"
-                if new_count > 1
-                else "I have studied this word"
-            )
-        else:
-            self.intake_count.setText("0")
-            self.intake_button.setEnabled(False)
-            self.intake_button.setText("Nothing to confirm")
-            self.intake_words.setText(
-                f"{done_today} introduced today — they will be reviewed from tomorrow."
-                if done_today
-                else "No new words are being offered right now."
-            )
-        # A finished day is already stated above; repeating it as a warning
-        # would be three sentences for one fact. Only the workload valve gets
-        # its own line, because it is a reason rather than a result.
-        show_note = bool(plan.intake_note) and (plan.intake_paused or not done_today)
-        self.intake_note.setText(plan.intake_note or "")
-        self.intake_note.setVisible(show_note)
-        self.intake_pool.setText(
-            f"{plan.pool_remaining:,} words in the plan have not been introduced yet."
-            if plan.pool_remaining
-            else "Every word in this plan has been introduced."
-        )
-
-        self.due_count.setText(f"{plan.due_count}")
-        self.review_button.setEnabled(plan.due_count > 0)
-        self.review_button.setText(
-            "Start reviewing" if plan.due_count else "Nothing due today"
-        )
-        self.done_label.setText(
-            f"{plan.reviews_done_today} answered today"
-            if plan.reviews_done_today
-            else "Not started today"
-        )
-
-        # Before anything has been introduced the chart is seven empty slots,
-        # which is a lot of panel for no information.
-        scheduled = sum(count for _, count in plan.forecast)
-        self._forecast_panel.setVisible(bool(scheduled))
+        self._show_today(plan)
+        self._show_words(plan)
+        self._show_week(plan)
         self._show_hard_words()
         self._show_stats()
-        self.forecast.set_forecast(plan.forecast)
-        upcoming = [count for _, count in plan.forecast[1:]]
-        busiest = max(upcoming, default=0)
+
+    def _show_today(self, plan: DailyPlan) -> None:
+        new_count = len(plan.new_words)
+        learned = len(plan.introduced_today)
+        due = plan.due_count
+        done = plan.reviews_done_today
+
+        # Step 1: the new words.
+        if new_count:
+            self.step_new.set_step(
+                f"Learn {new_count} new {'word' if new_count == 1 else 'words'}",
+                f"{learned} already confirmed" if learned else "study them, then confirm",
+                "active",
+            )
+        elif learned:
+            self.step_new.set_step(f"Learned {learned} new words", "done", "done")
+        else:
+            self.step_new.set_step("No new words today", _no_words_reason(plan), "waiting")
+
+        # Step 2: the reviews.
+        if due:
+            meta = f"{done} answered" if done else "from earlier days"
+            self.step_review.set_step(
+                f"Review {due} {'word' if due == 1 else 'words'}",
+                meta,
+                "waiting" if new_count else "active",
+            )
+        elif done:
+            self.step_review.set_step(f"Reviewed {done} words", "done", "done")
+        else:
+            self.step_review.set_step(
+                "Nothing to review today", "new words come back tomorrow", "waiting"
+            )
+
+        # The day's progress: learning and reviewing as shares of all of it.
+        total = new_count + learned + due + done
+        self.day_progress.set_parts(
+            learned / total if total else 0.0, done / total if total else 0.0
+        )
+        self.day_progress.setVisible(bool(total))
+
+        # One primary button, labelled with the next thing to do.
+        self.secondary_button.setVisible(False)
+        if new_count:
+            self._primary = "introduce"
+            self.primary_button.setText(
+                f"I studied these {new_count}" if new_count > 1 else "I studied this word"
+            )
+            self.primary_button.setToolTip(
+                "Confirm you have learned the words below. They are reviewed from tomorrow."
+            )
+            self.primary_button.setEnabled(True)
+            if due:
+                self.secondary_button.setText(f"Review {due} first")
+                self.secondary_button.setVisible(True)
+        elif due:
+            self._primary = "review"
+            self.primary_button.setText(
+                "Continue reviewing →" if done else "Start reviewing →"
+            )
+            self.primary_button.setToolTip(f"{due} words are waiting (1–4 to answer)")
+            self.primary_button.setEnabled(True)
+        else:
+            self._primary = None
+            self.primary_button.setText("All done for today ✓")
+            self.primary_button.setToolTip("Nothing is waiting. See you tomorrow.")
+            self.primary_button.setEnabled(False)
+
+        # A finished day is already stated by the steps; only the workload
+        # valve gets its own line, because it is a reason, not a result.
+        show_note = bool(plan.intake_note) and (plan.intake_paused or not learned)
+        self.intake_note.setText(plan.intake_note or "")
+        self.intake_note.setVisible(show_note)
+        # Only the remaining pool is news; an empty pool is already the reason
+        # on the first step, and saying it twice reads as a warning.
+        self.pool_label.setText(
+            f"{plan.pool_remaining:,} words in the plan are still to come."
+        )
+        self.pool_label.setVisible(bool(plan.pool_remaining))
+
+    def _primary_action(self) -> None:
+        if self._primary == "introduce":
+            self._introduce()
+        elif self._primary == "review":
+            self.start_session()
+
+    def _show_words(self, plan: DailyPlan) -> None:
+        """Today's words as chips, one row per CEFR level.
+
+        Before confirming these are the words to study; afterwards the same
+        chips stay, greyed, as the words learned today — the list you just
+        worked through should not vanish the moment you finish it.
+        """
+        pending = list(plan.new_words)
+        words = pending or list(plan.introduced_today)
+        self.words_section.setVisible(bool(words))
+        if not words:
+            return
+        title = "NEW WORDS" if pending else "LEARNED TODAY"
+        self.words_section.set_title(f"{title} · {len(words)}")
+        self.copy_button.setVisible(True)
+        self.export_button.setVisible(bool(pending))
+
+        while self._level_rows.count():
+            item = self._level_rows.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        groups: OrderedDict[str, list] = OrderedDict()
+        for word in words:
+            groups.setdefault(word.cefr_level or "–", []).append(word)
+        order = {level: index for index, level in enumerate(CEFR_ORDER)}
+        for level in sorted(groups, key=lambda value: order.get(value, len(order))):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(METRICS.space_3)
+            level_label = _label(level, "LevelLabel")
+            level_label.setFixedWidth(26)
+            row_layout.addWidget(level_label, 0, Qt.AlignmentFlag.AlignTop)
+            flow = ChipFlow()
+            flow.set_chips(
+                chip(word.word, None if pending else "done", _meaning(word))
+                for word in groups[level]
+            )
+            row_layout.addWidget(flow, 1)
+            self._level_rows.addWidget(row)
+
+    def word_chips(self) -> list[str]:
+        """The words shown as chips, in order. For tests and accessibility."""
+        texts: list[str] = []
+        for index in range(self._level_rows.count()):
+            row = self._level_rows.itemAt(index).widget()
+            if row is None:
+                continue
+            flow = row.findChild(ChipFlow)
+            if flow is not None:
+                texts.extend(flow.texts())
+        return texts
+
+    def _show_week(self, plan: DailyPlan) -> None:
+        # Before anything has been introduced the week is seven zeros, which
+        # is a lot of screen for no information.
+        scheduled = sum(count for _, count in plan.forecast)
+        self.week_section.setVisible(bool(scheduled))
+        if not scheduled:
+            return
         capacity = plan.review_capacity
+        self.week.set_forecast(plan.forecast, capacity)
+        busiest = max((count for _, count in plan.forecast[1:]), default=0)
         if capacity and busiest > capacity:
-            self.forecast_note.setText(
-                f"The busiest day ahead has {busiest} reviews, over the {capacity} "
-                f"you set as a daily limit. New words will pause until it clears."
+            self.week_note.setText(
+                f"The busiest day has {busiest} reviews, over your limit of {capacity}. "
+                "New words pause until it clears."
             )
         else:
-            total = sum(count for _, count in plan.forecast)
-            self.forecast_note.setText(f"{total} reviews due over the next 7 days.")
+            self.week_note.setText(f"{scheduled} reviews over the next 7 days.")
 
     def _show_hard_words(self) -> None:
-        items = self._engine.struggling_words(limit=12)
-        self._hard_panel.setVisible(bool(items))
+        items = self._engine.struggling_words(limit=16)
+        self.hard_section.setVisible(bool(items))
         if not items:
             return
-        muted = current_palette().text_muted
-        parts = []
-        for item in items:
-            missed = item.card.lapse_count
-            times = "once" if missed == 1 else f"{missed}&nbsp;times"
-            # Non-breaking inside an item, so a line never ends on "missed 2"
-            # and starts the next with "times".
-            word = escape(item.word.word).replace(" ", "&nbsp;")
-            parts.append(
-                f"<span style='white-space:nowrap'><b>{word}</b>&nbsp;"
-                f"<span style='color:{muted}'>missed&nbsp;{times}</span></span>"
+        self.hard_chips.set_chips(
+            chip(
+                f"{item.word.word}  ×{item.card.lapse_count}",
+                "hard",
+                f"Missed {item.card.lapse_count} "
+                f"{'time' if item.card.lapse_count == 1 else 'times'}"
+                + (f"\n{_meaning(item.word)}" if _meaning(item.word) else ""),
             )
-        self.hard_words.setText(" &nbsp;\u00b7&nbsp; ".join(parts))
+            for item in items
+        )
 
     def _show_stats(self) -> None:
         """Four numbers for the month. Hidden until there is a month to show."""
@@ -613,29 +736,33 @@ class StudyPage(QWidget):
         introduced = sum(
             count for day, count in self._engine.introduced_per_day(30).items() if day >= since
         )
-        self._stats_panel.setVisible(bool(answered or introduced))
+        self.stats_section.setVisible(bool(answered or introduced))
         again = ratings.get(int(Rating.AGAIN), 0)
         self.stat_reviews.set_value(answered)
         self.stat_again.value_label.setText(
-            f"{round(100 * again / answered)}%" if answered else "\u2013"
+            f"{round(100 * again / answered)}%" if answered else "–"
         )
         self.stat_introduced.set_value(introduced)
         self.stat_long_term.set_value(self._engine.state_counts().get("review", 0))
 
     def today_words(self) -> list:
         """The words on screen, for the window's export."""
-        return list(self._engine.daily_plan().new_words)
+        plan = self._plan or self._engine.daily_plan()
+        return list(plan.new_words or plan.introduced_today)
+
+    def copy_text(self) -> str:
+        """Today's words and their meanings, one per line, as copied."""
+        lines = []
+        for word in self.today_words():
+            meaning = _meaning(word)
+            lines.append(f"{word.word} — {meaning}" if meaning else word.word)
+        return "\n".join(lines)
 
     def _copy_words(self) -> None:
-        words = self.today_words()
-        lines = []
-        for word in words:
-            meaning = word.definition or ""
-            if word.note:
-                meaning = f"{meaning} ({word.note})".strip()
-            lines.append(f"{word.word} \u2014 {meaning}" if meaning else word.word)
-        QApplication.clipboard().setText("\n".join(lines))
-        self.notify.emit(f"Copied {len(lines)} words with their meanings.")
+        text = self.copy_text()
+        QApplication.clipboard().setText(text)
+        count = len(text.splitlines())
+        self.notify.emit(f"Copied {count} words with their meanings.")
 
     def _introduce(self) -> None:
         result = self._engine.introduce()
@@ -658,6 +785,8 @@ class StudyPage(QWidget):
         self._session_id = self._engine.start_session().id
         self._index = 0
         self._answered = 0
+        plan = self._engine.active_plan()
+        self.session_title.setText(plan.name if plan else "Study")
         self._stack.setCurrentWidget(self._pages[SESSION])
         self._show_card()
         self.setFocus()
@@ -688,10 +817,10 @@ class StudyPage(QWidget):
             self.end_session()
             return
         word = item.word
-        self.session_progress.setText(f"{self._index + 1} of {len(self._queue)}")
+        total = len(self._queue)
+        self.session_progress.setText(f"{self._index + 1} / {total}")
+        self.session_line.set_share(self._index / total if total else 0)
         self.session_flag.setVisible(item.is_struggling)
-        if item.is_struggling:
-            self.session_flag.setText("You have been finding this one hard")
 
         self.word_label.setText(word.word)
         meta = " · ".join(part for part in (word.part_of_speech, word.cefr_level) if part)
@@ -700,25 +829,23 @@ class StudyPage(QWidget):
 
         self._revealed = not item.hide_meaning
         self._apply_reveal(word.definition, word.note)
-
         self._show_intervals(self._engine.preview_intervals(word.id))
 
     def _show_intervals(self, preview: dict[Rating, int]) -> None:
         """Label the answers with when the word would come back.
 
         Early on, every answer lands tomorrow — the learning step is a day, and
-        a card with almost no stability cannot be pushed further out. Printing
-        "tomorrow" four times then looks like a bug, so in that case the four
-        buttons carry only their names and one line underneath says it once.
-        Compared as the words the user reads, not as raw days: 0 and 1 are
-        different numbers but the same sentence.
+        a card with almost no stability cannot be pushed further out. Saying
+        "tomorrow" four times looks like a bug, so then the buttons carry only
+        their names and the card's footer says it once. Compared as the words
+        the user reads, not as raw days: 0 and 1 are the same sentence.
         """
         labels = {rating: _interval(preview.get(rating)) for rating in Rating}
         uniform = len(set(labels.values())) <= 1
         for rating, button in self.answer_buttons.items():
-            button.setText(rating.label if uniform else f"{rating.label}\n{labels[rating]}")
+            button.set_interval("" if uniform else labels[rating])
         self.answer_hint.setText(
-            f"Every answer brings this word back {labels[Rating.GOOD]}." if uniform else ""
+            f"Every answer brings it back {labels[Rating.GOOD]}" if uniform else ""
         )
         self.answer_hint.setVisible(uniform)
 
@@ -742,9 +869,7 @@ class StudyPage(QWidget):
         item = self._current()
         if item is None:
             return
-        outcome = self._engine.answer(
-            item.word.id, rating, session_id=self._session_id
-        )
+        outcome = self._engine.answer(item.word.id, rating, session_id=self._session_id)
         if outcome is not None and not outcome.duplicate:
             self._answered += 1
             if outcome.marked_known:
@@ -758,11 +883,7 @@ class StudyPage(QWidget):
     # -- keyboard ----------------------------------------------------------
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Numbers answer, Space reveals, Escape leaves.
-
-        Only during a session: the same keys on the day view would be a trap,
-        because there is no card on screen for them to apply to.
-        """
+        """Numbers answer, Space reveals, Escape leaves — during a session only."""
         if not self.in_session:
             super().keyPressEvent(event)
             return
@@ -788,6 +909,23 @@ class StudyPage(QWidget):
         super().keyPressEvent(event)
 
 
+def _meaning(word) -> str:
+    meaning = word.definition or ""
+    if word.note:
+        meaning = f"{meaning} ({word.note})".strip()
+    return meaning
+
+
+def _no_words_reason(plan: DailyPlan) -> str:
+    if plan.intake_paused:
+        return "paused while reviews catch up"
+    if not plan.pool_remaining:
+        return "every word in the plan is introduced"
+    if not plan.new_target:
+        return "set to 0 a day in Settings"
+    return ""
+
+
 def _pretty_date(local_date: str) -> str:
     """``2026-09-17`` as ``Thursday 17 September``, so the day is unambiguous."""
     try:
@@ -795,16 +933,6 @@ def _pretty_date(local_date: str) -> str:
     except ValueError:
         return local_date
     return f"{day.strftime('%A')} {day.day} {day.strftime('%B')}"
-
-
-def _word_list(plan: DailyPlan) -> str:
-    """Today's words as one readable line, truncated if the count is high."""
-    words = [word.word for word in plan.new_words]
-    shown = words[:_WORDS_SHOWN]
-    text = " · ".join(shown)
-    if len(words) > len(shown):
-        text += f" · and {len(words) - len(shown)} more"
-    return text
 
 
 def _interval(days: int | None) -> str:

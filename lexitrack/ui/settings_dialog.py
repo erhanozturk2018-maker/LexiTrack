@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -59,6 +58,9 @@ from .dialogs import confirm, error_label, show_error
 from .telegram_controller import TelegramController
 from .theme import ThemeManager, ThemeName, current_palette
 from .theme.palette import METRICS
+
+#: Width of every number box and drop-down, so they line up down a page.
+_CONTROL_WIDTH = 160
 
 LEARNING, TELEGRAM, APPEARANCE, DATA, ADVANCED, ABOUT = (
     "Learning",
@@ -148,72 +150,64 @@ class SettingsDialog(QDialog):
 
     def _build_learning(self) -> QWidget:
         page, layout = _page("Learning", "How much you take on, and when the day turns over.")
-        form = _form()
 
+        workload = _Group("DAILY WORKLOAD")
         self.new_words = _spin(0, 200, " words")
-        self.new_words.setToolTip("How many new words you are offered each day. 0 pauses intake.")
-        form.addRow("New words a day", self.new_words)
-
-        self.include_not_reviewed = QCheckBox("Also offer words you have never answered")
-        self.include_not_reviewed.setToolTip(
-            "A freshly imported list is “not reviewed” rather than “unknown”. "
-            "Without this, such a list has nothing to offer."
+        workload.add("New words a day", "0 pauses new words; reviews carry on.", self.new_words)
+        self.include_not_reviewed = _switch()
+        workload.add(
+            "Offer words you have never answered",
+            "A freshly imported list is “not reviewed”, not “unknown”. "
+            "Without this, such a list has nothing to offer.",
+            self.include_not_reviewed,
         )
-        form.addRow("", self.include_not_reviewed)
-
         self.capacity = _spin(0, 1000, " reviews")
         self.capacity.setSpecialValueText("No limit")
-        self.capacity.setToolTip(
-            "The most reviews you want in one day. When a day is already over this, "
-            "new words pause until it clears."
+        workload.add(
+            "Review limit a day",
+            "When a day is already over this, new words pause until it clears.",
+            self.capacity,
         )
-        form.addRow("Review limit a day", self.capacity)
+        layout.addWidget(workload)
 
+        known = _Group("WORDS YOU KNOW")
         self.mastery_days = _spin(1, 365, " days")
-        self.mastery_days.setToolTip(
-            "Once LexiTrack expects you to remember a word for this long, it marks it known."
+        known.add(
+            "Count as known after",
+            "Once LexiTrack expects you to remember a word this long, it marks it known.",
+            self.mastery_days,
         )
-        form.addRow("Count as known after", self.mastery_days)
-
-        self.review_known = QCheckBox("Keep reviewing words marked known")
-        self.review_known.setToolTip(
-            "Known words still come round, just rarely. Turn this off and a known "
-            "word leaves the schedule until you reset it."
+        self.review_known = _switch()
+        known.add(
+            "Keep reviewing known words",
+            "They still come round, rarely. Off: a known word leaves the schedule.",
+            self.review_known,
         )
-        form.addRow("", self.review_known)
-
-        self.hide_meaning = QCheckBox("Hide the meaning until I ask for it")
-        self.hide_meaning.setToolTip(
-            "Applies to study reviews only. Flashcards and the word table always show it."
+        self.hide_meaning = _switch()
+        known.add(
+            "Hide the meaning until I ask",
+            "Study reviews only. Flashcards and the word table always show it.",
+            self.hide_meaning,
         )
-        form.addRow("", self.hide_meaning)
+        layout.addWidget(known)
 
-        # Same form, so the fields line up: two forms each size their own
-        # label column and the boxes end up at different offsets.
-        form.addRow(_heading("THE DAY"))
-        day_form = form
+        day = _Group("THE DAY")
         self.day_start = _HourSpin()
-        self.day_start.setToolTip(
-            "When a new learning day begins. At 0 the day turns over at midnight, "
-            "so a review at 01:00 counts as the new day."
+        day.add(
+            "Day starts at",
+            "At 00:00 a review at 01:00 counts for the new day.",
+            self.day_start,
         )
-        day_form.addRow("Day starts at", self.day_start)
-
         self.notify_hour = _HourSpin()
-        self.notify_hour.setToolTip("When the morning message with the day's words is sent.")
-        day_form.addRow("Morning message", self.notify_hour)
-
+        day.add("Morning message", "When today's words are sent to Telegram.", self.notify_hour)
         self.reminder_hour = _HourSpin()
-        self.reminder_hour.setToolTip("When you are reminded about anything still unanswered.")
-        day_form.addRow("Evening reminder", self.reminder_hour)
-        layout.addLayout(form)
-        layout.addWidget(
-            _note(
-                "Times are in Europe/Istanbul. The morning message and the day "
-                "boundary are separate: a 06:00 message with a midnight boundary "
-                "means a 06:00 answer counts for today, not yesterday."
-            )
+        day.add(
+            "Evening reminder",
+            "Sent only if something is still waiting.",
+            self.reminder_hour,
         )
+        layout.addWidget(day)
+        layout.addWidget(_note("Times are in Europe/Istanbul."))
         layout.addStretch(1)
         return page
 
@@ -223,57 +217,61 @@ class SettingsDialog(QDialog):
             "Today's words each morning and your reviews on your phone, for as "
             "long as LexiTrack is running.",
         )
-        self.telegram_enabled = QCheckBox("Send my daily words and reviews to Telegram")
-        self.telegram_enabled.setToolTip(
-            "Stays as you leave it across restarts. Turning it off stops the bot "
-            "until you turn it on again."
+        bot = _Group("BOT")
+        self.telegram_enabled = _switch()
+        bot.add(
+            "Send my daily words and reviews",
+            "Stays as you leave it across restarts.",
+            self.telegram_enabled,
         )
-        layout.addWidget(self.telegram_enabled)
-
-        form = _form()
         self.telegram_status = QLabel()
         self.telegram_status.setTextFormat(Qt.TextFormat.RichText)
-        form.addRow("Status", self.telegram_status)
-        self.telegram_token = QLabel()
-        self.telegram_token.setWordWrap(True)
-        self.telegram_token.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        form.addRow("Token", self.telegram_token)
+        bot.add("Status", None, self.telegram_status)
         self.telegram_chat = QLabel()
         self.telegram_chat.setWordWrap(True)
-        form.addRow("Your chat", self.telegram_chat)
-        layout.addLayout(form)
+        self.telegram_chat.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.telegram_chat.setMaximumWidth(300)
+        bot.add("Your chat", None, self.telegram_chat)
+        layout.addWidget(bot)
 
-        row = QHBoxLayout()
+        token = _Group("TOKEN")
+        self.telegram_token = QLabel()
+        self.telegram_token.setObjectName("SettingHint")
+        self.telegram_token.setWordWrap(True)
+        self.telegram_token.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        buttons = QWidget()
+        buttons.setObjectName("PanelBody")
+        row = QHBoxLayout(buttons)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(METRICS.space_2)
         open_env = QPushButton("Open .env")
         open_env.setToolTip("Open the file the token is read from")
         open_env.clicked.connect(self._open_env)
-        row.addWidget(open_env)
         reload_env = QPushButton("Reload .env")
         reload_env.setToolTip("Read the token again, after you have pasted it in")
         reload_env.clicked.connect(self._reload_env)
+        row.addWidget(open_env)
         row.addWidget(reload_env)
-        row.addStretch(1)
-        layout.addLayout(row)
+        token.add("Bot token", self.telegram_token, buttons)
+        layout.addWidget(token)
 
-        layout.addWidget(_heading("SETTING IT UP"))
-        # The steps are what this page is for, so they are body text rather
-        # than the faint type used for side notes.
-        steps = _note(
-            "1.  In Telegram, open @BotFather, send /newbot and follow the two "
+        steps = _Group("SETTING IT UP")
+        guide = QLabel(
+            "1.  In Telegram, open @BotFather, send /newbot and answer its two "
             "questions. It replies with a token.\n"
-            "2.  Open .env, paste the token after LEXITRACK_TELEGRAM_TOKEN= and save.\n"
-            "3.  Press Reload .env, tick the box above and press Save.\n"
-            "4.  Open your new bot in Telegram and send /start. That chat becomes "
-            "the only one the bot answers."
+            "2.  Press Open .env, paste the token after LEXITRACK_TELEGRAM_TOKEN= and save.\n"
+            "3.  Press Reload .env, switch the bot on above and press Save.\n"
+            "4.  Open your bot in Telegram and send /start. That chat becomes "
+            "the only one it answers."
         )
-        steps.setObjectName("Muted")
+        guide.setObjectName("Muted")
+        guide.setWordWrap(True)
+        steps.add_widget(guide)
         layout.addWidget(steps)
         layout.addWidget(
             _note(
-                "The token is never stored in the vocabulary database, so it is not "
-                "in your backups. If it leaks, revoke it in @BotFather and paste the "
-                "new one."
+                "The token is never stored in the vocabulary database, so it is not in "
+                "your backups. If it leaks, revoke it in @BotFather and paste the new one."
             )
         )
         layout.addStretch(1)
@@ -335,179 +333,151 @@ class SettingsDialog(QDialog):
         self._show_telegram_state()
 
     def _build_appearance(self) -> QWidget:
-        page, layout = _page("Appearance", "The only setting here that is not shared with the bot.")
-        form = _form()
+        page, layout = _page("Appearance", "The one setting here that is not shared with the bot.")
+        group = _Group(None)
         self.theme_combo = QComboBox()
         for name in (ThemeName.LIGHT, ThemeName.DARK):
             self.theme_combo.addItem(name.label, name.value)
-        self.theme_combo.setToolTip("Also Ctrl+T from anywhere in the app")
-        form.addRow("Theme", self.theme_combo)
-        layout.addLayout(form)
-        layout.addWidget(
-            _note(
-                "The theme is remembered per computer rather than in your vocabulary "
-                "database, so copying the database to another machine does not carry "
-                "it over."
-            )
+        self.theme_combo.setFixedWidth(_CONTROL_WIDTH)
+        group.add(
+            "Theme",
+            "Also Ctrl+T anywhere. Remembered on this computer, not in the database.",
+            self.theme_combo,
         )
+        layout.addWidget(group)
         layout.addStretch(1)
         return page
 
     def _build_data(self) -> QWidget:
         page, layout = _page("Data", "Where your words live, and how to start over.")
-        self.autostart = QCheckBox("Start LexiTrack when I sign in to Windows")
-        self.autostart.setToolTip(
-            "Starts in the tray, without a window, so the morning message is sent. "
-            "Also in Task Manager → Startup."
-        )
-        self.autostart.setVisible(autostart.supported())
-        self.autostart.setChecked(autostart.is_enabled())
-        layout.addWidget(self.autostart)
-        form = _form()
-        folder = QLabel(str(paths.data_dir()))
-        folder.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        folder.setWordWrap(True)
-        form.addRow("Data folder", folder)
-        database = QLabel(str(paths.database_path()))
-        database.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        database.setWordWrap(True)
-        form.addRow("Database", database)
-        layout.addLayout(form)
 
-        row = QHBoxLayout()
-        row.setSpacing(METRICS.space_2)
-        open_button = QPushButton("Open Data Folder")
+        storage = _Group("ON THIS COMPUTER")
+        self.autostart = _switch()
+        self.autostart.setChecked(autostart.is_enabled())
+        if autostart.supported():
+            storage.add(
+                "Start with Windows",
+                "Starts in the tray, without a window, so the morning message is sent.",
+                self.autostart,
+            )
+        open_button = QPushButton("Open")
         open_button.clicked.connect(
             lambda: QDesktopServices.openUrl(_file_url(paths.data_dir()))
         )
-        row.addWidget(open_button)
-        row.addStretch(1)
-        layout.addLayout(row)
+        storage.add("Data folder", str(paths.data_dir()), open_button)
+        layout.addWidget(storage)
 
-        layout.addWidget(_heading("BACKUPS"))
-        self.backup_label = _note("")
-        layout.addWidget(self.backup_label)
-        backup_row = QHBoxLayout()
-        backup_row.setSpacing(METRICS.space_2)
+        backups = _Group("BACKUPS")
+        self.backup_label = QLabel()
+        self.backup_label.setObjectName("SettingHint")
+        self.backup_label.setWordWrap(True)
         backup_now = QPushButton("Back Up Now")
         backup_now.clicked.connect(self._backup_now)
-        backup_row.addWidget(backup_now)
-        history = QPushButton("Export Review History\u2026")
-        history.setToolTip("Every answer you have given, as a CSV file for a spreadsheet")
+        backups.add("Daily copy", self.backup_label, backup_now)
+        history = QPushButton("Export…")
         history.clicked.connect(self._export_history)
-        backup_row.addWidget(history)
-        backup_row.addStretch(1)
-        layout.addLayout(backup_row)
+        backups.add(
+            "Review history",
+            "Every answer you have given, as a CSV file for a spreadsheet.",
+            history,
+        )
+        layout.addWidget(backups)
         self._show_backups()
 
-        layout.addWidget(_heading("STARTING OVER"))
-        layout.addWidget(
-            _note(
-                "Resetting progress marks every word as not reviewed and clears the "
-                "study schedule and review history, so the plan starts again from day "
-                "one. Your words, lists, definitions and plans are kept."
-            )
-        )
-        reset_row = QHBoxLayout()
-        reset = QPushButton("Reset All Progress…")
-        reset.setProperty("variant", "ghost")
+        over = _Group("STARTING OVER")
+        reset = QPushButton("Reset…")
+        reset.setProperty("variant", "danger")
         reset.clicked.connect(self._reset_progress)
-        reset_row.addWidget(reset)
-        reset_row.addStretch(1)
-        layout.addLayout(reset_row)
+        over.add(
+            "Reset all progress",
+            "Every word back to not reviewed; schedule and history cleared. "
+            "Words, lists, definitions and plans are kept.",
+            reset,
+        )
+        layout.addWidget(over)
         layout.addStretch(1)
         return page
 
     def _build_advanced(self) -> QWidget:
         page, layout = _page(
             "Advanced",
-            "Two separate switches: one shows the controls below, the other writes "
-            "a detailed log.",
+            "For looking under the hood. Nothing here is needed for everyday use.",
         )
-        switches = _form()
-        self.developer_mode = QCheckBox("Developer mode")
-        self.developer_mode.setToolTip("Reveals the scheduler controls and the simulator")
+        diagnostics = _Group("DIAGNOSTICS")
+        self.developer_mode = _switch()
         self.developer_mode.toggled.connect(self._apply_developer_mode)
-        switches.addRow("", self.developer_mode)
-        self.debug_logging = QCheckBox("Debug logging")
-        self.debug_logging.setToolTip(
-            "Writes what LexiTrack does to a file per day in the logs folder, "
-            "kept for a week. Off by default: nothing is written to disk unless "
-            "this is on. Needs Developer mode."
+        diagnostics.add(
+            "Developer mode",
+            "Unlocks the scheduler controls, the simulator and debug logging.",
+            self.developer_mode,
         )
-        switches.addRow("", self.debug_logging)
-        self.logs_button = QPushButton("Open Logs Folder")
-        self.logs_button.setProperty("variant", "ghost")
+        self.debug_logging = _switch()
+        diagnostics.add(
+            "Debug logging",
+            "One file a day in the logs folder, kept for a week. Nothing is written "
+            "to disk while this is off.",
+            self.debug_logging,
+        )
+        self.logs_button = QPushButton("Open")
         self.logs_button.setToolTip(str(paths.logs_dir()))
         self.logs_button.clicked.connect(self._open_logs)
-        switches.addRow("", self.logs_button)
-        layout.addLayout(switches)
+        diagnostics.add("Logs folder", str(paths.logs_dir()), self.logs_button)
+        layout.addWidget(diagnostics)
 
-        self._advanced_box = QFrame()
-        self._advanced_box.setObjectName("Panel")
-        self._advanced_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Everything below is disabled, not hidden, outside Developer mode.
+        self._advanced_box = QWidget()
+        self._advanced_box.setObjectName("PanelBody")
         box = QVBoxLayout(self._advanced_box)
-        box.setContentsMargins(
-            METRICS.space_4, METRICS.space_4, METRICS.space_4, METRICS.space_4
-        )
-        box.setSpacing(METRICS.space_3)
-        box.addWidget(_heading("SCHEDULER"))
-        scheduler_form = _form()
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(METRICS.space_4)
+
+        scheduler = _Group("SCHEDULER")
         self.retention = QDoubleSpinBox()
         self.retention.setRange(0.70, 0.99)
         self.retention.setSingleStep(0.01)
         self.retention.setDecimals(2)
-        self.retention.setMaximumWidth(160)
+        self.retention.setFixedWidth(_CONTROL_WIDTH)
         # The interface is English, so the number is too: "0.90", not the
         # "0,90" a Turkish system locale would otherwise produce.
         self.retention.setLocale(QLocale(QLocale.Language.English))
-        self.retention.setToolTip(
-            "How much you want to remember at each review. Higher means shorter "
-            "intervals and many more reviews; 0.90 is the tuned default."
+        scheduler.add(
+            "Target retention",
+            "Higher means shorter intervals and many more reviews. 0.90 is the default.",
+            self.retention,
         )
-        scheduler_form.addRow("Target retention", self.retention)
-
-        self.leech_consecutive = _spin(1, 20, "")
-        self.leech_consecutive.setToolTip("Failures in a row before a word is flagged")
-        scheduler_form.addRow("Flag after failures in a row", self.leech_consecutive)
-        self.leech_total = _spin(1, 100, "")
-        self.leech_total.setToolTip("Failures in total before a word is flagged")
-        scheduler_form.addRow("Flag after failures in total", self.leech_total)
+        self.leech_consecutive = _spin(1, 20, " in a row")
+        scheduler.add("Flag as hard after", "Failures in a row.", self.leech_consecutive)
+        self.leech_total = _spin(1, 100, " in total")
+        scheduler.add("Or after", "Failures over the word's lifetime.", self.leech_total)
         self.leech_weak = _spin(0, 90, " days")
-        self.leech_weak.setToolTip(
-            "A word answered right but forgotten within this many days is flagged too"
+        scheduler.add(
+            "Weak memory under",
+            "Answered right but forgotten within this many days.",
+            self.leech_weak,
         )
-        scheduler_form.addRow("Weak memory under", self.leech_weak)
-        box.addLayout(scheduler_form)
+        box.addWidget(scheduler)
 
-        box.addWidget(_heading("SIMULATE A YEAR"))
-        box.addWidget(
-            _note(
-                "Runs the real scheduler forward over an imaginary word pool and "
-                "reports the load. It writes nothing: no cards, no history, no "
-                "status changes."
-            )
-        )
-        sim_row = QHBoxLayout()
-        sim_row.setSpacing(METRICS.space_2)
+        simulation = _Group("SIMULATE A YEAR")
         self.profile_combo = QComboBox()
         for key in sorted(PROFILES):
             self.profile_combo.addItem(PROFILES[key].name, key)
         self.profile_combo.setCurrentIndex(self.profile_combo.findData(DEFAULT_PROFILE))
-        sim_row.addWidget(QLabel("Answers like"))
-        sim_row.addWidget(self.profile_combo)
-        self.simulate_button = QPushButton("Run 365-day simulation")
+        self.profile_combo.setFixedWidth(_CONTROL_WIDTH)
+        simulation.add(
+            "Answers like",
+            "The real scheduler, run forward over your plan. It writes nothing.",
+            self.profile_combo,
+        )
+        self.simulate_button = QPushButton("Run 365 days")
         self.simulate_button.clicked.connect(self._simulate)
-        sim_row.addWidget(self.simulate_button)
-        sim_row.addStretch(1)
-        box.addLayout(sim_row)
         self.simulation_result = QLabel("")
-        self.simulation_result.setObjectName("Muted")
+        self.simulation_result.setObjectName("SettingHint")
         self.simulation_result.setWordWrap(True)
         self.simulation_result.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        box.addWidget(self.simulation_result)
+        simulation.add("Result", self.simulation_result, self.simulate_button)
+        box.addWidget(simulation)
         layout.addWidget(self._advanced_box)
         layout.addStretch(1)
         return page
@@ -516,15 +486,18 @@ class SettingsDialog(QDialog):
         page, layout = _page("About", "LexiTrack — Vocabulary Learning & Review")
         counts = self._engine.state_counts()
         plan = self._engine.active_plan()
-        form = _form()
-        form.addRow("Study plan", QLabel(plan.name if plan else "None"))
-        form.addRow("Lists in plan", QLabel(plan.list_label if plan else "—"))
-        form.addRow("Words scheduled", QLabel(f"{sum(counts.values()):,}"))
+        group = _Group("YOUR STUDY")
+        group.add(
+            "Study plan",
+            plan.list_label if plan else None,
+            QLabel(plan.name if plan else "None"),
+        )
+        group.add("Words scheduled", None, QLabel(f"{sum(counts.values()):,}"))
         for state, count in counts.items():
             if count:
-                form.addRow(f"  {state.replace('_', ' ').title()}", QLabel(f"{count:,}"))
-        form.addRow("Words in total", QLabel(f"{self._service.get_progress().total:,}"))
-        layout.addLayout(form)
+                group.add(state.replace("_", " ").title(), None, QLabel(f"{count:,}"))
+        group.add("Words in total", None, QLabel(f"{self._service.get_progress().total:,}"))
+        layout.addWidget(group)
         layout.addWidget(
             _note(
                 "Everything is stored on this computer. LexiTrack sends nothing "
@@ -656,17 +629,17 @@ class SettingsDialog(QDialog):
     def _show_backups(self) -> None:
         maintenance = self._maintenance()
         existing = maintenance.backups()
+        # The folder is in the tooltip rather than the text: a full path in a
+        # one-line hint breaks mid-word, and the data folder row shows it.
         if existing:
             newest = existing[0].stem.replace("vocabulary-", "")
             text = (
-                f"A copy is made every day; the last {KEEP_BACKUPS} are kept. "
-                f"Newest: {newest} ({len(existing)} kept) in {maintenance.directory}."
+                f"Made every day, the newest {KEEP_BACKUPS} kept. "
+                f"Latest: {newest} · {len(existing)} kept."
             )
         else:
-            text = (
-                f"A copy is made every day; the last {KEEP_BACKUPS} are kept in "
-                f"{maintenance.directory}. None yet."
-            )
+            text = f"Made every day, the newest {KEEP_BACKUPS} kept. None yet."
+        self.backup_label.setToolTip(str(maintenance.directory))
         self.backup_label.setText(text)
 
     def _backup_now(self) -> None:
@@ -701,6 +674,84 @@ class SettingsDialog(QDialog):
         self.simulation_result.setText("")
 
 
+class _Group(QWidget):
+    """A titled card of settings rows, divided by hairlines.
+
+    Each row is the setting's name and a one-line explanation on the left and
+    its control on the right, so what a switch does is read next to the
+    switch rather than found in a tooltip. The pattern of macOS System
+    Settings and Linear, drawn in the app's own panel style.
+    """
+
+    def __init__(self, title: str | None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(METRICS.space_2)
+        if title:
+            heading = QLabel(title)
+            heading.setObjectName("GroupTitle")
+            outer.addWidget(heading)
+        self._card = QFrame()
+        self._card.setObjectName("SettingsGroup")
+        self._card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._rows = QVBoxLayout(self._card)
+        self._rows.setContentsMargins(0, 0, 0, 0)
+        self._rows.setSpacing(0)
+        outer.addWidget(self._card)
+
+    def _divider(self) -> None:
+        if self._rows.count():
+            line = QFrame()
+            line.setObjectName("RowDivider")
+            line.setFixedHeight(1)
+            self._rows.addWidget(line)
+
+    def add(self, title: str, hint: str | QLabel | None, control: QWidget) -> None:
+        self._divider()
+        row = QWidget()
+        row.setObjectName("SettingRow")
+        layout = QHBoxLayout(row)
+        m = METRICS
+        layout.setContentsMargins(m.space_4, m.space_3, m.space_4, m.space_3)
+        layout.setSpacing(m.space_4)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        name = QLabel(title)
+        name.setObjectName("SettingTitle")
+        text.addWidget(name)
+        if isinstance(hint, QLabel):
+            text.addWidget(hint)
+        elif hint:
+            label = QLabel(hint)
+            label.setObjectName("SettingHint")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            text.addWidget(label)
+        layout.addLayout(text, 1)
+        layout.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        control.setAccessibleName(title)
+        name.setBuddy(control)
+        self._rows.addWidget(row)
+
+    def add_widget(self, widget: QWidget) -> None:
+        self._divider()
+        holder = QWidget()
+        holder.setObjectName("SettingRow")
+        layout = QVBoxLayout(holder)
+        m = METRICS
+        layout.setContentsMargins(m.space_4, m.space_3, m.space_4, m.space_3)
+        layout.addWidget(widget)
+        self._rows.addWidget(holder)
+
+
+def _switch() -> QCheckBox:
+    """An on/off control whose label is the row's title."""
+    box = QCheckBox()
+    box.setCursor(Qt.CursorShape.PointingHandCursor)
+    return box
+
+
 # -- small builders --------------------------------------------------------
 
 
@@ -729,22 +780,14 @@ def _scrolled(widget: QWidget) -> QScrollArea:
     return scroll
 
 
-def _form() -> QFormLayout:
-    form = QFormLayout()
-    form.setSpacing(METRICS.space_3)
-    # Centred on the field, not on its top edge: the boxes are taller than a
-    # line of text, and top-aligned labels look like they belong to the row
-    # above.
-    form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-    return form
 
 
 def _spin(minimum: int, maximum: int, suffix: str) -> QSpinBox:
     spin = QSpinBox()
     spin.setRange(minimum, maximum)
     spin.setSuffix(suffix)
-    spin.setMaximumWidth(160)
+    # One width for every number, so the controls form a straight column.
+    spin.setFixedWidth(_CONTROL_WIDTH)
     return spin
 
 
@@ -754,7 +797,7 @@ class _HourSpin(QSpinBox):
     def __init__(self) -> None:
         super().__init__()
         self.setRange(0, 23)
-        self.setMaximumWidth(160)
+        self.setFixedWidth(_CONTROL_WIDTH)
 
     def textFromValue(self, value: int) -> str:  # noqa: N802 - Qt naming
         return f"{value:02d}:00"
@@ -764,10 +807,6 @@ class _HourSpin(QSpinBox):
         return int(digits) if digits.isdigit() else 0
 
 
-def _heading(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setObjectName("SectionTitle")
-    return label
 
 
 def _note(text: str) -> QLabel:
