@@ -6,7 +6,7 @@ is idempotent: calling it twice on the same day does nothing the second time.
 **Backups** use SQLite's online backup API, which copies a consistent snapshot
 while the database is in use, even with the Telegram thread writing. They go
 to ``data/backups`` as one file per day, and only the newest
-:data:`KEEP_BACKUPS` are kept: enough to go back two weeks, not enough to fill
+:data:`KEEP_BACKUPS` are kept: enough to go back ten days, not enough to fill
 a disk. The ``.env`` file is never included; it is not in the database.
 
 **The integrity check** is ``PRAGMA quick_check``, which reads every page but
@@ -34,7 +34,7 @@ from ..repositories import RuntimeRepository, SessionRepository
 log = logging.getLogger(__name__)
 
 #: How many daily backups are kept.
-KEEP_BACKUPS = 14
+KEEP_BACKUPS = 10
 #: How long Telegram idempotency keys are kept.
 KEEP_TELEGRAM_KEYS_DAYS = 14
 
@@ -100,7 +100,7 @@ class Maintenance:
         """
         stamp = local_date or self._clock.today()
         if not self.check_integrity().ok:
-            # Copying a damaged file would, fourteen days later, have pushed
+            # Copying a damaged file would, ten days later, have pushed
             # the last good copy out of the rotation.
             log.error("Skipping the backup: the database failed its integrity check")
             return None

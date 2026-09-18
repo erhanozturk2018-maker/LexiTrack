@@ -371,10 +371,10 @@ class SettingsDialog(QDialog):
         self.backup_label = QLabel()
         self.backup_label.setObjectName("SettingHint")
         self.backup_label.setWordWrap(True)
-        backup_now = QPushButton("Back Up Now")
+        backup_now = QPushButton("Back up now")
         backup_now.clicked.connect(self._backup_now)
         backups.add("Daily copy", self.backup_label, backup_now)
-        history = QPushButton("Export…")
+        history = QPushButton("Export history")
         history.clicked.connect(self._export_history)
         backups.add(
             "Review history",
@@ -385,7 +385,7 @@ class SettingsDialog(QDialog):
         self._show_backups()
 
         over = _Group("STARTING OVER")
-        reset = QPushButton("Reset…")
+        reset = QPushButton("Reset progress")
         reset.setProperty("variant", "danger")
         reset.clicked.connect(self._reset_progress)
         over.add(
@@ -666,7 +666,7 @@ class SettingsDialog(QDialog):
             "Mark every word as not reviewed and clear the study schedule and "
             "review history?\n\nYour words, lists, definitions and plans are kept, "
             "and yesterday's backup stays in the data folder. This cannot be undone.",
-            "Reset Progress",
+            "Reset progress",
         ):
             return
         self._service.reset_progress()

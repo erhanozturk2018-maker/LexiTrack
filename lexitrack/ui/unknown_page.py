@@ -61,7 +61,7 @@ class UnknownPage(QWidget):
         titles.addWidget(self.subtitle)
         header.addLayout(titles)
         header.addStretch(1)
-        self.export_button = QPushButton("Export…")
+        self.export_button = QPushButton("Export")
         self.export_button.clicked.connect(lambda: self.export())
         header.addWidget(self.export_button, 0, Qt.AlignmentFlag.AlignBottom)
         layout.addLayout(header)

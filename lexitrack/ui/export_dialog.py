@@ -248,7 +248,7 @@ class ExportDialog(QDialog):
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.save_button = QPushButton("Save As…")
+        self.save_button = QPushButton("Save as")
         self.save_button.setProperty("variant", "primary")
         self.save_button.setDefault(True)
         self.save_button.setAutoDefault(True)

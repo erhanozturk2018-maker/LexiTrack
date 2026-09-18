@@ -272,7 +272,7 @@ class StudyPage(QWidget):
         )
         body.setObjectName("EmptyBody")
         layout.addWidget(body, 0, Qt.AlignmentFlag.AlignHCenter)
-        button = QPushButton("Create a Study Plan…")
+        button = QPushButton("Create a study plan")
         button.setProperty("variant", "primary")
         button.clicked.connect(self.manage_plan.emit)
         layout.addSpacing(m.space_2)
@@ -299,7 +299,7 @@ class StudyPage(QWidget):
         self.plan_label = _label("", "PageSubtitle")
         titles.addWidget(self.plan_label)
         header.addLayout(titles, 1)
-        self.plan_button = QPushButton("Study Plan…")
+        self.plan_button = QPushButton("Study plan")
         self.plan_button.setProperty("variant", "ghost")
         self.plan_button.setToolTip("Choose which lists you are working through (Ctrl+P)")
         self.plan_button.clicked.connect(self.manage_plan.emit)
@@ -363,7 +363,7 @@ class StudyPage(QWidget):
     def _build_words(self) -> _Section:
         section = _Section("NEW WORDS")
         self.copy_button = QPushButton("Copy")
-        self.export_button = QPushButton("Export…")
+        self.export_button = QPushButton("Export")
         for button, tip in (
             (self.copy_button, "Copy the words and their meanings, one per line"),
             (self.export_button, "Save the words as PDF, CSV or JSON (Ctrl+E)"),

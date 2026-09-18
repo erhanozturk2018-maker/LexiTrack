@@ -576,7 +576,7 @@ class MainWindow(QMainWindow):
             "plan starts again from day one. Your lists, words and definitions are "
             "kept, and yesterday's backup is in the data folder. This cannot be undone."
         )
-        if not confirm(self, "Reset all progress?", text, "Reset Everything"):
+        if not confirm(self, "Reset all progress?", text, "Reset everything"):
             return
         self._service.reset_progress()
         self.review.session = None

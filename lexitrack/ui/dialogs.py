@@ -145,7 +145,7 @@ class ListDialog(QDialog):
 
         buttons = QDialogButtonBox()
         save = buttons.addButton(
-            "Save" if editing else "Create List", QDialogButtonBox.ButtonRole.AcceptRole
+            "Save" if editing else "Create list", QDialogButtonBox.ButtonRole.AcceptRole
         )
         save.setProperty("variant", "primary")
         save.setDefault(True)
@@ -238,7 +238,7 @@ class AddWordDialog(QDialog):
         close = QPushButton("Close")
         close.clicked.connect(self.accept)
         buttons.addWidget(close)
-        self.add_button = QPushButton("Add Word")
+        self.add_button = QPushButton("Add word")
         self.add_button.setProperty("variant", "primary")
         self.add_button.setDefault(True)
         self.add_button.clicked.connect(self._add)

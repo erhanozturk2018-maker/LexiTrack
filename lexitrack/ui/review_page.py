@@ -54,8 +54,8 @@ class FinishedState(EmptyState):
         super().__init__(
             title="List complete",
             body="",
-            primary_text="Open as List",
-            secondary_text="Export…",
+            primary_text="Open as list",
+            secondary_text="Export",
             glyph="✓",
             parent=parent,
         )
@@ -118,7 +118,7 @@ class ReviewPage(QWidget):
         row.addWidget(self.language_tag, 0, Qt.AlignmentFlag.AlignBottom)
         row.addSpacing(m.space_2)
 
-        self.actions_button = QPushButton("List Actions")
+        self.actions_button = QPushButton("List actions")
         self.actions_button.setProperty("variant", "ghost")
         self.actions_button.setProperty("size", "small")
         self.actions_menu = QMenu(self.actions_button)
@@ -158,8 +158,8 @@ class ReviewPage(QWidget):
         self.empty = EmptyState(
             title="This list has no words yet",
             body="Add words by typing them in, or import a PDF or JSON file into this list.",
-            primary_text="Add Words…",
-            secondary_text="Import into List…",
+            primary_text="Add words",
+            secondary_text="Import into list",
         )
         if self.empty.primary_button is not None:
             self.empty.primary_button.clicked.connect(self._add_words)
@@ -178,7 +178,7 @@ class ReviewPage(QWidget):
                 Column.LISTS,
             )
         )
-        add_words = QPushButton("Add Words…")
+        add_words = QPushButton("Add words")
         add_words.clicked.connect(self._add_words)
         self.table.extra_filters.addWidget(add_words)
         self.table.status_requested.connect(self._set_status)

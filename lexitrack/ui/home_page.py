@@ -131,11 +131,11 @@ class HomePage(QWidget):
         lists_header = QHBoxLayout()
         lists_header.addWidget(_label("YOUR LISTS", "SectionTitle"))
         lists_header.addStretch(1)
-        new_list = QPushButton("New List")
+        new_list = QPushButton("New list")
         new_list.setToolTip("Create an empty list (Ctrl+N)")
         new_list.clicked.connect(self._actions.create_list)
         lists_header.addWidget(new_list)
-        import_button = QPushButton("Import…")
+        import_button = QPushButton("Import")
         import_button.setToolTip("Import PDF or JSON files (Ctrl+O)")
         import_button.clicked.connect(lambda: self._actions.import_into(None))
         lists_header.addWidget(import_button)
@@ -210,10 +210,10 @@ class HomePage(QWidget):
         self.current_language.setToolTip(current.language_name)
         if p.total == 0:
             detail = "This list is empty. Add words or import a file into it."
-            self.continue_button.setText("Open List  →")
+            self.continue_button.setText("Open list  →")
         elif p.remaining == 0:
             detail = f"All {p.total:,} words reviewed · {p.known:,} known · {p.unknown:,} to learn"
-            self.continue_button.setText("Open List  →")
+            self.continue_button.setText("Open list  →")
         else:
             detail = (
                 f"{p.reviewed:,} of {p.total:,} reviewed · {p.remaining:,} remaining · "

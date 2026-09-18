@@ -71,7 +71,7 @@ class ListActions(QObject):
             noun = "word is" if shared == 1 else "words are"
             lines.append(f"{shared:,} {noun} also in other lists and will be kept.")
         lines.append("This cannot be undone.")
-        if not confirm(self._parent, "Delete list", "\n\n".join(lines), "Delete List"):
+        if not confirm(self._parent, "Delete list", "\n\n".join(lines), "Delete list"):
             return False
         try:
             self._service.delete_list(list_id)

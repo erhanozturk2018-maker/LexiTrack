@@ -94,8 +94,8 @@ class WelcomeState(EmptyState):
                 "any text-based PDF, or a LexiTrack JSON file. Or create an empty list "
                 "and type your own words."
             ),
-            primary_text="Import…",
-            secondary_text="New List",
+            primary_text="Import",
+            secondary_text="New list",
             parent=parent,
         )
         if self.primary_button is not None:

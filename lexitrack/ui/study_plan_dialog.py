@@ -90,7 +90,7 @@ class StudyPlanDialog(QDialog):
         self.plan_combo.setAccessibleName("Study plan")
         self.plan_combo.currentIndexChanged.connect(self._on_plan_selected)
         picker.addWidget(self.plan_combo, 1)
-        self.delete_button = QPushButton("Delete…")
+        self.delete_button = QPushButton("Delete plan")
         self.delete_button.setProperty("variant", "ghost")
         self.delete_button.clicked.connect(self._delete)
         picker.addWidget(self.delete_button)
@@ -133,7 +133,7 @@ class StudyPlanDialog(QDialog):
 
         buttons = QDialogButtonBox()
         self.save_button = buttons.addButton(
-            "Save and Use", QDialogButtonBox.ButtonRole.AcceptRole
+            "Save and use", QDialogButtonBox.ButtonRole.AcceptRole
         )
         self.save_button.setProperty("variant", "primary")
         self.save_button.setDefault(True)
@@ -188,12 +188,12 @@ class StudyPlanDialog(QDialog):
             self.name_field.setText(_suggest_name(self._plans))
             self._build_list_checks(set())
             self.delete_button.setEnabled(False)
-            self.save_button.setText("Create and Use")
+            self.save_button.setText("Create and use")
         else:
             self.name_field.setText(plan.name)
             self._build_list_checks(set(plan.list_ids))
             self.delete_button.setEnabled(len(self._plans) > 0)
-            self.save_button.setText("Save and Use")
+            self.save_button.setText("Save and use")
         self._update_summary()
 
     # -- summary -----------------------------------------------------------
@@ -267,7 +267,7 @@ class StudyPlanDialog(QDialog):
             "Delete Study Plan",
             f"Delete “{plan.name}”?\n\nYour words, your progress and everything you "
             f"have already learned are kept. Only the plan itself is removed.",
-            "Delete Plan",
+            "Delete plan",
         ):
             return
         try:

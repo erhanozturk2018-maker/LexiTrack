@@ -457,7 +457,7 @@ class ImportDialog(QDialog):
         self.files_label.setProperty("state", "empty")
         self.files_label.setWordWrap(True)
         row.addWidget(self.files_label, 1)
-        browse = QPushButton("Choose Files…")
+        browse = QPushButton("Choose files")
         browse.clicked.connect(self._choose_files)
         row.addWidget(browse, 0, Qt.AlignmentFlag.AlignTop)
         choose_layout.addLayout(row)
