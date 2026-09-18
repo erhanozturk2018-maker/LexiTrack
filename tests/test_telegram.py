@@ -494,3 +494,13 @@ def test_the_token_is_masked_in_every_log_line() -> None:
 
     record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "HTTP %s", (url,), None)
     assert "AAHf" not in RedactingFormatter("%(message)s").format(record)
+
+
+def test_connecting_after_the_morning_hour_does_not_send_the_list_twice(
+    seeded: Database, outbox: FakeOutbox, clock: FrozenClock
+) -> None:
+    core = BotCore(seeded, outbox, clock=clock)  # 07:00, after the 06:00 brief time
+    run(core.command(OWNER, "/start"))
+    briefs = [m for _, m in outbox.sent if "Good morning" in m.text]
+    assert len(briefs) == 1
+    assert run(core.tick()) == []

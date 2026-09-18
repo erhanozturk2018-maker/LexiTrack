@@ -116,6 +116,12 @@ class BotCore:
         await self._outbox.send(chat_id, Message(messages.welcome(bound=bound)))
         if bound:
             await self._outbox.send(chat_id, self._brief())
+            # That was today's brief. Without this, connecting after 06:00
+            # would be followed half a minute later by the same list again.
+            with self._db.lock:
+                settings = self._engine.refresh_settings()
+                if self._engine.clock.now_local().hour >= settings.notify_hour:
+                    mark_sent(Notification.MORNING, self._engine.clock, settings, self._runtime)
 
     def _brief(self) -> Message:
         with self._db.lock:
