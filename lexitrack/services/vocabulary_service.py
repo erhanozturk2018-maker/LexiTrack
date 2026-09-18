@@ -25,6 +25,7 @@ from ..models.word_entry import WordEntry
 from ..normalization.word_normalizer import display_form, normalize_word
 from ..parsers.base import ParserInfo
 from ..parsers.registry import AUTO, ParserRegistry
+from ..repositories.card_repository import CardRepository
 from ..repositories.list_repository import ListRepository
 from ..repositories.source_repository import SourceRepository
 from ..repositories.state_repository import StateRepository
@@ -284,9 +285,18 @@ class VocabularyService:
         return self._words.count() == 0 and self._lists.count() == 0
 
     def reset_progress(self) -> int:
-        """Mark every word as not reviewed, keeping the vocabulary itself."""
-        count = self._state.reset_all()
-        log.info("Review progress reset for %d words", count)
+        """Start over: every word not reviewed, and no schedule or history.
+
+        Statuses and the study schedule are cleared together, in one
+        transaction. Clearing only the statuses would leave cards scheduled
+        for words the app now calls "not reviewed" — two answers to the same
+        question. Words, lists, definitions and study plans are kept, and the
+        daily backup from before the reset is still in ``data/backups``.
+        """
+        with self._db.transaction():
+            count = self._state.reset_all()
+            cards = CardRepository(self._db).clear_all()
+        log.info("Progress reset: %d statuses, %d scheduled cards", count, cards)
         return count
 
     def unknown_count(self, list_id: int | None = None) -> int:

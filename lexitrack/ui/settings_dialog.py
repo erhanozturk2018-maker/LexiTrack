@@ -20,6 +20,7 @@ engine in a state the user did not choose.
 from __future__ import annotations
 
 from dataclasses import replace
+from html import escape
 
 from PySide6.QtCore import QLocale, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -47,13 +49,14 @@ from ..core import autostart, paths
 from ..core.errors import LexiTrackError
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
+from ..services.maintenance import KEEP_BACKUPS, Maintenance
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
 from ..services.vocabulary_service import VocabularyService
 from ..telegram.config import env_file_candidates
 from ..telegram.runtime import BotState
 from .dialogs import confirm, error_label, show_error
 from .telegram_controller import TelegramController
-from .theme import ThemeManager, ThemeName
+from .theme import ThemeManager, ThemeName, current_palette
 from .theme.palette import METRICS
 
 LEARNING, TELEGRAM, APPEARANCE, DATA, ADVANCED, ABOUT = (
@@ -228,7 +231,7 @@ class SettingsDialog(QDialog):
 
         form = _form()
         self.telegram_status = QLabel()
-        self.telegram_status.setObjectName("ContextName")
+        self.telegram_status.setTextFormat(Qt.TextFormat.RichText)
         form.addRow("Status", self.telegram_status)
         self.telegram_token = QLabel()
         self.telegram_token.setWordWrap(True)
@@ -253,16 +256,18 @@ class SettingsDialog(QDialog):
         layout.addLayout(row)
 
         layout.addWidget(_heading("SETTING IT UP"))
-        layout.addWidget(
-            _note(
-                "1.  In Telegram, open @BotFather, send /newbot and follow the two "
-                "questions. It replies with a token.\n"
-                "2.  Open .env, paste the token after LEXITRACK_TELEGRAM_TOKEN= and save.\n"
-                "3.  Press Reload .env, tick the box above and press Save.\n"
-                "4.  Open your new bot in Telegram and send /start. That chat becomes "
-                "the only one the bot answers."
-            )
+        # The steps are what this page is for, so they are body text rather
+        # than the faint type used for side notes.
+        steps = _note(
+            "1.  In Telegram, open @BotFather, send /newbot and follow the two "
+            "questions. It replies with a token.\n"
+            "2.  Open .env, paste the token after LEXITRACK_TELEGRAM_TOKEN= and save.\n"
+            "3.  Press Reload .env, tick the box above and press Save.\n"
+            "4.  Open your new bot in Telegram and send /start. That chat becomes "
+            "the only one the bot answers."
         )
+        steps.setObjectName("Muted")
+        layout.addWidget(steps)
         layout.addWidget(
             _note(
                 "The token is never stored in the vocabulary database, so it is not "
@@ -281,11 +286,19 @@ class SettingsDialog(QDialog):
             self.telegram_status.setText("Unavailable")
             return
         state = telegram.state
-        status = state.label
+        palette = current_palette()
+        # A dot in the state's colour carries the meaning at a glance; the
+        # words stay at body weight like every other value on the page.
+        colour = {
+            BotState.RUNNING: palette.known,
+            BotState.CONNECTING: palette.unknown,
+            BotState.NO_TOKEN: palette.unknown,
+            BotState.ERROR: palette.danger,
+        }.get(state, palette.text_faint)
+        status = escape(state.label)
         if telegram.detail:
-            status = f"{status} · {telegram.detail}"
-        self.telegram_status.setText(status)
-        self.telegram_status.setProperty("tone", "error" if state is BotState.ERROR else "")
+            status = f"{status} · {escape(telegram.detail)}"
+        self.telegram_status.setText(f"<span style='color:{colour}'>●</span>&nbsp; {status}")
 
         config = telegram.config
         if config.has_token:
@@ -370,12 +383,28 @@ class SettingsDialog(QDialog):
         row.addStretch(1)
         layout.addLayout(row)
 
+        layout.addWidget(_heading("BACKUPS"))
+        self.backup_label = _note("")
+        layout.addWidget(self.backup_label)
+        backup_row = QHBoxLayout()
+        backup_row.setSpacing(METRICS.space_2)
+        backup_now = QPushButton("Back Up Now")
+        backup_now.clicked.connect(self._backup_now)
+        backup_row.addWidget(backup_now)
+        history = QPushButton("Export Review History\u2026")
+        history.setToolTip("Every answer you have given, as a CSV file for a spreadsheet")
+        history.clicked.connect(self._export_history)
+        backup_row.addWidget(history)
+        backup_row.addStretch(1)
+        layout.addLayout(backup_row)
+        self._show_backups()
+
         layout.addWidget(_heading("STARTING OVER"))
         layout.addWidget(
             _note(
-                "Resetting progress marks every word as not reviewed and removes the "
-                "schedule, so the engine starts again from your first day. Your words, "
-                "lists and definitions are kept."
+                "Resetting progress marks every word as not reviewed and clears the "
+                "study schedule and review history, so the plan starts again from day "
+                "one. Your words, lists, definitions and plans are kept."
             )
         )
         reset_row = QHBoxLayout()
@@ -601,12 +630,49 @@ class SettingsDialog(QDialog):
             text += "\n\n" + "\n".join(f"• {note}" for note in result.warnings)
         self.simulation_result.setText(text)
 
+    def _maintenance(self) -> Maintenance:
+        return Maintenance(self._service.database, self._engine.clock)
+
+    def _show_backups(self) -> None:
+        maintenance = self._maintenance()
+        existing = maintenance.backups()
+        if existing:
+            newest = existing[0].stem.replace("vocabulary-", "")
+            text = (
+                f"A copy is made every day; the last {KEEP_BACKUPS} are kept. "
+                f"Newest: {newest} ({len(existing)} kept) in {maintenance.directory}."
+            )
+        else:
+            text = (
+                f"A copy is made every day; the last {KEEP_BACKUPS} are kept in "
+                f"{maintenance.directory}. None yet."
+            )
+        self.backup_label.setText(text)
+
+    def _backup_now(self) -> None:
+        target = self._maintenance().backup()
+        if target is None:
+            show_error(self.error, "The backup failed. The log file has the details.")
+        self._show_backups()
+
+    def _export_history(self) -> None:
+        default = paths.exports_dir() / f"review-history-{self._engine.clock.today()}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Review History", str(default), "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        rows = self._maintenance().export_review_log(path)
+        show_error(self.error, None)
+        self.backup_label.setText(f"Exported {rows:,} reviews to {path}.")
+
     def _reset_progress(self) -> None:
         if not confirm(
             self,
             "Reset All Progress",
-            "Mark every word as not reviewed and clear the review schedule?\n\n"
-            "Your words, lists and definitions are kept. This cannot be undone.",
+            "Mark every word as not reviewed and clear the study schedule and "
+            "review history?\n\nYour words, lists, definitions and plans are kept, "
+            "and yesterday's backup stays in the data folder. This cannot be undone.",
             "Reset Progress",
         ):
             return

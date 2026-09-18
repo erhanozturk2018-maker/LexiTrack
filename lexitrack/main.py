@@ -17,7 +17,7 @@ import signal
 import sys
 import threading
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import __version__
@@ -25,6 +25,7 @@ from .core import paths
 from .core.errors import LexiTrackError
 from .core.logging_config import configure_logging
 from .services.learning_service import LearningService
+from .services.maintenance import Maintenance
 from .services.vocabulary_service import VocabularyService
 from .ui.main_window import MainWindow
 from .ui.single_instance import InstanceServer, notify_running_instance
@@ -81,6 +82,28 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     instance.show_requested.connect(window.bring_forward)
 
+    # Housekeeping: a corrupt file is reported while yesterday's backup still
+    # exists, and today's backup is taken once, now or on the first check
+    # after midnight.
+    maintenance = Maintenance(service.database, engine.clock)
+    integrity = maintenance.check_integrity()
+    if not integrity.ok:
+        log.error("Database integrity check failed: %s", integrity.detail)
+        QMessageBox.warning(
+            None,
+            "LexiTrack found a problem",
+            "The vocabulary database did not pass its integrity check.\n\n"
+            f"Daily backups are in {maintenance.directory}. Close LexiTrack, "
+            "and copy the newest one over vocabulary.db to restore it.\n\n"
+            f"Details: {integrity.detail}",
+        )
+    else:
+        maintenance.run_daily()
+    daily = QTimer(app)
+    daily.setInterval(60 * 60 * 1000)
+    daily.timeout.connect(maintenance.run_daily)
+    daily.start()
+
     minimized = "--minimized" in args and window.tray is not None
     if not minimized:
         window.show()
@@ -117,6 +140,8 @@ def run_headless() -> int:
         return 2
     database = Database()
     database.connect()
+    maintenance = Maintenance(database)
+    maintenance.run_daily()
     stopped = threading.Event()
     runtime = TelegramRuntime(
         database,
@@ -127,9 +152,13 @@ def run_headless() -> int:
     runtime.start()
     print("LexiTrack is running headless. Press Ctrl+C to stop.")
     try:
+        seconds = 0
         while not stopped.wait(1.0):
             if not runtime.running:
                 break
+            seconds += 1
+            if seconds % 3600 == 0:
+                maintenance.run_daily()
     finally:
         runtime.stop()
         database.close()

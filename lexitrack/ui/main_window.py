@@ -252,6 +252,7 @@ class MainWindow(QMainWindow):
         self.study.manage_plan.connect(self.manage_plan)
         self.study.data_changed.connect(self._on_data_changed)
         self.study.notify.connect(self._toast)
+        self.study.export_requested.connect(self.export_study)
 
         self._page_widgets = {
             STUDY: self.study,
@@ -460,6 +461,9 @@ class MainWindow(QMainWindow):
     def export(self) -> None:
         """Export from wherever the user is, with scopes that fit."""
         page = self.current_page
+        if page == STUDY:
+            self.export_study()
+            return
         if page == UNKNOWN:
             self.unknown.export(self.unknown.table.selected_ids())
             return
@@ -532,6 +536,34 @@ class MainWindow(QMainWindow):
         """A short message at the bottom of the window."""
         self._toast_widget.show_message(message)
 
+    def export_study(self) -> None:
+        """Export from the Study page: today's words, and the hard ones.
+
+        The same dialog as every other export, with a preview, so a day's
+        words can be printed or carried to a phone as a PDF.
+        """
+        scopes: list[ExportScope] = []
+        new_ids = [word.id for word in self._engine.daily_plan().new_words]
+        if new_ids:
+            scopes.append(
+                ExportScope(
+                    f"Today's new words ({len(new_ids)})",
+                    lambda: self._service.export_content_for_selection(new_ids),
+                )
+            )
+        hard_ids = [item.word.id for item in self._engine.struggling_words()]
+        if hard_ids:
+            scopes.append(
+                ExportScope(
+                    f"Words you find hard ({len(hard_ids)})",
+                    lambda: self._service.export_content_for_selection(hard_ids),
+                )
+            )
+        if not scopes:
+            self._toast("There is nothing to export from Study today.")
+            return
+        ExportDialog(self._service, scopes, parent=self).exec()
+
     def reset_progress(self) -> None:
         progress = self._service.get_progress()
         if progress.reviewed == 0:
@@ -540,7 +572,9 @@ class MainWindow(QMainWindow):
         text = (
             f"This marks all {progress.total:,} words in every list as not reviewed, clearing "
             f"{progress.known:,} known and {progress.unknown:,} unknown answers.\n\n"
-            "Your lists and words are kept. This cannot be undone."
+            "The study schedule and review history are cleared too, so the study "
+            "plan starts again from day one. Your lists, words and definitions are "
+            "kept, and yesterday's backup is in the data folder. This cannot be undone."
         )
         if not confirm(self, "Reset all progress?", text, "Reset Everything"):
             return

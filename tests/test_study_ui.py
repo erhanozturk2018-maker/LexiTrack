@@ -452,3 +452,73 @@ def test_start_with_windows_runs_the_app_minimized_without_a_console() -> None:
     assert command.endswith("-m lexitrack --minimized")
     if autostart.supported():
         assert "pythonw.exe" in command.lower() or "python" in command.lower()
+
+
+class TestStudyExtras:
+    def test_copy_puts_the_words_and_meanings_on_the_clipboard(
+        self, qapp, window, engine, loaded
+    ) -> None:
+        with_plan(engine, loaded)
+        window.show_page(STUDY)
+        window.study.copy_button.click()
+        lines = QApplication.clipboard().text().splitlines()
+        assert len(lines) == 25
+        assert lines[0] == engine.daily_plan().new_words[0].word
+
+    def test_hard_words_appear_only_once_there_are_some(
+        self, window, engine, loaded, clock
+    ) -> None:
+        with_plan(engine, loaded)
+        engine.save_settings({"leech_consecutive": 2})
+        window.show_page(STUDY)
+        assert window.study._hard_panel.isHidden()
+        engine.introduce()
+        word = engine.daily_plan().introduced_today[0]
+        for _ in range(2):
+            clock.advance_to_day_start(1)
+            engine.answer(word.id, Rating.AGAIN)
+        window.study.refresh()
+        assert not window.study._hard_panel.isHidden()
+        text = window.study.hard_words.text().replace("&nbsp;", " ")
+        assert word.word in text
+        assert "missed 2 times" in text
+
+    def test_the_month_panel_counts_reviews_and_the_again_rate(
+        self, window, engine, loaded, clock
+    ) -> None:
+        with_plan(engine, loaded)
+        window.show_page(STUDY)
+        assert window.study._stats_panel.isHidden()
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        queue = engine.review_queue()
+        for index, item in enumerate(queue):
+            engine.answer(item.word.id, Rating.AGAIN if index < 5 else Rating.GOOD)
+        window.study.refresh()
+        assert not window.study._stats_panel.isHidden()
+        assert window.study.stat_reviews.value_label.text() == "25"
+        assert window.study.stat_again.value_label.text() == "20%"
+        assert window.study.stat_introduced.value_label.text() == "25"
+
+    def test_export_from_study_offers_todays_words(
+        self, window, engine, loaded, monkeypatch
+    ) -> None:
+        import lexitrack.ui.main_window as main_window
+
+        captured: dict = {}
+
+        class FakeDialog:
+            def __init__(self, _service, scopes, parent=None) -> None:
+                captured["scopes"] = scopes
+
+            def exec(self) -> int:
+                return 0
+
+        monkeypatch.setattr(main_window, "ExportDialog", FakeDialog)
+        with_plan(engine, loaded)
+        window.show_page(STUDY)
+        window.export()
+        labels = [scope.label for scope in captured["scopes"]]
+        assert labels == ["Today's new words (25)"]
+        content = captured["scopes"][0].content()
+        assert len(content.words) == 25

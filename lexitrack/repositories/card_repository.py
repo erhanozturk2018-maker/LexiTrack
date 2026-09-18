@@ -344,6 +344,20 @@ class CardRepository:
             raise StorageError("Those cards could not be removed.") from exc
         return removed
 
+    def clear_all(self) -> int:
+        """Remove every card, session and review. Part of "reset all progress".
+
+        Returns the number of cards removed. The caller wraps this in the same
+        transaction as the status reset, so the two can never disagree.
+        """
+        try:
+            with self._db.transaction() as conn:
+                conn.execute("DELETE FROM review_logs")
+                conn.execute("DELETE FROM review_sessions")
+                return conn.execute("DELETE FROM srs_cards").rowcount
+        except sqlite3.Error as exc:
+            raise StorageError("The review schedule could not be cleared.") from exc
+
     # -- history -----------------------------------------------------------
 
     def log(self, entry: ReviewLogEntry) -> int:

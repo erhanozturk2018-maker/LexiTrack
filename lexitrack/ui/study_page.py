@@ -28,10 +28,12 @@ The page holds no learning logic at all: every number comes from one
 from __future__ import annotations
 
 from datetime import date
+from html import escape
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -45,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from ..models.srs import Rating
 from ..services.learning_service import DailyPlan, LearningService, StudyItem
+from .components.cards import StatTile
 from .theme import current_palette
 from .theme.palette import METRICS
 from .widgets import WrappedLabel
@@ -165,6 +168,8 @@ class StudyPage(QWidget):
     data_changed = Signal()
     #: A short message for the window's toast.
     notify = Signal(str)
+    #: The user wants today's words (or the hard ones) as a file.
+    export_requested = Signal()
 
     def __init__(self, engine: LearningService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -251,6 +256,10 @@ class StudyPage(QWidget):
         layout.addWidget(self._build_review_panel())
         self._forecast_panel = self._build_forecast_panel()
         layout.addWidget(self._forecast_panel)
+        self._hard_panel = self._build_hard_panel()
+        layout.addWidget(self._hard_panel)
+        self._stats_panel = self._build_stats_panel()
+        layout.addWidget(self._stats_panel)
         layout.addStretch(1)
         scroll.setWidget(page)
         return scroll
@@ -284,6 +293,22 @@ class StudyPage(QWidget):
         self.intake_words = _label("", "DefinitionLabel", wrap=True)
         self.intake_words.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.intake_words)
+        tools = QHBoxLayout()
+        tools.setSpacing(METRICS.space_2)
+        self.copy_button = QPushButton("Copy with meanings")
+        self.copy_button.setProperty("variant", "ghost")
+        self.copy_button.setProperty("size", "small")
+        self.copy_button.setToolTip("Copy today's words and their meanings, one per line")
+        self.copy_button.clicked.connect(self._copy_words)
+        tools.addWidget(self.copy_button)
+        self.export_button = QPushButton("Export\u2026")
+        self.export_button.setProperty("variant", "ghost")
+        self.export_button.setProperty("size", "small")
+        self.export_button.setToolTip("Save today's words as PDF, CSV or JSON (Ctrl+E)")
+        self.export_button.clicked.connect(self.export_requested.emit)
+        tools.addWidget(self.export_button)
+        tools.addStretch(1)
+        layout.addLayout(tools)
         self.intake_note = _label("", "WarningText", wrap=True)
         layout.addWidget(self.intake_note)
         self.intake_pool = _label("", "Faint")
@@ -327,6 +352,54 @@ class StudyPage(QWidget):
         layout.addWidget(self.forecast)
         self.forecast_note = _label("", "Faint", wrap=True)
         layout.addWidget(self.forecast_note)
+        return panel
+
+    def _build_hard_panel(self) -> QWidget:
+        """Words the engine has flagged. Shown only when there are some.
+
+        Listed by name rather than counted, with how often each has been
+        missed: the point is to look at them, and a number does not help
+        with that.
+        """
+        m = METRICS
+        panel = QFrame()
+        panel.setObjectName("Panel")
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
+        layout.setSpacing(m.space_2)
+        layout.addWidget(_label("WORDS YOU FIND HARD", "SectionTitle"))
+        self.hard_words = _label("", "DefinitionLabel", wrap=True)
+        self.hard_words.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(self.hard_words)
+        self.hard_note = _label(
+            "They come first in every session until they stick. Writing them in a "
+            "sentence of your own tends to help more than another review.",
+            "Faint",
+            wrap=True,
+        )
+        layout.addWidget(self.hard_note)
+        return panel
+
+    def _build_stats_panel(self) -> QWidget:
+        m = METRICS
+        panel = QFrame()
+        panel.setObjectName("Panel")
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
+        layout.setSpacing(m.space_3)
+        layout.addWidget(_label("THE LAST 30 DAYS", "SectionTitle"))
+        row = QHBoxLayout()
+        row.setSpacing(m.space_3)
+        self.stat_reviews = StatTile("reviews")
+        self.stat_again = StatTile("answered Again")
+        self.stat_introduced = StatTile("new words learned")
+        self.stat_long_term = StatTile("in long-term memory", tone="known")
+        for tile in (self.stat_reviews, self.stat_again, self.stat_introduced,
+                     self.stat_long_term):
+            row.addWidget(tile, 1)
+        layout.addLayout(row)
         return panel
 
     def _build_session(self) -> QWidget:
@@ -451,6 +524,8 @@ class StudyPage(QWidget):
 
         new_count = len(plan.new_words)
         done_today = len(plan.introduced_today)
+        self.copy_button.setVisible(bool(new_count))
+        self.export_button.setVisible(bool(new_count))
         if new_count:
             self.intake_count.setText(f"{new_count}")
             self.intake_words.setText(_word_list(plan))
@@ -496,6 +571,8 @@ class StudyPage(QWidget):
         # which is a lot of panel for no information.
         scheduled = sum(count for _, count in plan.forecast)
         self._forecast_panel.setVisible(bool(scheduled))
+        self._show_hard_words()
+        self._show_stats()
         self.forecast.set_forecast(plan.forecast)
         upcoming = [count for _, count in plan.forecast[1:]]
         busiest = max(upcoming, default=0)
@@ -508,6 +585,57 @@ class StudyPage(QWidget):
         else:
             total = sum(count for _, count in plan.forecast)
             self.forecast_note.setText(f"{total} reviews due over the next 7 days.")
+
+    def _show_hard_words(self) -> None:
+        items = self._engine.struggling_words(limit=12)
+        self._hard_panel.setVisible(bool(items))
+        if not items:
+            return
+        muted = current_palette().text_muted
+        parts = []
+        for item in items:
+            missed = item.card.lapse_count
+            times = "once" if missed == 1 else f"{missed}&nbsp;times"
+            # Non-breaking inside an item, so a line never ends on "missed 2"
+            # and starts the next with "times".
+            word = escape(item.word.word).replace(" ", "&nbsp;")
+            parts.append(
+                f"<span style='white-space:nowrap'><b>{word}</b>&nbsp;"
+                f"<span style='color:{muted}'>missed&nbsp;{times}</span></span>"
+            )
+        self.hard_words.setText(" &nbsp;\u00b7&nbsp; ".join(parts))
+
+    def _show_stats(self) -> None:
+        """Four numbers for the month. Hidden until there is a month to show."""
+        since = self._engine.clock.shift_days(-29)
+        ratings = self._engine.rating_counts(since)
+        answered = sum(ratings.values())
+        introduced = sum(
+            count for day, count in self._engine.introduced_per_day(30).items() if day >= since
+        )
+        self._stats_panel.setVisible(bool(answered or introduced))
+        again = ratings.get(int(Rating.AGAIN), 0)
+        self.stat_reviews.set_value(answered)
+        self.stat_again.value_label.setText(
+            f"{round(100 * again / answered)}%" if answered else "\u2013"
+        )
+        self.stat_introduced.set_value(introduced)
+        self.stat_long_term.set_value(self._engine.state_counts().get("review", 0))
+
+    def today_words(self) -> list:
+        """The words on screen, for the window's export."""
+        return list(self._engine.daily_plan().new_words)
+
+    def _copy_words(self) -> None:
+        words = self.today_words()
+        lines = []
+        for word in words:
+            meaning = word.definition or ""
+            if word.note:
+                meaning = f"{meaning} ({word.note})".strip()
+            lines.append(f"{word.word} \u2014 {meaning}" if meaning else word.word)
+        QApplication.clipboard().setText("\n".join(lines))
+        self.notify.emit(f"Copied {len(lines)} words with their meanings.")
 
     def _introduce(self) -> None:
         result = self._engine.introduce()
