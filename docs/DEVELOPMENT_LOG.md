@@ -379,3 +379,113 @@ note or definition for every word.
 
 **Verification:** 343 tests passing, lint clean; screenshots regenerated;
 dialogs, palette and PDF inspected in both themes.
+
+
+# Version 0.3
+
+## 2026-09-17 — Designing the learning engine
+
+**Asked for.** An honest review of a proposal to turn LexiTrack into a
+learning engine: 25 new words a day from study plans, FSRS reviews, a Telegram
+bot as the daily client, and FastAPI and Docker around it.
+
+**Decided.** The engine, the plans and FSRS as proposed; 25 a day is fixed,
+and a simulation replaced a first suggestion to lower it. The bot became a
+thread inside the app rather than a client of a local server, because two
+processes on one SQLite file would be two writers. Days end at 00:00
+Europe/Istanbul; the morning message is at 06:00. The meaning is hidden only
+in study reviews. Word-note editing was dropped. The result is
+[LEARNING_ENGINE.md](LEARNING_ENGINE.md), with its process lifecycle (tray,
+bot switch, Start with Windows, single instance).
+
+## 2026-09-17 — Phase 1: schema 3, clock, scheduler, persistence
+
+**Done.**
+
+- Schema version 3 from one file, `learning.sql`, run by both a new database
+  and the 2 → 3 migration, which also seeds settings and creates one plan from
+  the largest list. `executescript` would commit the migration's transaction,
+  so the file is run statement by statement.
+- `DayClock` and `FrozenClock`; `SrsScheduler` over `fsrs` 6 with day steps,
+  day snapping and no fuzz; repositories for plans, cards and review logs,
+  sessions and Telegram keys, settings and runtime state.
+- `LearningService` for the day, the queue, answers and mastery;
+  `WorkloadSimulator` in memory.
+
+**Problems and solutions**
+
+- The forecast grouped cards by SQL `DATE(due_at)`, which is a UTC date, so a
+  card due at 01:00 Istanbul landed on the previous day. The repository now
+  returns instants and the clock buckets them.
+- `refresh_settings` replaced the shared clock with a copy, so the test's
+  frozen clock stopped advancing for the service. The clock is now
+  reconfigured in place.
+- The first leech rule flagged almost every new word (stability starts low).
+  The weak-stability rule now waits for four reviews, with hysteresis on the
+  way out.
+- A year's simulation took 15 seconds per run; the long ones are marked
+  `slow` and run with `pytest -m slow`.
+- Simulated, 6,825 words at 25 a day: a typical learner peaks at 250 reviews
+  a day and settles near 110. That set the review limit.
+
+## 2026-09-18 — Phases 2–4: Study, Telegram, the tray, housekeeping
+
+**Done.**
+
+- The Study tab, the Study Plan window and Settings; export and copy of the
+  day's words; words you find hard; the last 30 days.
+- `Database.transaction()` now holds a real reentrant lock. The docstring had
+  promised one; a test with two threads failed without it.
+- Telegram in `lexitrack/telegram/`: `.env` configuration, messages as data,
+  `BotCore` behind an outbox, notifications as once-a-day decisions, a polling
+  runtime; the Qt controller and a Telegram page in Settings.
+- Tray, close-to-tray while the bot is on, single instance over a local
+  socket, Start with Windows, `--minimized`, `--headless`, an app icon.
+- Daily online backups (ten kept), `quick_check` at start-up, key pruning,
+  review history as CSV. Reset All Progress now also clears the schedule.
+
+**The first real bot test**, and what it found:
+
+- `/start` was sent before the bot ran and never arrived; resent, it bound the
+  chat. The day's list then came twice: `/start` sends it and the tick sent it
+  again. `/start` now counts as the morning message.
+- `httpx` logs every request URL at INFO, and the token is in the URL, so it
+  went into the log every ten seconds. HTTP loggers are now at WARNING and
+  every line is masked. The regression test was first written with the real
+  token's secret behind a fake bot id; that commit was pushed, the token was
+  revoked, and the test now uses a fake value.
+- "Quit" in the menu called `close()`, which hides to the tray while the bot
+  is on, so the app kept running with the old code. Quit now quits.
+- The log was written whether wanted or not. It is now off unless Debug
+  logging is on, one file a day in `logs/`, seven kept.
+
+## 2026-09-18 — Design pass, install paths, and a leaked backup
+
+**Done.**
+
+- The new screens redone in Home's language (DECISIONS §58): a Today panel with
+  one primary button, chips for the day's words, a week of day tiles, the
+  flashcards' answer colours; Settings as titled groups of explained rows; the
+  Study Plan list with progress bars. Buttons lost their ellipsis.
+- `lexitrack --create-shortcut` and `app.ico`; an AppUserModelID for the
+  taskbar.
+- An installed copy keeps its data in `%LOCALAPPDATA%\LexiTrack`: the old rule
+  would have used `site-packages`.
+- README, screenshots and these documents brought up to 0.3; version 0.3.0.
+
+**Problems and solutions**
+
+- Qt ignores `:hover` on an ancestor in a descendant selector, so the answer
+  buttons' hover colours applied all the time and two labels were unreadable
+  in dark mode. Hover now changes only the border.
+- A final audit found `data/backups/vocabulary-2026-09-18.db` in the public
+  repository: `data/*.db` did not match subfolders. It held the word list with
+  statuses and paths with the Windows user name, but no token. The file and
+  the revoked token's secret were removed from every commit with
+  `git filter-repo`, all 46 commits keeping their messages and dates; the
+  GitHub repository was deleted and recreated, so no cached copy remains.
+  `data/` is now ignored as a whole and a test checks what git tracks.
+
+**Verification:** 581 tests (6 of them `slow`), lint clean; every new screen
+rendered in both themes; the first bot test on the real database; the public
+repository checked from outside after the rewrite.

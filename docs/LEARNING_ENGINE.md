@@ -1,14 +1,54 @@
-# Learning Engine — design for version 0.3
+# Learning Engine — design and as built (version 0.3)
 
 This is the design document for turning LexiTrack from a vocabulary manager
 into a learning engine: study plans, a fixed daily intake of new words, an
 FSRS review schedule, and Telegram as the daily client.
 
-Nothing here is implemented yet. It is written against the repository as it
-actually is at version 0.2.0 (schema version 2, 343 tests), and it records the
-decisions already taken so implementation does not reopen them.
+**Status: implemented in 0.3.0** — all four phases of §O. The design below is
+kept as it was written, because its reasoning and its numbers (the workload
+model in §H, the risks in §N) still explain the defaults. Where the built
+engine differs, the difference is listed first, here. For the code as it is,
+read [ARCHITECTURE.md](ARCHITECTURE.md) §10–13; for why, [DECISIONS.md](DECISIONS.md)
+§42–59.
 
-**Status:** design approved in outline; not implemented.
+## As built: what differs from the design below
+
+| Design | As built | Why |
+| --- | --- | --- |
+| Six services: `StudyPlanService`, `NewWordSelector`, `ReviewQueueService`, `WorkloadPolicy`, `ReviewService`, `MasteryPolicy` | One `LearningService`, with the policies as its methods, over `SrsScheduler` and `DayClock` | One surface is what keeps the window and the bot from computing "today" differently |
+| A **Today** page | The **Study** tab, first in the app bar | The interface is English and "Today" read as a date, not a place |
+| Leech rule: weak stability after ≥ 6 reviews | After ≥ 4 reviews; the total-lapses rule needs a fresh lapse; a flag clears only when there is no failure streak *and* stability has recovered | Measured: the first version flagged almost every new word; without the recovery rule one lucky Good emptied the list |
+| FSRS defaults | One-day learning and relearning steps, due times snapped to a day start and never today, fuzzing off | A once-a-day app: minute steps would always be missed, and fuzz would make the forecast unreproducible |
+| Callback data `rev:<session>:<rating>` | `intro:<date>`, `start`, `ans:<session>:<word>:<rating>`, `end:<session>`; the idempotency key is `ans:<session>:<word>` | Carrying the word lets a tap on an old card be recognised; carrying the date stops an old morning message confirming the next day's words |
+| An end-of-day summary message | A summary when a review session ends; an evening reminder only if work is left | The session end is when the numbers are fresh |
+| Backups `data/backups/lexitrack-YYYY-MM-DD-HHMM.db`, keep N | `data/backups/vocabulary-YYYY-MM-DD.db`, one a day, the newest ten; skipped if the integrity check fails | One per day is what "go back N days" means; a bad copy must not push out a good one |
+| Debug log `data/logs/debug/YYYY-MM-DD.log` | `logs/lexitrack-YYYY-MM-DD.log` beside `data/`, seven kept, only while Debug logging is on (which needs Developer mode). HTTP loggers held at WARNING and every line masked for tokens | Logs are not vocabulary and never belong in a backup; the first real test showed `httpx` writing the token in every URL |
+| Daily CSV files `data/logs/reviews/…` written automatically | *Export history* in Settings → Data writes the whole review log as one CSV on request | `review_logs` is the record; a file per day nobody opens is clutter |
+| The day's brief as Markdown / PDF / clipboard | *Copy with meanings* and *Export* (PDF / CSV / JSON, through the usual preview) on the Study page | The existing export dialog already does PDF with a preview |
+| A Struggling Words view | *Words you find hard* on the Study page; they also come first in every session | Seen every day without a separate page |
+| Statistics: population by state, Again rate, introduced over time | *The last 30 days* on Study (reviews, Again rate, words learned, in long-term memory); population by state in Settings → About | |
+| A Developer page: simulation, queue inspector, scheduler info, runtime state, maintenance | Settings → Advanced: Developer mode unlocks target retention, the leech thresholds and a 365-day simulator; *Back up now* is in Settings → Data; the integrity check and pruning run by themselves | See "Not built" below |
+| Settings layout: Learning / Appearance / Data / About | Learning, Telegram, Appearance, Data, Advanced, About; each row a setting with a one-line explanation | Telegram needed its own page for the token and status |
+| Time zone Europe/Istanbul via `zoneinfo` | `zoneinfo` when available, otherwise a fixed UTC+3 offset | Windows ships no time-zone database; Türkiye has no daylight saving |
+| — | A reentrant lock held for every transaction | The design assumed one; it did not exist, and a second thread could join the first's transaction |
+| — | Close hides to the tray only while the bot is on; Quit always quits | An app lingering in the tray with nothing to do gets killed |
+| — | An installed copy keeps its data in `%LOCALAPPDATA%\LexiTrack`; a clone keeps `data/` | The old rule would have put the database in `site-packages` |
+| — | Reset All Progress also clears cards, sessions and review logs | Clearing statuses alone left cards scheduled for "not reviewed" words |
+
+### Not built
+
+- **Queue inspector** and **runtime-state view** in Developer mode.
+- **A time-zone control** in Settings; the zone is a stored setting only.
+- **Fitting FSRS parameters** to the user's own review log.
+- **A "send the brief now" button**; `/today` in Telegram does the same.
+
+---
+
+## The original design
+
+It was written against the repository as it was at version 0.2.0 (schema
+version 2, 343 tests), before any of it was implemented; sections A–C
+describe that starting point.
 
 ---
 

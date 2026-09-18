@@ -2,8 +2,9 @@
 
 Significant choices, with the reasoning and the alternatives that lost.
 
-Decisions 1-22 were made for version 0.1; 23 onwards for 0.2. Where a later
-decision refines an earlier one, the earlier entry points to it.
+Decisions 1-22 were made for version 0.1, 23-41 for 0.2 and 42 onwards for
+0.3. Where a later decision refines an earlier one, the earlier entry points
+to it.
 
 ---
 
@@ -151,6 +152,8 @@ and maintenance for no benefit to that person.
 **Alternatives.** *Cloud sync* — solves a problem (multi-device) the MVP does
 not have. *A translation API* — an API key, a cost and an internet dependency
 for a feature not in scope.
+
+Version 0.3 adds one optional use of the network, the Telegram bot; see §49.
 
 ---
 
@@ -625,3 +628,239 @@ column.
 notes to 873 existing words with no migration, and a JSON import of notes or
 definitions fills in words that lack them without touching status — which is
 how the definitions for the user's 6,825 words were delivered.
+
+---
+
+# Version 0.3
+
+## 42. FSRS, through the `fsrs` library
+
+**Decision.** Reviews are scheduled by FSRS (`fsrs` 6), wrapped by
+`SrsScheduler`, rather than by a hand-written SM-2 or fixed intervals.
+
+**Reason.** FSRS models how memory decays for each word and is the current
+state of the art; its parameters can later be fitted to the user's own
+`review_logs`. The library's state is kept as JSON on the card and read by the
+wrapper alone, so an upgrade or a parameter fit is a change to one file.
+
+**Alternatives.** *SM-2* — simpler, known to over-review easy words and
+under-review hard ones. *Fixed intervals (1, 3, 7, 14…)* — no notion of how
+well a word is known.
+
+---
+
+## 43. A once-a-day scheduler: day steps, day boundaries, no fuzz
+
+**Decision.** Learning and relearning steps are one day; every due time is
+snapped to the start of a learning day and is never today; fuzzing is off.
+
+**Reason.** The user answers once a day, often from a phone. FSRS's default
+1- and 10-minute steps would be missed and every card would arrive overdue.
+Snapping keeps the morning count stable through the day and an evening
+session finite. With intervals already quantised to days, fuzzing would only
+move cards between days at random and make the forecast unreproducible.
+
+---
+
+## 44. The introduction is not a review
+
+**Decision.** New words are *offered*; a card exists only after the user
+confirms they have studied them, and no rating is recorded for that step.
+The first FSRS rating is the first real answer, the next day.
+
+**Reason.** The user studies the day's words away from the app. Inventing a
+Good for the introduction would teach the scheduler something that did not
+happen. "Not yet introduced" is the absence of a card, so there is no pointer
+to keep in step through missed days, partial days or restarts.
+
+---
+
+## 45. One card per word, whatever the plan
+
+**Decision.** `srs_cards` is keyed by word. A study plan is a scope, not an
+owner; a word in two lists, or two plans, has one schedule.
+
+**Reason.** The same word reviewed twice under two plans would double the
+workload and split its history. Keeping the schedule with the word, like the
+status (§24), means switching or deleting a plan never loses progress.
+
+---
+
+## 46. The review limit is a brake, and 250 comes from a simulation
+
+**Decision.** When today's due reviews reach the limit (250 by default), new
+words pause, and the Study page and the morning message say so.
+
+**Reason.** 25 new words a day is the user's fixed goal, so the workload had
+to be measured rather than guessed. Running the real scheduler over a year on
+the 6,825-word pool, a typical learner peaks at about 250 reviews a day and
+settles near 110; a struggling one saturates the limit, which the simulator
+reports. Pausing intake is the one automatic correction, because adding words
+to a day that is already too big only makes the following days worse.
+
+---
+
+## 47. Struggling words: three ways in, one harder way out
+
+**Decision.** A word is flagged after 4 Agains in a row, after 8 in total with
+a fresh one, or with stability under 7 days after at least 4 reviews. It stays
+flagged until it has no failure streak *and* its stability has recovered.
+
+**Reason.** The first version flagged on low stability alone and marked
+almost every new word, because every word starts with low stability. Without
+the recovery rule a single lucky Good would empty the list.
+
+---
+
+## 48. Mastery is derived, and a manual Known archives
+
+**Decision.** A word becomes Known by itself when its stability reaches 21
+days. Marking a word Known by hand archives its card instead of deleting it.
+
+**Reason.** Known should mean the schedule expects the word to stick, not that
+a button was pressed once. Archiving keeps the history, so resetting the status
+later resumes the schedule rather than starting the word over.
+
+---
+
+## 49. Telegram is a thread in the app, not a second process or a server
+
+**Decision.** The bot runs on a thread inside LexiTrack, calls the same
+services as the window, and uses long polling. No web API, no Docker.
+
+**Reason.** Two processes on one SQLite file would be two writers; one process
+with one connection and one lock has none of that. The bot only needs to run
+while the computer is on, which was accepted. Long polling needs only an
+outgoing connection, where a webhook needs a public HTTPS address. Telegram
+keeps undelivered updates for a day, so a sleeping laptop catches up.
+
+**Alternatives.** *A local API server with the bot as a client* — a second
+process and a network boundary for a single user. *A hosted bot* — a server to
+run and the vocabulary leaving the machine. This amends §9: the app is still
+local-first, and the bot is its one optional use of the network.
+
+---
+
+## 50. The token lives in `.env`, never in the database or the log
+
+**Decision.** The bot token is read from `LEXITRACK_TELEGRAM_TOKEN` or a
+`.env` file, with `.env.example` as the committed template. The HTTP libraries
+are held at WARNING and every log line masks anything shaped like a token.
+
+**Reason.** The database is the file that gets backed up, copied and shared.
+The masking came after the first real test: `httpx` logs each request URL at
+INFO and the Bot API puts the token in the URL, so the token was being written
+to the log every ten seconds. A test now checks the mask.
+
+---
+
+## 51. Idempotency keys for every answer from a phone
+
+**Decision.** An answer from Telegram claims `ans:<session>:<word>` in
+`telegram_updates` before anything is written, and is ignored unless that word
+is the session's current card. Taps are acknowledged before the work.
+
+**Reason.** Telegram re-delivers a callback it is unsure about; without the
+key one tap could rate a card twice. The insert *is* the lock, so two
+deliveries racing each other still produce one review. The permanent record
+is `review_logs`; keys are pruned after 14 days.
+
+---
+
+## 52. Settings shared with the bot live in the database
+
+**Decision.** Learning settings are rows in `app_settings`, read as one typed
+snapshot. Only presentation (theme, window state, the last list) and Start
+with Windows (a registry value) live elsewhere.
+
+**Reason.** A setting in the Windows registry is invisible to anything that is
+not the Qt window. Reading the whole snapshot at once means the queue builder
+cannot see one daily count for one card and another for the next. A value
+edited by hand into nonsense falls back to its default rather than stopping
+the app.
+
+---
+
+## 53. Close hides to the tray only while the bot is on
+
+**Decision.** With the bot on, the window's close button hides it to the tray;
+Quit (menu, Ctrl+Q, tray) always quits. With the bot off, closing quits.
+
+**Reason.** The morning message needs the app running, but an app that lingers
+in the tray for no reason is one people learn to kill. Three switches stay
+independent: the bot, Start with Windows, and Quit.
+
+---
+
+## 54. One instance, over a local socket
+
+**Decision.** A second launch asks the running instance to come forward and
+exits; the channel is a local socket named after the data folder.
+
+**Reason.** Two instances would poll Telegram with one token (Telegram rejects
+one of them) and write one database twice. A socket, unlike a lock file,
+cannot outlive a crash.
+
+---
+
+## 55. Logs only when asked for, one file a day
+
+**Decision.** Nothing is written to disk unless Debug logging is on, which
+needs Developer mode. Then each day has its own file in `logs/`, seven are
+kept, and the folder sits beside `data/`, not inside it.
+
+**Reason.** Logs explain a problem after the fact, and most days there is
+none; a log growing every ten seconds while the bot polled was disk spent on
+nothing. Logs describe the program, not the vocabulary, so they are never in
+a backup.
+
+---
+
+## 56. Ten daily backups, counted rather than sized
+
+**Decision.** One online backup a day, the newest ten kept, no size cap.
+
+**Reason.** The count is what matters to the user ("I can go back ten days"),
+and it already bounds the space, about 30 MB today. A size cap would have to
+delete backups early, or stop taking them, on the day it was reached. A
+database that fails its integrity check is not backed up, so bad copies cannot
+push out the last good one.
+
+---
+
+## 57. An installed copy keeps its data in `%LOCALAPPDATA%`
+
+**Decision.** A source checkout, recognised by its `pyproject.toml`, keeps
+`data/` and `logs/` in the clone; any other install uses
+`%LOCALAPPDATA%\LexiTrack`.
+
+**Reason.** The earlier rule, "the folder beside the code is writable", was
+also true of `site-packages`, so a plain `pip install .` would have kept the
+database there and lost it on the next upgrade. `%LOCALAPPDATA%` is where
+Windows applications keep their own data, and it does not roam.
+
+---
+
+## 58. The new screens use the existing visual language
+
+**Decision.** Study, the review card, Settings and the Study Plan window reuse
+the patterns of Home and Review: one decision panel, section titles outside
+their cards, stat tiles, the flashcards' answer colours, the list cards'
+progress bar. Buttons use sentence case without an ellipsis.
+
+**Reason.** The first versions used the app's parts but not its layout, and
+read as a different program. One primary button whose label is the next
+thing to do replaced two panels that each asked the user to choose.
+
+---
+
+## 59. Everything under `data/` is ignored
+
+**Decision.** `.gitignore` ignores `data/` as a whole apart from its two
+placeholders, and a test checks what git actually tracks.
+
+**Reason.** The rule `data/*.db` matched only the top of the folder, and a
+daily backup in `data/backups/` was committed to the public repository. It
+held no token, but it held the word list with the user's statuses and file
+paths containing their Windows user name. The history was rewritten and the
+repository recreated; the test makes a repeat fail loudly.

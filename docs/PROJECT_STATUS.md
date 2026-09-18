@@ -1,119 +1,102 @@
 # Project Status
 
-**Last updated:** 17 September 2026
-**Version:** 0.2.0 · schema version 2
+**Last updated:** 18 September 2026
+**Version:** 0.3.0 · schema version 3
 
 ---
 
 ## Current Phase
 
-**Version 0.2 complete.** LexiTrack has moved from "one PDF, one word at a
-time" to a vocabulary manager with lists, JSON import and export, flashcard and
-list review modes, multi-step review navigation and an Unknown Words manager.
-Existing version 0.1 databases upgrade automatically.
+**Version 0.3 complete.** LexiTrack is now a learning engine as well as a
+vocabulary manager: a study plan introduces 25 new words a day, FSRS schedules
+their reviews, and an optional Telegram bot delivers the day's words and runs
+review sessions from a phone. Version 0.2 databases upgrade automatically.
 
 ## Overall Progress
 
 | Area | Status |
 | --- | --- |
-| Lists and many-to-many membership | Done |
-| Language-aware word identity | Done |
-| Schema versioning and v1 → v2 migration | Done, verified on a copy of a real v1 database |
-| JSON parser and exporter | Done, round-trip tested |
-| Prepare → preview → commit import, multiple files and lists | Done |
-| Review session with multi-step Backspace | Done |
-| Flashcard and List modes | Done |
-| Unknown Words manager | Done |
-| Manual list creation and word entry | Done |
-| Home, navigation, context-aware export | Done |
-| Three design directions explored | Done — A chosen and implemented |
-| Light and dark themes for every new component | Done |
-| Arrow-key navigation, one-step copy/move with Undo | Done |
-| Export preview with A → Z / CEFR order | Done |
-| Floating selection bar, details panel, CEFR filters | Done |
-| Ctrl+K palette, Keyboard Shortcuts window, no menu bar | Done |
-| Word notes; definitions in the PDF with CEFR headings | Done |
-| Tests | 343 passing |
-| Documentation | Updated |
+| Schema version 3 and the v2 → v3 migration | Done, run on the real database with a backup |
+| Local learning day (00:00 Europe/Istanbul) and a test clock | Done |
+| FSRS scheduling with day steps, no fuzz | Done |
+| Study plans, 25 new words a day, review limit | Done |
+| Struggling words and mastery (Known at 21 days) | Done |
+| Workload simulator | Done — set the review limit to 250 |
+| Study tab, Study Plan window, Settings | Done, redesigned in the app's visual language |
+| Telegram bot: brief, reviews, reminders, commands | Done, tested with the real bot |
+| Tray, single instance, Start with Windows, headless mode | Done |
+| Daily backups (ten kept), integrity check, key pruning | Done |
+| Debug log: off by default, one file a day in `logs/` | Done |
+| Desktop shortcut with the app icon | Done |
+| Installed copy keeps its data in `%LOCALAPPDATA%` | Done |
+| Tests | 581 (6 marked `slow`) |
+| Documentation | Updated for 0.3 |
 
 ---
 
 ## Completed
 
-### Data
+Version 0.1 and 0.2 are described in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md);
+everything from them still works as described there.
 
-- Schema version 2: `lists`, `list_words` (with position), `language` on
-  `words`, `UNIQUE(language, normalized_word)`.
-- Migration from version 1 with automatic backup, preserved ids, per-step
-  transactions, foreign-key and row-count verification, and refusal of newer
-  databases. Each old source becomes a list; Oxford words become English.
-- Invariants: vocabulary is the union of the lists; a list with a language only
-  holds that language; imports never overwrite metadata or status.
-- Learning status remains word-level and shared across lists.
+### Learning engine
 
-### Import and export
+- **Study plans.** A plan is an ordered set of lists; words are offered in list
+  order, 25 a day. A word already known or already scheduled is skipped.
+- **Introduction.** The day's words are offered; a card is created only when
+  the user confirms they have studied them. No rating is recorded for that.
+- **Reviews.** FSRS 6 through `SrsScheduler`: one-day learning and relearning
+  steps, due times snapped to a day start and never today, no fuzz. One card
+  per word, whatever the plan.
+- **Review limit.** When today's due reviews reach 250, new words pause and the
+  Study page and the morning message say so.
+- **Words you find hard.** Four Agains in a row, eight in total with a fresh
+  one, or weak stability after four reviews; cleared only when the streak is
+  gone *and* stability has recovered. They come first in every session.
+- **Mastery.** A word becomes Known when its stability reaches 21 days. Known
+  by hand archives the card.
+- **Reset All Progress** also clears cards, sessions and review logs.
 
-- `JsonDocument` + `JsonParser`; `open_document` picks PDF or JSON by
-  extension or content. Parsers declare which document types they read.
-- Structural JSON errors reported with location; unusable items skipped with a
-  warning.
-- Import preview: format, total, new, already existing, merged repeats,
-  warnings, target lists, language. Language clashes block Import with a
-  reason.
-- Each file commits in one transaction; failure part-way writes nothing.
-- Exports by scope — list, unknown in list, all unknown, selection — to PDF,
-  CSV or JSON. JSON exports import back identically.
-- Export window with a live preview (first PDF page or first lines), order
-  A → Z / CEFR / list, remembered settings; Enter saves with the defaults.
-- PDF definition column shows the note under the definition; CEFR order adds a
-  heading per level. CSV has a Note column; JSON reads and writes `note`.
+### Study, Study Plan and Settings
 
-### Review
+- **Study** (first tab): a Today panel with one primary button whose label is
+  the next thing to do; today's words as chips with *Copy with meanings* and
+  *Export*; the week ahead as day tiles; words you find hard; the last 30 days.
+- **Review session** in the window with the flashcards' answer colours and the
+  interval each answer would give.
+- **Study Plan** window (Ctrl+P): choose and order lists, with a summary of
+  how long the plan will take.
+- **Settings** (Ctrl+,): Learning, Telegram, Appearance, Data, Advanced,
+  About. Developer mode unlocks target retention, leech thresholds, the
+  365-day simulator and Debug logging.
 
-- `ReviewSession`: Backspace steps back through every answer without changing
-  status; Enter moves forward on earlier words and repeats the last answer on
-  the live word; R resets explicitly; answering an earlier word changes it
-  explicitly.
-- Flashcard card shows provenance as "Source: …", a status badge and a history
-  banner when looking back.
-- List mode: search, status and CEFR level filters, sorting, multi-select,
-  a floating selection bar (Known / Unknown / Reset, Copy to, Move to, More:
-  Export, Remove), and a details panel following the current row. K / U / R on
-  the selection.
-- Switching mode keeps the list and the session history.
-- ← / → move back and forward through the session; only K, U and R change
-  status.
-- Copy to / Move to a list in one step from the selection bar, the right-click
-  menu, or C / M with a keyboard picker; result toast with Undo; Also In
-  column.
-- Home cards navigable with arrow keys; Ctrl+Tab between pages; Ctrl+L to
-  switch list.
+### Telegram
 
-### Interface
+- Token from `.env` or `LEXITRACK_TELEGRAM_TOKEN`, never stored in the
+  database. The first chat to send `/start` becomes the owner.
+- Morning brief at 06:00 with the day's words; confirming starts the day.
+  Review sessions card by card with Again / Hard / Good / Easy; a summary at
+  the end; an evening reminder only if work is left.
+- `/start`, `/today`, `/review`, `/help`. Repeated deliveries are ignored
+  through idempotency keys.
+- Runs on a thread inside the app with long polling: no server, no Docker.
 
-- Tabs: Home · Review · Unknown Words (Alt+H / Alt+R / Alt+U).
-- App bar: Search or run a command (Ctrl+K), Import, theme icon, "⋯" menu. No
-  native menu bar; commands, the "⋯" menu and Keyboard Shortcuts share one
-  command list.
-- Home: continue learning, overview totals (the Unknown tile opens Unknown
-  Words), list cards with context menus.
-- Review: list switcher in the context strip, List Actions menu, mode switch,
-  per-list stats bar.
-- Unknown Words: every unknown word with the lists it belongs to (no status
-  column), list filter, bulk Known / Reset, copy to a list, export.
-- Dialogs: import, export with preview, new/edit list, add words, Keyboard
-  Shortcuts (scrollable, filterable); a type-to-filter list picker.
-- Shortcuts are not printed around the app; F1 and Ctrl+K list them.
-- Status always shown as symbol plus word. Two-tone progress bars.
-- Current list and mode remembered between runs; app opens into Review when a
-  list is part-way through.
-- One-time notice after a database upgrade naming the backup file.
+### Running in the background
 
-### Removed
+- Tray icon; the close button hides the window only while the bot is on;
+  Quit (menu, Ctrl+Q, tray) always quits.
+- One instance: a second launch brings the first forward.
+- Start with Windows (`--minimized`), `--headless` for the bot alone,
+  `--create-shortcut` for a desktop shortcut.
 
-Code no feature used: PDF layout-aware line extraction and column detection,
-the old top progress bar, several unused helpers and palette tokens. A theme
-bug that made tests write to the real LexiTrack settings is fixed.
+### Files
+
+- A clone keeps `data/` and `logs/` in the project; an installed copy keeps
+  them in `%LOCALAPPDATA%\LexiTrack`.
+- Daily online backup to `data/backups/`, the newest ten kept, skipped if the
+  integrity check fails. Export history writes the review log as CSV.
+- The debug log is written only while Debug logging is on: one file a day,
+  seven kept, tokens masked.
 
 ---
 
@@ -125,7 +108,9 @@ Nothing.
 
 ## Known Issues
 
-None open.
+- **"Task was destroyed but it is pending!"** can appear on the console when
+  the bot is switched off and on again. It comes from `python-telegram-bot`'s
+  shutdown and has no effect on the bot or the data.
 
 ---
 
@@ -133,20 +118,18 @@ None open.
 
 Deliberate; see [DECISIONS.md](DECISIONS.md).
 
-- **Word details cannot be edited after adding.** Status can; POS, level,
-  definition and example cannot. First item in [TODO.md](TODO.md).
-- **Review history is per session.** Backspace does not reach answers from a
-  previous run of the app.
-- **Undoing a move returns words to the end of the source list**, not their
-  original position.
-- **Learning status is shared across lists.** A word cannot be known in one
-  list and unknown in another.
-- **Deleting a list deletes words that are only in it**, with their status;
-  the confirmation states how many.
-- **No lemmatization, no language-specific normalization.** `run`/`running`
-  are separate; German `Straße` and `Strasse` are one identity.
-- **No OCR, no spaced repetition.**
-- **Neither Oxford PDF contains definitions or examples.**
+- **The bot runs only while the computer is on.** Telegram keeps undelivered
+  updates for a day, so a sleeping laptop catches up.
+- **The time zone is fixed** to Europe/Istanbul (a stored setting, no control
+  in Settings).
+- **FSRS uses its default parameters**; they are not fitted to the user's own
+  reviews yet.
+- **Word details cannot be edited after adding.** Status and notes can; POS,
+  level, definition and example cannot.
+- **Learning status is shared across lists**, and one card per word is shared
+  across plans.
+- **Deleting a list deletes words that are only in it**, with their status.
+- **No lemmatization, no language-specific normalization, no OCR.**
 - **Windows only, in practice.**
 
 ---
@@ -161,76 +144,69 @@ None.
 
 ```bash
 pytest
+pytest -m slow
 ruff check lexitrack tests tools
 ```
 
-**343 passing**, lint clean. Tests needing the real Oxford PDFs in `pdfs/` skip
-when the files are absent.
+**575 run by default and 6 more with `-m slow`** (year-long simulations), lint
+clean. Tests needing the real Oxford PDFs in `pdfs/` skip when the files are
+absent.
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `test_normalizer.py` | 30 | Case, Unicode, apostrophes, hyphens, non-words, no lemmatization |
+| `test_normalizer.py` | 30 | Case, Unicode, apostrophes, hyphens, non-words |
 | `test_deduplication.py` | 9 | Collapsing, ordering, metadata merging |
 | `test_generic_parser.py` | 16 | Tokenising, punctuation, document failures |
-| `test_oxford_parser.py` | 28 | Entry grammar, real PDF quirks, zero dropped lines |
-| `test_database.py` | 21 | Schema, constraints, rollback, review queue |
-| `test_migrations.py` | 17 | v1 → v2: ids, statuses, timestamps, lists, backup, parity with fresh schema, failure rollback, newer-version refusal |
-| `test_lists.py` | 29 | Lists, membership, language identity, orphan deletion, bulk status |
-| `test_json.py` | 36 | Valid and invalid JSON, skipped items, metadata, export, round trip |
-| `test_import_workflow.py` | 20 | Preview, targets, multi-list, re-import, language resolution, atomic rollback |
-| `test_review_session.py` | 18 | Multi-step Backspace, forward, explicit changes, reset, Enter |
-| `test_vocabulary_service.py` | 31 | 0.1 behaviour: import, review, resume, re-import, export, PDF level headings |
-| `test_ui.py` | 88 | Flashcard keys, table search/filter/sort/selection, floating bar, details panel, CEFR chips, export preview and order, palette, shortcuts window, pages, persistence, dialogs, themes |
+| `test_oxford_parser.py` | 28 | Entry grammar, real PDF quirks |
+| `test_database.py` | 22 | Schema, constraints, rollback, the transaction lock |
+| `test_migrations.py` | 23 | v1 → v2 → v3, backups, parity with a fresh schema |
+| `test_lists.py` | 29 | Lists, membership, language identity |
+| `test_json.py` | 36 | JSON parsing, export, round trip |
+| `test_import_workflow.py` | 20 | Preview, targets, atomic rollback |
+| `test_review_session.py` | 18 | Multi-step Backspace, forward, reset |
+| `test_vocabulary_service.py` | 31 | Import, review, export, reset |
+| `test_clock.py` | 12 | Learning day, day start, time zone fallback |
+| `test_srs_scheduler.py` | 17 | Day steps, snapping, previews, state round trip |
+| `test_learning_repositories.py` | 29 | Plans, cards, logs, sessions, settings, keys |
+| `test_learning_service.py` | 37 | Intake, queue, review limit, leeches, mastery, missed days |
+| `test_simulation.py` | 14 + 6 `slow` | Workload over time |
+| `test_telegram.py` | 45 | Owner binding, brief, sessions, idempotency, notifications |
+| `test_maintenance.py` | 12 | Backups, integrity check, pruning |
+| `test_logging.py` | 9 | Off by default, daily files, token masking |
+| `test_paths.py` | 5 | Clone vs installed data folder |
+| `test_repository_hygiene.py` | 3 | Git tracks no database, `.env` or log |
+| `test_study_ui.py` | 42 | Study page, session, Study Plan, Settings, tray, shortcut |
+| `test_ui.py` | 88 | The 0.2 screens, dialogs and themes |
 
 ### What has genuinely been verified
 
-- **Migration on real data:** a copy of an actual version 1 database (4,953
-  words, 812 known, 118 unknown) upgraded with every id, status and review
-  timestamp identical, two lists created, backup written, reopening a no-op.
-- **The upgraded copy was opened in the new UI:** it resumed at the next
-  unreviewed word, answering and multi-step Backspace behaved as specified, and
-  statuses in the database matched.
-- **Both themes** rendered and inspected for Home, Flashcard, List mode,
-  Unknown Words and the import dialog.
-- **Rendering bugs found by looking, then fixed:** clipped bold tab labels,
-  unpainted status pills, missing combo arrows, grey blocks inside panels,
-  a misleading "100%" on all-unknown lists.
-- **Dead code** scanned for with vulture and removed where no feature or test
-  used it.
-
----
-
-## Next: the learning engine (0.3)
-
-The design for study plans, FSRS scheduling, the daily 25-new-word intake and
-the Telegram client is written up in
-[LEARNING_ENGINE.md](LEARNING_ENGINE.md), with the decisions already settled
-(one card per word, explicit acquisition step, 00:00 Europe/Istanbul day
-boundary, Telegram as a thread inside the app, no FastAPI or Docker). Nothing
-of it is implemented yet.
+- **The migration on the real database**, with its v2 backup kept.
+- **The real bot** with the user's own chat: `/start`, the morning brief,
+  confirmation, a review session and the summary.
+- **Every new screen in both themes**, by rendering and looking; several
+  defects were found that way and fixed (unreadable dark-mode buttons,
+  stretched key caps, unequal button widths).
+- **The public repository after the history rewrite**: the removed backup and
+  the old commits are no longer reachable.
 
 ---
 
 ## Next Exact Steps
 
-1. **Edit word details** (see TODO). Add `VocabularyService.update_word`,
-   write to the manual source's `word_sources` row, and change the flattening
-   in `WordRepository._SELECT_WORD` so `parser_type = 'manual'` wins. Add an
-   Edit button to the details panel (`WordPanel`).
-2. **CEFR filter for flashcards.** Optional `levels` on
-   `WordRepository.next_unreviewed` and `ReviewSession`; a small combo in the
-   Review context strip.
-3. **Session statistics** on Home from `user_word_state.reviewed_at`.
+1. **Use it for a few weeks** before changing the engine; the defaults came
+   from a simulation, not from real reviews.
+2. **Fit FSRS parameters** once a few thousand reviews exist in `review_logs`.
+3. **Edit word details** (see [TODO.md](TODO.md)).
 
 ---
 
 ## How to Continue
 
 1. Read this file.
-2. Read [ARCHITECTURE.md](ARCHITECTURE.md) — especially §3 (word, source, list,
-   status) and §8 (navigation versus status).
-3. Read [DECISIONS.md](DECISIONS.md) 23–41 before changing lists, identity,
-   review or migrations.
+2. Read [ARCHITECTURE.md](ARCHITECTURE.md), especially §10–13 for the learning
+   engine, Telegram, the process and files.
+3. Read [DECISIONS.md](DECISIONS.md) 42–59 before changing the engine or the bot,
+   and [LEARNING_ENGINE.md](LEARNING_ENGINE.md) for the reasoning and numbers.
 4. Read the latest [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) entry.
 5. Set up and test:
 
@@ -242,27 +218,29 @@ of it is implemented yet.
    ```
 
 6. Run: `lexitrack`
-7. Continue from **Next Exact Steps**.
 
 ### Where things live
 
 | Looking for | Go to |
 | --- | --- |
-| Schema and upgrades | `lexitrack/database/schema.sql`, `migrations.py` |
-| List rules (orphans, language) | `lexitrack/repositories/list_repository.py` |
-| Import pipeline and language resolution | `lexitrack/services/import_service.py` |
-| Backspace semantics | `lexitrack/services/review_session.py` |
-| JSON format | `lexitrack/parsers/json_parser.py`, `docs/formats/json-import-export.md` |
-| What the UI may call | `lexitrack/services/vocabulary_service.py` |
-| Screens | `lexitrack/ui/home_page.py`, `review_page.py`, `unknown_page.py` |
-| Shared table | `lexitrack/ui/components/vocabulary_table.py` |
-| Colours and component styles | `lexitrack/ui/theme/palette.py`, `component_styles.py` |
+| Schema and upgrades | `lexitrack/database/schema.sql`, `learning.sql`, `migrations.py` |
+| The learning day | `lexitrack/core/clock.py` |
+| FSRS | `lexitrack/services/srs_scheduler.py` |
+| Intake, queue, leeches, mastery | `lexitrack/services/learning_service.py` |
+| Workload simulation | `lexitrack/services/simulation.py` |
+| Backups and pruning | `lexitrack/services/maintenance.py` |
+| Telegram | `lexitrack/telegram/` (`core.py` decides, `runtime.py` talks) |
+| Paths, logs, autostart, shortcut | `lexitrack/core/` |
+| Screens | `lexitrack/ui/study_page.py`, `settings_dialog.py`, `study_plan_dialog.py`, and the 0.2 pages |
+| Styles | `lexitrack/ui/theme/` |
 
 ### Conventions to keep
 
-- The UI never issues SQL and never constructs a repository.
+- The UI and the bot never issue SQL; both go through `LearningService`.
+- Days are local learning days from `DayClock`; timestamps are stored in UTC.
+- The token never goes into the database, the log or a test.
+- Nothing under `data/` or `logs/` is ever committed.
 - Seeing a word never changes its status; navigation never changes status.
 - Schema changes need a migration step and keep the parity test passing.
-- No feature without a use.
-- Status is never communicated by colour alone.
+- No feature without a use. Status is never communicated by colour alone.
 - Never add an AI co-author trailer to a commit.
