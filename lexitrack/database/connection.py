@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,8 +34,13 @@ class Database:
 
     The application is single-user and single-process, so one connection is
     enough. ``check_same_thread=False`` plus the write lock in
-    :meth:`transaction` lets the import worker thread share it with the UI
-    thread.
+    :meth:`transaction` lets the import worker and the Telegram thread share it
+    with the UI thread.
+
+    The lock is reentrant and held for the whole transaction. Without it the
+    nesting counter below would be shared between threads, and a Telegram
+    answer arriving while the UI was mid-import would silently join the
+    import's transaction — and be rolled back with it if the import failed.
     """
 
     def __init__(self, path: Path | str | None = None) -> None:
@@ -44,6 +50,10 @@ class Database:
         self.path = Path(path)
         self._connection: sqlite3.Connection | None = None
         self._transaction_depth = 0
+        #: Serialises transactions across threads. Reentrant, so a service can
+        #: nest repository calls on one thread; held until the outermost
+        #: transaction commits or rolls back.
+        self.lock = threading.RLock()
         #: Set when opening this database upgraded it; the path of the backup.
         self.migration_backup: Path | None = None
 
@@ -139,6 +149,10 @@ class Database:
         without the repositories needing to know about each other.
         """
         connection = self.connect()
+        with self.lock:
+            yield from self._transaction(connection)
+
+    def _transaction(self, connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
         outermost = self._transaction_depth == 0
         if outermost:
             try:

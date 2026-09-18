@@ -301,3 +301,44 @@ def test_listing_by_status_is_alphabetical(database: Database) -> None:
 
     listed = words.list_by_status(ReviewStatus.UNKNOWN)
     assert [w.normalized_word for w in listed] == ["apple", "zebra"]
+
+
+# -- threads ------------------------------------------------------------------
+
+
+def test_a_second_thread_does_not_join_a_transaction_in_progress(database: Database) -> None:
+    """The Telegram thread's answer must not ride on the UI's transaction.
+
+    Without the lock, the nesting counter is shared: a transaction opened on
+    another thread while one is in progress thinks it is nested, skips its own
+    BEGIN/COMMIT, and is rolled back with the outer one.
+    """
+    import threading
+
+    started = threading.Event()
+    other_done = threading.Event()
+
+    def other_thread() -> None:
+        started.wait(5)
+        with database.transaction() as conn:
+            conn.execute("INSERT INTO words (normalized_word, display_word) VALUES ('b', 'b')")
+        other_done.set()
+
+    worker = threading.Thread(target=other_thread)
+    worker.start()
+    try:
+        with database.transaction() as conn:
+            conn.execute("INSERT INTO words (normalized_word, display_word) VALUES ('a', 'a')")
+            started.set()
+            # The other thread must wait for us rather than join us.
+            assert not other_done.wait(0.3)
+            raise RuntimeError("roll back the first transaction")
+    except RuntimeError:
+        pass
+    worker.join(5)
+    assert other_done.is_set()
+    words = {
+        row["normalized_word"]
+        for row in database.connection.execute("SELECT normalized_word FROM words")
+    }
+    assert words == {"b"}, "the other thread's write survived our rollback"
