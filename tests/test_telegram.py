@@ -488,14 +488,14 @@ def test_the_token_is_masked_in_every_log_line() -> None:
 
     from lexitrack.core.logging_config import RedactingFormatter, redact
 
-    secret = "123456789:REMOVED-REVOKED-TOKEN"
+    secret = "123456789:" + "FAKE-test-secret-" + "x" * 20  # never a real token
     url = f"POST https://api.telegram.org/bot{secret}/getUpdates"
-    assert "AAHf" not in redact(url)
+    assert "FAKE-test-secret" not in redact(url)
     assert "123456789:[redacted]" in redact(url)
     assert redact("08:24:02,726 at 12:30:45") == "08:24:02,726 at 12:30:45"
 
     record = logging.LogRecord("httpx", logging.INFO, __file__, 1, "HTTP %s", (url,), None)
-    assert "AAHf" not in RedactingFormatter("%(message)s").format(record)
+    assert "FAKE-test-secret" not in RedactingFormatter("%(message)s").format(record)
 
 
 def test_connecting_after_the_morning_hour_does_not_send_the_list_twice(
