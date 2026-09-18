@@ -106,8 +106,10 @@ def outbox() -> FakeOutbox:
 
 @pytest.fixture
 def bot(seeded: Database, outbox: FakeOutbox, clock: FrozenClock) -> BotCore:
+    """A bot connected on an earlier day, so today's brief is still owed."""
     core = BotCore(seeded, outbox, clock=clock)
     run(core.command(OWNER, "/start"))
+    RuntimeRepository(seeded).clear(RuntimeRepository.LAST_NOTIFIED_ON)
     outbox.sent.clear()
     return core
 
