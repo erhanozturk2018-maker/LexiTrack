@@ -46,13 +46,14 @@ desktop.ini
 # The database is created automatically on first launch and is personal to
 # each user, so it is never committed. The directories themselves are kept via
 # .gitkeep so a clean clone has somewhere to write.
-data/*.db
-data/*.db-wal
-data/*.db-shm
-data/*.log
+#
+# Everything under data/ is ignored, subfolders included: the earlier rule
+# data/*.db only matched the top level, so data/backups/*.db slipped through.
+data/*
+!data/.gitkeep
+!data/exports/
 data/exports/*
 !data/exports/.gitkeep
-!data/.gitkeep
 *.log
 
 # --- Source PDFs ---
