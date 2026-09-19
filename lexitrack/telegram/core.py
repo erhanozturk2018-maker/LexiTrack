@@ -49,6 +49,9 @@ class Outbox(Protocol):
     async def edit(self, chat_id: str, message_id: str, message: Message) -> None:
         """Replace a message's text and buttons."""
 
+    async def delete(self, chat_id: str, message_id: str) -> None:
+        """Remove a message. Best effort: a message that cannot go is left."""
+
 
 class BotCore:
     """Commands, button presses and the clock, turned into messages."""
@@ -223,7 +226,15 @@ class BotCore:
                 )
         self._on_activity()
         if queue:
-            await self._outbox.edit(chat_id, message_id, card)
+            # Each card is a new message rather than an edit of the last one:
+            # Telegram keeps a spoiler open once tapped, through every later
+            # edit of the same message, so an edited card would show the next
+            # meaning uncovered. The answered card is removed to keep the chat
+            # to one card; the new one opens with that card's result.
+            sent = await self._outbox.send(chat_id, card)
+            with self._db.lock:
+                self._engine.show_in_session(session.id, nxt.word.id, message_id=sent)
+            await self._outbox.delete(chat_id, message_id)
         else:
             await self._end(
                 chat_id, message_id, session.id, stopped_early=False, last=outcome

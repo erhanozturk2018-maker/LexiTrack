@@ -106,6 +106,23 @@ class _BotOutbox:
             if "not modified" not in str(exc).lower():
                 raise
 
+    async def delete(self, chat_id: str, message_id: str) -> None:
+        from telegram.error import TelegramError
+
+        try:
+            await self._bot.delete_message(chat_id=chat_id, message_id=int(message_id))
+        except TelegramError as exc:
+            # Already gone, or older than the Bot API lets a bot delete. The
+            # card stays; its buttons are stripped so it cannot be mistaken
+            # for the live one.
+            log.info("Could not delete Telegram message: %s", exc)
+            try:
+                await self._bot.edit_message_reply_markup(
+                    chat_id=chat_id, message_id=int(message_id), reply_markup=None
+                )
+            except TelegramError:
+                pass
+
 
 class TelegramRuntime:
     """Runs the bot on a background thread until told to stop."""

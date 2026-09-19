@@ -52,6 +52,7 @@ class FakeOutbox:
     def __init__(self) -> None:
         self.sent: list[tuple[str, Message]] = []
         self.edits: list[tuple[str, str, Message]] = []
+        self.deleted: list[tuple[str, str]] = []
         self._next_id = 100
 
     async def send(self, chat_id: str, message: Message) -> str:
@@ -61,6 +62,12 @@ class FakeOutbox:
 
     async def edit(self, chat_id: str, message_id: str, message: Message) -> None:
         self.edits.append((chat_id, message_id, message))
+
+    async def delete(self, chat_id: str, message_id: str) -> None:
+        self.deleted.append((chat_id, message_id))
+
+    def last_id(self) -> str:
+        return str(self._next_id)
 
     def last_text(self) -> str:
         texts = [m.text for _, m in self.sent] + [m.text for _, _, m in self.edits]
@@ -299,7 +306,13 @@ class TestReviews:
         message = outbox.sent[-1][1]
         answer = next(d for d in FakeOutbox.callbacks(message) if d.startswith("ans:"))
         parsed = parse_callback(answer)
-        return str(100 + len(outbox.sent)), parsed.session_id, parsed.word_id
+        return outbox.last_id(), parsed.session_id, parsed.word_id
+
+    @staticmethod
+    def next_word(outbox: FakeOutbox) -> int | None:
+        """The word on the card now on screen, or None once the session ended."""
+        answers = [d for d in FakeOutbox.callbacks(outbox.sent[-1][1]) if d.startswith("ans:")]
+        return parse_callback(answers[0]).word_id if answers else None
 
     def test_a_session_shows_the_first_card_with_four_answers(
         self, due: BotCore, outbox: FakeOutbox
@@ -311,16 +324,27 @@ class TestReviews:
         labels = [label for row in message.buttons for label, _ in row]
         assert labels[:4] == ["Again", "Hard", "Good", "Easy"]
 
-    def test_an_answer_is_recorded_and_the_same_message_moves_on(
+    def test_an_answer_is_recorded_and_the_next_card_replaces_it(
         self, due: BotCore, outbox: FakeOutbox
     ) -> None:
         message_id, session, word = self.start(due, outbox)
         run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
         assert due.engine.rating_counts()[int(Rating.GOOD)] == 1
-        _, edited_id, edited = outbox.edits[-1]
-        assert edited_id == message_id
-        assert "2 / 25" in edited.text
-        assert "Good" in edited.text and "back" in edited.text
+        card = outbox.sent[-1][1]
+        assert "2 / 25" in card.text
+        assert "Good" in card.text and "back" in card.text
+        assert outbox.deleted == [(OWNER, message_id)]
+        assert due.engine.session(session).message_id == outbox.last_id()
+
+    def test_every_card_is_a_new_message_so_its_meaning_starts_hidden(
+        self, due: BotCore, outbox: FakeOutbox
+    ) -> None:
+        """Telegram keeps a tapped spoiler open through edits of that message."""
+        message_id, session, word = self.start(due, outbox)
+        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
+        assert outbox.edits == [], "a card is never edited into the next one"
+        assert "<tg-spoiler>" in outbox.sent[-1][1].text
+        assert outbox.last_id() != message_id
 
     def test_a_double_tap_counts_once(self, due: BotCore, outbox: FakeOutbox) -> None:
         """Telegram re-delivers a tap it was unsure about."""
@@ -342,13 +366,14 @@ class TestReviews:
     def test_the_last_answer_ends_with_a_summary(self, due: BotCore, outbox: FakeOutbox) -> None:
         message_id, session, word = self.start(due, outbox)
         for _ in range(25):
+            sent_before = len(outbox.sent)
             run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-            last = outbox.edits[-1][2]
-            next_answer = [d for d in FakeOutbox.callbacks(last) if d.startswith("ans:")]
-            if not next_answer:
+            if len(outbox.sent) == sent_before:
                 break
-            word = parse_callback(next_answer[0]).word_id
-        text = outbox.edits[-1][2].text
+            message_id, word = outbox.last_id(), self.next_word(outbox)
+        _, summary_id, summary = outbox.edits[-1]
+        assert summary_id == message_id, "the last card becomes the summary"
+        text = summary.text
         assert "Session finished" in text
         assert "25 reviewed" in text
         assert due.engine.open_session(due.engine.session(session).channel) is None
@@ -356,7 +381,7 @@ class TestReviews:
     def test_stop_here_keeps_what_was_answered(self, due: BotCore, outbox: FakeOutbox) -> None:
         message_id, session, word = self.start(due, outbox)
         run(due.callback(OWNER, message_id, answer_data(session, word, Rating.HARD), ""))
-        run(due.callback(OWNER, message_id, end_data(session), ""))
+        run(due.callback(OWNER, outbox.last_id(), end_data(session), ""))
         text = outbox.edits[-1][2].text
         assert "Stopped" in text
         assert "1 reviewed" in text

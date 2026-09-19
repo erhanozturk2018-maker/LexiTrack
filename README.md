@@ -60,8 +60,8 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 - **The day's words at 06:00**, each with a short meaning, and one button to
   confirm you have studied them.
-- **Reviews on your phone.** One message is edited for each card, and the
-  meaning stays hidden until you tap it.
+- **Reviews on your phone.** One card at a time, each replacing the last, with
+  the meaning hidden until you tap it.
 - **An evening reminder**, only if something is still waiting.
 - **Private.** The bot answers only your chat. Its token lives in a `.env`
   file, never in the database or the backups, and never in the log.

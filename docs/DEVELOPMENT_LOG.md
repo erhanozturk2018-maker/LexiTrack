@@ -489,3 +489,18 @@ bot switch, Start with Windows, single instance).
 **Verification:** 581 tests (6 of them `slow`), lint clean; every new screen
 rendered in both themes; the first bot test on the real database; the public
 repository checked from outside after the rewrite.
+
+## 2026-09-19 — Hidden meanings in Telegram reviews
+
+**Found in use.** The first card's meaning was hidden, but once tapped, every
+later card showed its meaning uncovered. Each card was an edit of the same
+message, and Telegram keeps a revealed spoiler open through later edits of
+that message.
+
+**Done.** Each card is now sent as a new message and the answered one is
+deleted, so the chat still shows one card at a time. A message that cannot be
+deleted keeps its text but loses its buttons. The last card still becomes the
+session summary.
+
+**Verification:** 576 tests (a new one pins that a card is never an edit of
+the previous one), lint clean.

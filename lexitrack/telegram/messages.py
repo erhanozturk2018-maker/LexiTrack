@@ -163,10 +163,11 @@ def review_card(
     total: int,
     previous: AnswerOutcome | None = None,
 ) -> Message:
-    """One card, in the message that is edited for every answer.
+    """One card, sent as a message of its own.
 
     The meaning is a spoiler when the setting asks for it hidden: tapping it
-    reveals it in place, so hiding costs no extra round-trip to the bot.
+    reveals it in place, so hiding costs no extra round-trip to the bot. The
+    card must be a new message: an edited one keeps its spoiler revealed.
     """
     word = item.word
     lines: list[str] = []
