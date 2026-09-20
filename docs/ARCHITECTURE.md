@@ -465,6 +465,20 @@ settings decide how much evidence Known needs:
 | Good | `review` once the step is passed | The interval FSRS gives | `consecutive_lapses` reset to 0 |
 | Easy | `review` | The longest of the four | `consecutive_lapses` reset to 0 |
 
+Put as one rule: **only Good or Easy move a card forward.** Confirming the
+day's new words is not an answer, so the first rating is still owed the next
+day.
+
+| Card now | Answer | Becomes |
+| --- | --- | --- |
+| `introduced` (never answered) | Good, Easy | `review` |
+| `introduced` | Hard, Again | `learning`, asked again tomorrow |
+| `learning` | Good, Easy | `review` |
+| `learning` | Hard, Again | `learning`, asked again tomorrow |
+| `review` | Again | `relearning`, asked again tomorrow |
+| `relearning` | Good, Easy | `review` |
+| `relearning` | Hard | `relearning`, asked again tomorrow |
+
 Only Good or Easy take a card out of `learning` or `relearning`; Hard repeats
 the one-day step. Stability restarts lower than it was before the lapse, so a
 word that was due in a week comes back in a day or two and has to earn the
