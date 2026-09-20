@@ -306,6 +306,29 @@ class TestSettingsDialog:
         assert theme.current is ThemeName.DARK
         theme.apply(ThemeName.LIGHT)
 
+    def test_the_outlook_panel_answers_with_real_days(self, qapp, engine, loaded) -> None:
+        dialog = SettingsDialog(engine, loaded, ThemeManager())
+        asked, outcome = dialog._outlook_rows[1]  # answering Good every time
+        assert "days 1, 3 and 14" in asked.text()
+        assert outcome.text() == "Known on day 14"
+        assert outcome.accessibleName() == "If you answer Good every time: Known on day 14"
+        assert "comes round again" in dialog._outlook_note.text(), "known words kept"
+        dialog.review_known.setChecked(False)
+        assert "leaves the schedule" in dialog._outlook_note.text()
+
+    def test_the_outlook_follows_the_controls_before_saving(
+        self, qapp, engine, loaded
+    ) -> None:
+        """The numbers are computed, so an unsaved edit already moves them."""
+        dialog = SettingsDialog(engine, loaded, ThemeManager())
+        before = dialog._outlook_rows[0][1].text()
+        dialog.mastery_days.setValue(120)
+        after = dialog._outlook_rows[0][1].text()
+        assert after != before
+        dialog.review_known.setChecked(False)
+        assert "leaves the schedule" in dialog._outlook_note.text()
+        assert engine.refresh_settings().mastery_stability_days == 21.0, "nothing saved"
+
     def test_the_simulator_uses_the_values_on_screen(self, qapp, engine, loaded) -> None:
         dialog = SettingsDialog(engine, loaded, ThemeManager())
         dialog.developer_mode.setChecked(True)

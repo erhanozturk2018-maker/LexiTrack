@@ -504,3 +504,33 @@ session summary.
 
 **Verification:** 576 tests (a new one pins that a card is never an edit of
 the previous one), lint clean.
+
+## 2026-09-20 — The Learning page says what its settings do
+
+**Asked for.** The thresholds on the Learning page ("count as known after 21
+days") describe a number the user never sees, and reading the architecture
+document is not how anyone answers "when does this word stop coming back?".
+A panel in the window, with numbers that follow the settings rather than a
+table someone has to remember to update.
+
+**Done.** `services/schedule_preview.py` walks the real `SrsScheduler` over a
+throwaway card for three ways of answering — Easy, Good, and Good with one
+Again — and returns the days the word is asked and the day it becomes Known.
+It reads no database and no saved settings. A group at the bottom of Settings
+→ Learning shows the three rows and recomputes from the controls on every
+change, so an edit shows its effect before Save, and the footnote follows
+*Keep reviewing known words*.
+
+**Problems and solutions**
+
+- The right-hand labels used an object name with no rule behind it, so they
+  were drawn at title weight and each row had two focal points. `#SettingValue`
+  is now defined beside `#SettingHint`, in the muted colour.
+- `_Group.add` names every control after its row, which is right for a switch
+  and wrong for an answer: a screen reader read the question back instead of
+  the number. The rows set their own accessible name.
+
+**Verification:** 585 tests; a new `test_schedule_preview.py` pins the
+documented days and that raising the threshold or the retention moves them,
+and the dialog test checks the panel follows an unsaved edit. Both themes
+rendered and looked at.

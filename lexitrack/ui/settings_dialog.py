@@ -47,7 +47,8 @@ from PySide6.QtWidgets import (
 from ..core import autostart, paths
 from ..core.errors import LexiTrackError
 from ..core.logging_config import set_file_logging
-from ..models.settings import Setting
+from ..models.settings import LearningSettings, Setting
+from ..services import schedule_preview
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
@@ -126,6 +127,11 @@ class SettingsDialog(QDialog):
         for name, widget in self._page_widgets.items():
             QListWidgetItem(name, self.nav)
             self.pages.addWidget(_scrolled(widget))
+        # The outlook panel reads the controls, so it follows every one of
+        # them that changes a schedule, including retention on Advanced.
+        for control in (self.mastery_days, self.day_start, self.retention):
+            control.valueChanged.connect(self._refresh_outlook)
+        self.review_known.toggled.connect(self._refresh_outlook)
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.setCurrentRow(0)
         body.addWidget(self.nav)
@@ -208,6 +214,23 @@ class SettingsDialog(QDialog):
         )
         layout.addWidget(day)
         layout.addWidget(_note("Times are in Europe/Istanbul."))
+
+        # The numbers below are run through the real scheduler rather than
+        # written here, so editing any setting on this page — or the target
+        # retention on Advanced — moves them with it.
+        self._outlook = _Group("WHAT THIS MEANS FOR ONE WORD")
+        self._outlook_rows: list[tuple[QLabel, QLabel]] = []
+        for path in schedule_preview.paths(self._settings):
+            asked = QLabel()
+            asked.setObjectName("SettingHint")
+            asked.setWordWrap(True)
+            outcome = QLabel()
+            outcome.setObjectName("SettingValue")
+            self._outlook.add(f"If you answer {path.label}", asked, outcome)
+            self._outlook_rows.append((asked, outcome))
+        layout.addWidget(self._outlook)
+        self._outlook_note = _note("")
+        layout.addWidget(self._outlook_note)
         layout.addStretch(1)
         return page
 
@@ -531,6 +554,48 @@ class SettingsDialog(QDialog):
         index = self.theme_combo.findData(self._theme.current.value)
         self.theme_combo.setCurrentIndex(max(index, 0))
         self._apply_developer_mode(s.developer_mode)
+        self._refresh_outlook()
+
+    # -- the outlook panel -------------------------------------------------
+
+    def _pending_settings(self) -> LearningSettings:
+        """The settings as the window stands, saved or not.
+
+        Read from the controls rather than from the database so the panel
+        answers "what would this do?" while the user is still deciding.
+        """
+        return replace(
+            self._settings,
+            mastery_stability_days=float(self.mastery_days.value()),
+            desired_retention=round(self.retention.value(), 2),
+            review_known_words=self.review_known.isChecked(),
+            day_start_hour=self.day_start.value(),
+        )
+
+    def _refresh_outlook(self) -> None:
+        settings = self._pending_settings()
+        for path, (asked, outcome) in zip(
+            schedule_preview.paths(settings), self._outlook_rows, strict=False
+        ):
+            asked.setText(f"Asked on {_days_phrase(path.asked_on)} after the word is introduced.")
+            outcome.setText(
+                f"Known on day {path.known_on}"
+                if path.known_on is not None
+                else "Not known within 12 answers"
+            )
+            # _Group.add names every control after its row, which is right for
+            # a switch and wrong for an answer: a screen reader would read the
+            # question back instead of the number.
+            outcome.setAccessibleName(f"If you answer {path.label}: {outcome.text()}")
+        self._outlook_note.setText(
+            "Counted from the day the word is offered, by running these settings "
+            "through the scheduler itself. "
+            + (
+                "A known word stays in the schedule and comes round again months later."
+                if settings.review_known_words
+                else "A known word then leaves the schedule and is not asked again."
+            )
+        )
 
     def _open_logs(self) -> None:
         folder = paths.logs_dir()
@@ -807,6 +872,14 @@ class _HourSpin(QSpinBox):
         return int(digits) if digits.isdigit() else 0
 
 
+
+
+def _days_phrase(days: tuple[int, ...]) -> str:
+    """``(1, 3, 14)`` as "days 1, 3 and 14"."""
+    numbers = [str(day) for day in days]
+    if len(numbers) == 1:
+        return f"day {numbers[0]}"
+    return "days " + ", ".join(numbers[:-1]) + f" and {numbers[-1]}"
 
 
 def _note(text: str) -> QLabel:
