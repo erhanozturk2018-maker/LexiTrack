@@ -418,6 +418,44 @@ what the library cannot decide for a once-a-day app:
 The introduction is not a review: no rating is invented, and a word's first
 FSRS rating is the first real answer.
 
+**There is one queue, not two.** "Learning", "review" and "relearning" are
+labels on a card, not separate lists. Everything due today — a word introduced
+yesterday, a word failed last night, a word last seen a month ago — is in the
+same queue and is asked the same way. A card's state changes which interval
+the next answer earns, not which queue it is in.
+
+**The life of a word.** The days below are what the real scheduler produces
+with the default settings, counted from the day the word was introduced.
+
+| Day | What happens | State | Next |
+| --- | --- | --- | --- |
+| 0 | Offered in the day's 25 and confirmed. No rating, no card history yet | `introduced` | Tomorrow |
+| 1 | First real answer. Good | `review` | Day 3 |
+| 3 | Good | `review` | Day 13 |
+| 13 | Good. Stability passes 21 days | `review` | Marked **Known** |
+
+So a word introduced on day 0 *is* reviewed from day 1 onwards; there is no
+separate learning phase it has to finish first. Answering Easy each time
+reaches Known in two answers (day 1 and day 8), Good in three, and Hard
+alone never does: at two-day steps its stability is still under 9 days after
+eight answers.
+
+Failing resets much of that. On the same word, Again on day 13 drops it to
+`relearning` with a stability of 1.5 days; Good on days 14, 18 and 28 rebuild
+it, and Known arrives on day 28 instead of day 13.
+
+**Known is a prediction, not a confirmation.** The word is marked Known on the
+answer whose stability crosses the threshold, and the long interval that same
+answer scheduled — 74 days on the Easy path — is never used while *Keep
+reviewing known words* is off, because Known words leave the queue. Two
+settings decide how much evidence Known needs:
+
+- *Count as known after* (21 days) is the threshold itself. Raising it to 45
+  or 60 asks for another answer or two before a word is retired.
+- *Keep reviewing known words* puts that last long interval back: the word
+  stays in the schedule and is asked again months later, which is the only way
+  the prediction is ever tested.
+
 **What each answer does.** Only Again counts as a lapse.
 
 | Answer | Card state | Next due | Counters |
