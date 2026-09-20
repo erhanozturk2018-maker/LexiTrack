@@ -244,9 +244,9 @@ Miss the same word again later and it recovers more slowly each time, because
 LexiTrack has learned the word is hard for you — after the second slip it also
 joins *Words you find hard* and comes first in every session.
 
-*Settings → Learning* shows these days for your own settings and recalculates
-them as you edit, so changing the threshold or the target retention tells you
-what it did before you save.
+These days come from the scheduler with the default settings. Change
+*Count as known after* or, in Developer mode, the target retention, and they
+move with it.
 
 ### Study plans
 

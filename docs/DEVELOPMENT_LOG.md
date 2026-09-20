@@ -505,36 +505,6 @@ session summary.
 **Verification:** 576 tests (a new one pins that a card is never an edit of
 the previous one), lint clean.
 
-## 2026-09-20 — The Learning page says what its settings do
-
-**Asked for.** The thresholds on the Learning page ("count as known after 21
-days") describe a number the user never sees, and reading the architecture
-document is not how anyone answers "when does this word stop coming back?".
-A panel in the window, with numbers that follow the settings rather than a
-table someone has to remember to update.
-
-**Done.** `services/schedule_preview.py` walks the real `SrsScheduler` over a
-throwaway card for three ways of answering — Easy, Good, and Good with one
-Again — and returns the days the word is asked and the day it becomes Known.
-It reads no database and no saved settings. A group at the bottom of Settings
-→ Learning shows the three rows and recomputes from the controls on every
-change, so an edit shows its effect before Save, and the footnote follows
-*Keep reviewing known words*.
-
-**Problems and solutions**
-
-- The right-hand labels used an object name with no rule behind it, so they
-  were drawn at title weight and each row had two focal points. `#SettingValue`
-  is now defined beside `#SettingHint`, in the muted colour.
-- `_Group.add` names every control after its row, which is right for a switch
-  and wrong for an answer: a screen reader read the question back instead of
-  the number. The rows set their own accessible name.
-
-**Verification:** 585 tests; a new `test_schedule_preview.py` pins the
-documented days and that raising the threshold or the retention moves them,
-and the dialog test checks the panel follows an unsaved edit. Both themes
-rendered and looked at.
-
 ## 2026-09-20 — Saying plainly what an answer costs
 
 **Found in use.** Two rounds of questions about the same thing: a card back in
@@ -553,3 +523,18 @@ an earlier draft of the state table claimed Hard takes a card out of
 relearning, which the run disproved.
 
 **Verification:** numbers reproduced from the scheduler; no code changed.
+
+## 2026-09-20 — The schedule outlook panel, built and taken out again
+
+**Asked for, then withdrawn.** A group at the bottom of Settings → Learning
+computed three answering paths through the real scheduler and showed which
+days a word would be asked on and when it would be Known, following the
+controls before Save. On seeing it, the reading was that the documentation
+covers this and the page did not need it; it was reverted the same day.
+
+**Kept as the lesson**: the questions it answered were real, and they are now
+answered in ARCHITECTURE §10 and the README's *How a word is learned*. If the
+panel ever comes back, `git show f3539ce` has the whole of it — a pure
+`services/schedule_preview.py` walking a throwaway card, with tests.
+
+**Verification:** reverted, lint clean, 576 tests.

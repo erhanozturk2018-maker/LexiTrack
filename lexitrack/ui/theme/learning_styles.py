@@ -139,9 +139,6 @@ QPushButton[variant="known-solid"] #AnswerKey {{
 #RowDivider {{ background-color: {p.border}; border: none; }}
 #SettingTitle {{ font-size: 14px; color: {p.text}; background: transparent; }}
 #SettingHint {{ font-size: 12px; color: {p.text_muted}; background: transparent; }}
-/* A row whose right-hand side is an answer rather than a control. It is
-   quieter than a title so the row still reads name first, answer second. */
-#SettingValue {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
 #GroupTitle {{
     font-size: 11px;
     font-weight: 600;
