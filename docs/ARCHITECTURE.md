@@ -480,7 +480,27 @@ day.
 | `relearning` | Hard | `relearning`, asked again tomorrow |
 
 Only Good or Easy take a card out of `learning` or `relearning`; Hard repeats
-the one-day step. Stability restarts lower than it was before the lapse, so a
+the one-day step. **The state is not progress.** Known is decided by stability
+alone, so a card back in `review` after a lapse is no closer to Known than it
+was the day before — the number, not the label, is what mastery reads.
+
+**What a lapse actually costs.** Measured on one word with the defaults:
+
+| Day | Answer | Stability | Also |
+| --- | --- | --- | --- |
+| 3 | Good | 11.0 days | |
+| 14 | Again | **1.5 days**, `relearning` | First lapse |
+| 15 | Good | 3.6 days, `review` again | Not Known: 3.6 < 21 |
+| 19 | Good | 9.7 days | |
+| 29 | Good | 22.9 days | **Known**, 15 days later than without the lapse |
+| 52 | Again | 22.9 → **2.0 days** | Second lapse: flagged as struggling |
+| 56 | Again | 3.1 → **0.7 days** | Third: now asked every day |
+
+Each lapse also raises the card's difficulty, so recovery is slower every
+time: the same word rebuilt 11 days of stability in two answers before its
+first lapse and needed three after it. A lapsed word is a review, not a new
+word — it returns tomorrow in the day's due queue and never costs one of the
+day's 25 introductions. Stability restarts lower than it was before the lapse, so a
 word that was due in a week comes back in a day or two and has to earn the
 long interval again.
 

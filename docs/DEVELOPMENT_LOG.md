@@ -534,3 +534,22 @@ change, so an edit shows its effect before Save, and the footnote follows
 documented days and that raising the threshold or the retention moves them,
 and the dialog test checks the panel follows an unsaved edit. Both themes
 rendered and looked at.
+
+## 2026-09-20 — Saying plainly what an answer costs
+
+**Found in use.** Two rounds of questions about the same thing: a card back in
+`review` after an Again looks like recovered progress, and the state tables
+did not say that Known reads stability and nothing else. A related worry was
+whether a failed word comes back as a new word and eats one of the day's 25.
+
+**Done.** ARCHITECTURE §10 now states that the state is not progress, and
+carries a measured lapse table — 11.0 → 1.5 days on the first Again, Known
+arriving on day 29 instead of day 14, the second and third lapses recovering
+more slowly and flagging the word as struggling. The README gained *How a word
+is learned* with the same numbers for the reader who never opens `docs/`.
+
+Every figure was taken by running `SrsScheduler` rather than reasoned about:
+an earlier draft of the state table claimed Hard takes a card out of
+relearning, which the run disproved.
+
+**Verification:** numbers reproduced from the scheduler; no code changed.

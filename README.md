@@ -210,6 +210,44 @@ seven days, **Words you find hard** lists the words you keep missing (they
 come first in every session), and **The last 30 days** gives four numbers for
 the month.
 
+### How a word is learned
+
+The four answers do not move a word along a fixed track; they change one
+number, how long LexiTrack expects you to remember the word. Everything else
+follows from it. With the default settings:
+
+| Day | You answer | Remembered for | Comes back |
+| --- | --- | --- | --- |
+| 0 | Studied the new words and confirmed | — | Tomorrow |
+| 1 | Good | 2 days | Day 3 |
+| 3 | Good | 11 days | Day 14 |
+| 14 | Good | 46 days | Marked **Known** |
+
+A word becomes Known when that number passes 21 days — three Goods, or two
+Easys, but never on the day you first study it. Answering Easy every time gets
+there on day 9; Hard alone never does, because it barely moves the number.
+
+**Pressing Again is not a reset to the beginning.** It costs you the interval
+you had built up, and the word comes back tomorrow as a review — it does not
+go back into the new-word list and never uses up one of your 25:
+
+| Day | You answer | Remembered for |
+| --- | --- | --- |
+| 14 | Again | 11 days → **1.5 days** |
+| 15 | Good | 3.6 days |
+| 19 | Good | 9.7 days |
+| 29 | Good | 22.9 days → **Known** |
+
+Note day 15: Good brings the word back to normal intervals immediately, but
+not to where it was. One slip on day 14 moved Known from day 14 to day 29.
+Miss the same word again later and it recovers more slowly each time, because
+LexiTrack has learned the word is hard for you — after the second slip it also
+joins *Words you find hard* and comes first in every session.
+
+*Settings → Learning* shows these days for your own settings and recalculates
+them as you edit, so changing the threshold or the target retention tells you
+what it did before you save.
+
 ### Study plans
 
 **Study plan** on the Study page (`Ctrl+P`) chooses the lists a plan draws
