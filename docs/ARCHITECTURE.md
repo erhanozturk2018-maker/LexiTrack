@@ -416,7 +416,30 @@ what the library cannot decide for a once-a-day app:
   read nowhere else.
 
 The introduction is not a review: no rating is invented, and a word's first
-FSRS rating is the first real answer. A word is flagged as **struggling**
+FSRS rating is the first real answer.
+
+**What each answer does.** Only Again counts as a lapse.
+
+| Answer | Card state | Next due | Counters |
+| --- | --- | --- | --- |
+| Again | `relearning` from `review`; `learning` stays `learning` | The next day | `lapse_count` and `consecutive_lapses` both +1 |
+| Hard | Unchanged: a `learning` or `relearning` card repeats its step | The next day while on a step, a short interval from `review` | `consecutive_lapses` reset to 0 |
+| Good | `review` once the step is passed | The interval FSRS gives | `consecutive_lapses` reset to 0 |
+| Easy | `review` | The longest of the four | `consecutive_lapses` reset to 0 |
+
+Only Good or Easy take a card out of `learning` or `relearning`; Hard repeats
+the one-day step. Stability restarts lower than it was before the lapse, so a
+word that was due in a week comes back in a day or two and has to earn the
+long interval again.
+
+**A word never returns to the new-word queue.** Intake offers only words with
+no card at all, so a lapse — however many times it happens — keeps the word in
+the review queue instead of costing one of the day's 25 new words. The two
+ways back are deliberate and both are the user's: *Reset All Progress*, which
+clears every card, and archiving through a manual Known, which can be undone
+with `resume` rather than starting the word over.
+
+A word is flagged as **struggling**
 after a run of Agains (4 by default), a long failure history that has just
 repeated, or a low stability after at least four reviews; it stays flagged
 until it has no current failure streak *and* its stability has recovered.
