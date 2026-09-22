@@ -179,8 +179,10 @@ class SettingsDialog(QDialog):
         )
         self.review_known = _switch()
         known.add(
-            "Keep reviewing known words",
-            "They still come round, rarely. Off: a known word leaves the schedule.",
+            "Keep reviewing words learned here",
+            "Only words that became Known through Study; words you knew before "
+            "are never scheduled. On, they come round every few months, which is "
+            "how LexiTrack learns whether its predictions were right.",
             self.review_known,
         )
         self.hide_meaning = _switch()
@@ -390,8 +392,9 @@ class SettingsDialog(QDialog):
         reset.clicked.connect(self._reset_progress)
         over.add(
             "Reset all progress",
-            "Every word back to not reviewed; schedule and history cleared. "
-            "Words, lists, definitions and plans are kept.",
+            "Every word back to not reviewed; the schedule, every answer and "
+            "the status history are cleared. Words, lists, definitions and "
+            "plans are kept.",
             reset,
         )
         layout.addWidget(over)
@@ -663,9 +666,12 @@ class SettingsDialog(QDialog):
         if not confirm(
             self,
             "Reset All Progress",
-            "Mark every word as not reviewed and clear the study schedule and "
-            "review history?\n\nYour words, lists, definitions and plans are kept, "
-            "and yesterday's backup stays in the data folder. This cannot be undone.",
+            "Mark every word as not reviewed and clear the study schedule, every "
+            "answer you have given and the history of how each word was learned?"
+            "\n\nYour answers are also what LexiTrack would learn your memory "
+            "from. To keep a copy, cancel and use Export history first.\n\n"
+            "Your words, lists, definitions and plans are kept, and yesterday's "
+            "backup stays in the data folder. This cannot be undone.",
             "Reset progress",
         ):
             return

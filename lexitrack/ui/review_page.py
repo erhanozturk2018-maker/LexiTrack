@@ -103,7 +103,7 @@ class ReviewPage(QWidget):
 
         names = QVBoxLayout()
         names.setSpacing(0)
-        names.addWidget(_label("REVIEWING", "ContextLabel"))
+        names.addWidget(_label("SORTING", "ContextLabel"))
         self.list_button = QPushButton()
         self.list_button.setObjectName("ContextListButton")
         self.list_button.setToolTip("Switch list (Ctrl+L)")
@@ -131,6 +131,18 @@ class ReviewPage(QWidget):
         self.mode_switch.mode_changed.connect(self.set_mode)
         row.addWidget(self.mode_switch, 0, Qt.AlignmentFlag.AlignBottom)
         layout.addWidget(strip)
+
+        # Two things in the app are called reviewing. This one sorts; the
+        # Study tab schedules. Saying so here is what stops an answer on
+        # this page being mistaken for a spaced-repetition review.
+        self.purpose = _label(
+            "Sort words into Known and Unknown. The words you mark Unknown are "
+            "the ones the Study tab teaches; nothing on this page is scheduled.",
+            "Faint",
+        )
+        self.purpose.setWordWrap(True)
+        self.purpose.setContentsMargins(m.space_6, 0, m.space_6, m.space_2)
+        layout.addWidget(self.purpose)
 
         self.modes = QStackedWidget()
         layout.addWidget(self.modes, 1)

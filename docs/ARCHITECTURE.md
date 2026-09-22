@@ -452,7 +452,7 @@ settings decide how much evidence Known needs:
 
 - *Count as known after* (21 days) is the threshold itself. Raising it to 45
   or 60 asks for another answer or two before a word is retired.
-- *Keep reviewing known words* puts that last long interval back: the word
+- *Keep reviewing words learned here* puts that last long interval back: the word
   stays in the schedule and is asked again months later, which is the only way
   the prediction is ever tested.
 
