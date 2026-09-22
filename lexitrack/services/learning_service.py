@@ -438,6 +438,14 @@ class LearningService:
             if card.word_id in words
         ]
 
+    def study_item(self, word_id: int) -> StudyItem | None:
+        """One word's card as a review item: what Undo puts back on screen."""
+        card = self._cards.get(int(word_id))
+        word = self._words.get(int(word_id))
+        if card is None or word is None:
+            return None
+        return StudyItem(word=word, card=card, hide_meaning=self._settings.hide_meaning_in_study)
+
     def _due_cards(self, scope: Sequence[int], limit: int | None) -> list[SrsCard]:
         capacity = self._settings.review_capacity_per_day or None
         effective = min(filter(None, (limit, capacity))) if (limit or capacity) else None

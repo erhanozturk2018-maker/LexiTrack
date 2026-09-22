@@ -73,6 +73,17 @@ def learning_rules(p: Palette) -> str:
     border-radius: {m.radius_lg}px;
 }}
 #CardFooter {{ font-size: 12px; color: {p.text_faint}; background: transparent; }}
+/* An action that lives in the card's footer: footer-sized, so it does not
+   compete with the four answers, and clearly a link when pointed at. */
+QPushButton#FooterAction {{
+    font-size: 12px;
+    color: {p.text_muted};
+    background: transparent;
+    border: none;
+    padding: 2px 6px;
+}}
+QPushButton#FooterAction:hover {{ color: {p.accent}; }}
+QPushButton#FooterAction:focus {{ color: {p.accent}; }}
 
 QPushButton#AnswerButton {{
     border-radius: {m.radius_md}px;

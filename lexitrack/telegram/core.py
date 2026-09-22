@@ -149,6 +149,8 @@ class BotCore:
             await self._answer(chat_id, message_id, parsed)
         elif parsed.action == "end":
             await self._end(chat_id, message_id, parsed.session_id or "", stopped_early=True)
+        elif parsed.action == "undo":
+            await self._undo(chat_id, message_id, parsed.session_id or "")
 
     async def _introduce(
         self, chat_id: str, message_id: str, local_date: str, text_html: str
@@ -223,6 +225,7 @@ class BotCore:
                     session.done_count + 1,
                     max(session.planned_count, session.done_count + len(queue)),
                     previous=outcome,
+                    can_undo=self._engine.can_undo(session.id),
                 )
         self._on_activity()
         if queue:
@@ -239,6 +242,38 @@ class BotCore:
             await self._end(
                 chat_id, message_id, session.id, stopped_early=False, last=outcome
             )
+
+    async def _undo(self, chat_id: str, message_id: str, session_id: str) -> None:
+        """Take back the last answer and put that word's card back on screen.
+
+        The card comes back as a new message, like every card, so its meaning
+        starts hidden again. A second tap finds nothing to take back and does
+        nothing: Undo reaches one answer, never a chain of them.
+        """
+        with self._db.lock:
+            self._engine.refresh_settings()
+            session = self._engine.session(session_id)
+            if session is None or not session.is_open:
+                return
+            word = self._engine.undo_last_answer(session_id)
+            if word is None:
+                return
+            item = self._engine.study_item(word.id)
+            session = self._engine.session(session_id)
+            assert item is not None and session is not None
+            remaining = len(self._engine.review_queue())
+            card = messages.review_card(
+                item,
+                session_id,
+                session.done_count + 1,
+                max(session.planned_count, session.done_count + remaining),
+                note=f"Took back your answer to {word.word}.",
+            )
+        self._on_activity()
+        sent = await self._outbox.send(chat_id, card)
+        with self._db.lock:
+            self._engine.show_in_session(session_id, word.id, message_id=sent)
+        await self._outbox.delete(chat_id, message_id)
 
     async def _end(
         self,

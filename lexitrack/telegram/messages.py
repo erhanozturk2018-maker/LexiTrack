@@ -16,6 +16,7 @@ Callback data is kept short (Telegram allows 64 bytes) and self-describing:
 ``start``               begin a review session
 ``ans:<s>:<w>:<r>``     rating ``r`` for word ``w`` in session ``s``
 ``end:<s>``             stop the session and keep what was answered
+``undo:<s>``            take back the last answer in session ``s``
 =====================  ==========================================
 
 The date on ``intro`` is what stops an old morning message from confirming
@@ -70,6 +71,10 @@ def end_data(session_id: str) -> str:
     return f"end:{session_id}"
 
 
+def undo_data(session_id: str) -> str:
+    return f"undo:{session_id}"
+
+
 START_DATA = "start"
 
 
@@ -104,6 +109,8 @@ def parse_callback(data: str | None) -> Callback | None:
             )
         if parts[0] == "end" and len(parts) == 2:
             return Callback("end", session_id=parts[1])
+        if parts[0] == "undo" and len(parts) == 2:
+            return Callback("undo", session_id=parts[1])
     except ValueError:
         return None
     return None
@@ -162,6 +169,8 @@ def review_card(
     position: int,
     total: int,
     previous: AnswerOutcome | None = None,
+    can_undo: bool = False,
+    note: str | None = None,
 ) -> Message:
     """One card, sent as a message of its own.
 
@@ -171,7 +180,10 @@ def review_card(
     """
     word = item.word
     lines: list[str] = []
-    if previous is not None and not previous.duplicate:
+    if note:
+        lines.append(f"<i>{escape(note)}</i>")
+        lines.append("")
+    elif previous is not None and not previous.duplicate:
         lines.append(f"<i>{escape(answer_line(previous))}</i>")
         lines.append("")
     lines.append(f"<b>{escape(word.word)}</b>")
@@ -194,7 +206,14 @@ def review_card(
     )
     return Message(
         "\n".join(lines),
-        (answers[:2], answers[2:], (("Stop here", end_data(session_id)),)),
+        (
+            answers[:2],
+            answers[2:],
+            (
+                *((("\u21b6 Undo", undo_data(session_id)),) if can_undo else ()),
+                ("Stop here", end_data(session_id)),
+            ),
+        ),
     )
 
 

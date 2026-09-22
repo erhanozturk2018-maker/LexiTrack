@@ -252,6 +252,9 @@ class MainWindow(QMainWindow):
         self.study.manage_plan.connect(self.manage_plan)
         self.study.data_changed.connect(self._on_data_changed)
         self.study.notify.connect(self._toast)
+        self.study.notify_undo.connect(
+            lambda text, undo: self._toast_widget.show_message(text, undo=undo)
+        )
         self.study.export_requested.connect(self.export_study)
 
         self._page_widgets = {

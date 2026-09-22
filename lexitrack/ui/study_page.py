@@ -31,7 +31,7 @@ from collections import OrderedDict
 from datetime import date
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter
+from PySide6.QtGui import QColor, QKeyEvent, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -220,6 +220,8 @@ class StudyPage(QWidget):
     data_changed = Signal()
     #: A short message for the window's toast.
     notify = Signal(str)
+    #: A message whose Undo button calls the given function.
+    notify_undo = Signal(str, object)
     #: The user wants today's words (or the hard ones) as a file.
     export_requested = Signal()
 
@@ -233,6 +235,10 @@ class StudyPage(QWidget):
         self._answered = 0
         self._plan: DailyPlan | None = None
         self._primary: str | None = None
+        # The last answer, for Undo: which word and which button, and the
+        # session it belongs to even after that session has ended.
+        self._last_session_id: str | None = None
+        self._last_answer: tuple[str, Rating] | None = None
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -509,7 +515,16 @@ class StudyPage(QWidget):
         self.answer_hint = _label("", "CardFooter")
         self.answer_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         escape_hint = _label("Esc to stop", "CardFooter")
+        # Names the answer it would take back, so a slip is recognised
+        # before it is undone rather than after.
+        self.undo_button = QPushButton("")
+        self.undo_button.setObjectName("FooterAction")
+        self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_button.setToolTip("Take back your last answer (Ctrl+Z)")
+        self.undo_button.clicked.connect(self.undo_last)
+        self.undo_button.hide()
         footer.addWidget(self.session_progress)
+        footer.addWidget(self.undo_button)
         footer.addStretch(1)
         footer.addWidget(self.answer_hint)
         footer.addStretch(1)
@@ -783,6 +798,8 @@ class StudyPage(QWidget):
             self.refresh()
             return
         self._session_id = self._engine.start_session().id
+        self._last_session_id = self._session_id
+        self._last_answer = None
         self._index = 0
         self._answered = 0
         plan = self._engine.active_plan()
@@ -793,11 +810,18 @@ class StudyPage(QWidget):
 
     def end_session(self) -> None:
         if self._session_id is not None:
-            self._engine.finish_session(self._session_id)
+            session_id = self._session_id
+            self._engine.finish_session(session_id)
             self._session_id = None
             if self._answered:
                 word = "word" if self._answered == 1 else "words"
-                self.notify.emit(f"{self._answered} {word} reviewed.")
+                text = f"{self._answered} {word} reviewed."
+                if self._engine.can_undo(session_id):
+                    # The last card of a session is where a slip is most
+                    # likely and least visible: the page has moved on.
+                    self.notify_undo.emit(text, self.undo_last)
+                else:
+                    self.notify.emit(text)
                 self.data_changed.emit()
         self._queue = []
         self.refresh()
@@ -830,6 +854,40 @@ class StudyPage(QWidget):
         self._revealed = not item.hide_meaning
         self._apply_reveal(word.definition, word.note)
         self._show_intervals(self._engine.preview_intervals(word.id))
+        self._show_undo()
+
+    def _show_undo(self) -> None:
+        last = self._last_answer
+        possible = (
+            last is not None
+            and self._session_id is not None
+            and self._engine.can_undo(self._session_id)
+        )
+        if possible:
+            word, rating = last
+            self.undo_button.setText(f"\u21b6 Undo {rating.label} on \u201c{word}\u201d")
+        self.undo_button.setVisible(possible)
+
+    def undo_last(self) -> None:
+        """Take back the last answer: in a session, show that card again."""
+        session_id = self._session_id or self._last_session_id
+        if session_id is None:
+            return
+        word = self._engine.undo_last_answer(session_id)
+        if word is None:
+            return
+        self._last_answer = None
+        self.notify.emit(f"Took back your answer to \u201c{word.word}\u201d.")
+        self.data_changed.emit()
+        if self.in_session:
+            self._index = max(self._index - 1, 0)
+            self._answered = max(self._answered - 1, 0)
+            item = self._engine.study_item(word.id)
+            if item is not None and self._index < len(self._queue):
+                self._queue[self._index] = item
+            self._show_card()
+        else:
+            self.refresh()
 
     def _show_intervals(self, preview: dict[Rating, int]) -> None:
         """Label the answers with when the word would come back.
@@ -872,6 +930,7 @@ class StudyPage(QWidget):
         outcome = self._engine.answer(item.word.id, rating, session_id=self._session_id)
         if outcome is not None and not outcome.duplicate:
             self._answered += 1
+            self._last_answer = (item.word.word, rating)
             if outcome.marked_known:
                 self.notify.emit(f"“{outcome.word.word}” is now marked as known.")
         self._index += 1
@@ -890,6 +949,9 @@ class StudyPage(QWidget):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.end_session()
+            return
+        if event.matches(QKeySequence.StandardKey.Undo):
+            self.undo_last()
             return
         if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if self._revealed:

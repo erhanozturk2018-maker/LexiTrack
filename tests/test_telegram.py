@@ -37,6 +37,7 @@ from lexitrack.telegram.messages import (
     end_data,
     intro_data,
     parse_callback,
+    undo_data,
 )
 from lexitrack.telegram.schedule import Notification, due_notifications, mark_sent
 
@@ -362,6 +363,35 @@ class TestReviews:
         counts = due.engine.rating_counts()
         assert counts[int(Rating.AGAIN)] == 0
         assert counts[int(Rating.GOOD)] == 1
+
+    def test_undo_appears_from_the_second_card_and_puts_the_word_back(
+        self, due: BotCore, outbox: FakeOutbox
+    ) -> None:
+        message_id, session, word = self.start(due, outbox)
+        assert not any(
+            d.startswith("undo:") for d in FakeOutbox.callbacks(outbox.sent[-1][1])
+        ), "nothing to take back on the first card"
+        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.EASY), ""))
+        second_id = outbox.last_id()
+        assert undo_data(session) in FakeOutbox.callbacks(outbox.sent[-1][1])
+        run(due.callback(OWNER, second_id, undo_data(session), ""))
+        card = outbox.sent[-1][1]
+        assert "Took back your answer" in card.text
+        assert "1 / 25" in card.text
+        assert "<tg-spoiler>" in card.text, "a new message, so hidden again"
+        assert (OWNER, second_id) in outbox.deleted
+        assert sum(due.engine.rating_counts().values()) == 0
+        # The same word can be answered again, even with the same button.
+        run(due.callback(OWNER, outbox.last_id(), answer_data(session, word, Rating.GOOD), ""))
+        assert due.engine.rating_counts()[int(Rating.GOOD)] == 1
+
+    def test_a_second_undo_does_nothing(self, due: BotCore, outbox: FakeOutbox) -> None:
+        message_id, session, word = self.start(due, outbox)
+        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
+        run(due.callback(OWNER, outbox.last_id(), undo_data(session), ""))
+        sent = len(outbox.sent)
+        run(due.callback(OWNER, outbox.last_id(), undo_data(session), ""))
+        assert len(outbox.sent) == sent
 
     def test_the_last_answer_ends_with_a_summary(self, due: BotCore, outbox: FakeOutbox) -> None:
         message_id, session, word = self.start(due, outbox)

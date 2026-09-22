@@ -242,6 +242,50 @@ def test_intervals_read_as_words() -> None:
     assert _interval(365) == "1 year"
 
 
+class TestUndo:
+    @pytest.fixture
+    def due(self, window, engine, loaded, clock):
+        with_plan(engine, loaded)
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        window.show_page(STUDY)
+        return window.study
+
+    def test_the_undo_button_names_what_it_takes_back(self, due) -> None:
+        due.start_session()
+        assert due.undo_button.isHidden(), "nothing to take back yet"
+        first = due.word_label.text()
+        due.keyPressEvent(_key(Qt.Key.Key_4))
+        assert not due.undo_button.isHidden()
+        assert due.undo_button.text() == f"\u21b6 Undo Easy on \u201c{first}\u201d"
+
+    def test_ctrl_z_puts_the_card_back_with_its_meaning_hidden(self, due, engine) -> None:
+        due.start_session()
+        first = due.word_label.text()
+        due.keyPressEvent(_key(Qt.Key.Key_4))
+        assert due.session_progress.text() == "2 / 25"
+        due.keyPressEvent(_ctrl(Qt.Key.Key_Z))
+        assert due.word_label.text() == first
+        assert due.session_progress.text() == "1 / 25"
+        assert due.definition_label.isHidden()
+        assert sum(engine.rating_counts().values()) == 0
+        assert due.undo_button.isHidden(), "one answer, once"
+
+    def test_the_last_card_offers_undo_after_the_session_closes(
+        self, due, engine
+    ) -> None:
+        offers: list[tuple[str, object]] = []
+        due.notify_undo.connect(lambda text, undo: offers.append((text, undo)))
+        due.start_session()
+        for _ in range(25):
+            due.keyPressEvent(_key(Qt.Key.Key_3))
+        assert not due.in_session
+        (text, undo), = offers
+        assert text == "25 words reviewed."
+        undo()
+        assert engine.daily_plan().due_count == 1, "the last word is due again"
+
+
 class TestStudyPlanDialog:
     def test_a_new_plan_needs_a_list(self, qapp, engine, loaded) -> None:
         dialog = StudyPlanDialog(engine, loaded)
@@ -373,6 +417,13 @@ def test_shortcuts_window_documents_the_study_keys(window) -> None:
     sections = [name for name, _keys in window.shortcut_sections()]
     assert sections[0] == "Study reviews"
     window.show_page(HOME)
+
+
+def _ctrl(key: Qt.Key):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    return QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.ControlModifier)
 
 
 def _key(key: Qt.Key):
