@@ -99,6 +99,13 @@ class CardRepository:
         ).fetchone()
         return _to_card(row) if row else None
 
+    def all_cards(self) -> list[SrsCard]:
+        """Every card, whatever its plan or state. For the Progress page."""
+        rows = self._db.connection.execute(
+            "SELECT * FROM srs_cards ORDER BY introduced_at, word_id"
+        ).fetchall()
+        return [_to_card(row) for row in rows]
+
     def get_many(self, word_ids: Iterable[int]) -> dict[int, SrsCard]:
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         found: dict[int, SrsCard] = {}

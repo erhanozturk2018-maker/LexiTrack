@@ -49,10 +49,12 @@ from PySide6.QtWidgets import (
 from ..core import paths
 from ..repositories.word_repository import StoredWord
 from ..services.learning_service import LearningService
+from ..services.progress import ProgressService
 from ..services.vocabulary_service import VocabularyService
 from .command_palette import Command, CommandPalette
 from .components.cards import ModeSwitch
 from .components.toast import Toast
+from .components.word_history import WordHistoryDialog
 from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
 from .home_page import HomePage
@@ -248,7 +250,14 @@ class MainWindow(QMainWindow):
 
         self.unknown = UnknownPage(self._service)
 
+        # One reader of the learning record for every place that shows it:
+        # the details panels, the Study page's words and the Progress page.
+        self._progress = ProgressService(self._service.database, self._engine)
+        for table in (self.review.table, self.unknown.table):
+            table.panel.set_history_source(self._progress.journey)
+
         self.study = StudyPage(self._engine)
+        self.study.history_opener = self.open_word_history
         self.study.manage_plan.connect(self.manage_plan)
         self.study.data_changed.connect(self._on_data_changed)
         self.study.notify.connect(self._toast)
@@ -538,6 +547,11 @@ class MainWindow(QMainWindow):
     def _toast(self, message: str) -> None:
         """A short message at the bottom of the window."""
         self._toast_widget.show_message(message)
+
+    def open_word_history(self, word_id: int) -> None:
+        journey = self._progress.journey(word_id)
+        if journey is not None:
+            WordHistoryDialog(journey, parent=self).exec()
 
     def export_study(self) -> None:
         """Export from the Study page: today's words, and the hard ones.

@@ -130,6 +130,18 @@ class SrsScheduler:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
+    def predicted_recall(self, stability: float, elapsed_days: float) -> float:
+        """FSRS's forgetting curve: the chance of recall after ``elapsed_days``.
+
+        The same formula the library applies to a card, taken from the same
+        parameters, so a calibration check compares the user's answers with
+        exactly what the scheduler believed. Whole days, as the library counts.
+        """
+        decay = -self.parameters[20]
+        factor = 0.9 ** (1 / decay) - 1
+        days = max(int(elapsed_days), 0)
+        return float((1 + factor * days / max(stability, 1e-6)) ** decay)
+
     def retrievability(self, card: SrsCard, now: datetime) -> float | None:
         """How likely the word is to be remembered now, from 0 to 1.
 

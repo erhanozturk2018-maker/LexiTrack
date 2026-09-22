@@ -98,8 +98,28 @@ class FlowLayout(QLayout):
         return y + line - rect.y()
 
 
-def chip(text: str, tone: str | None = None, tooltip: str | None = None) -> QLabel:
-    label = QLabel(text)
+class _ClickableChip(QLabel):
+    """A chip that opens something: a word's history, on the Study page."""
+
+    def __init__(self, text: str, on_click) -> None:
+        super().__init__(text)
+        self._on_click = on_click
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("clickable", "true")
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_click()
+        super().mouseReleaseEvent(event)
+
+
+def chip(
+    text: str,
+    tone: str | None = None,
+    tooltip: str | None = None,
+    on_click=None,
+) -> QLabel:
+    label = _ClickableChip(text, on_click) if on_click is not None else QLabel(text)
     label.setObjectName("Chip")
     if tone:
         label.setProperty("tone", tone)

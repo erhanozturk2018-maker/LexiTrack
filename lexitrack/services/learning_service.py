@@ -199,6 +199,10 @@ class LearningService:
         return self._clock
 
     @property
+    def scheduler(self) -> SrsScheduler:
+        return self._scheduler
+
+    @property
     def runtime(self) -> RuntimeRepository:
         return self._runtime
 

@@ -45,6 +45,18 @@ def learning_rules(p: Palette) -> str:
     border-color: {p.unknown_soft};
 }}
 #Chip[tone="done"] {{ color: {p.text_muted}; background-color: {p.surface_sunken}; }}
+/* The four answers, in the colours of the answer buttons. */
+#Chip[tone="again"] {{
+    background-color: {p.unknown_soft}; color: {p.unknown_text}; border-color: {p.unknown_soft};
+}}
+#Chip[tone="hard-answer"] {{ color: {p.text}; }}
+#Chip[tone="good"] {{
+    background-color: {p.known_soft}; color: {p.known_text}; border-color: {p.known_soft};
+}}
+#Chip[tone="easy"] {{
+    background-color: {p.known}; color: {p.text_on_accent}; border-color: {p.known};
+}}
+#Chip[clickable="true"]:hover {{ border-color: {p.accent}; }}
 #LevelLabel {{
     color: {p.text_faint};
     font-size: 11px;
@@ -84,6 +96,18 @@ QPushButton#FooterAction {{
 }}
 QPushButton#FooterAction:hover {{ color: {p.accent}; }}
 QPushButton#FooterAction:focus {{ color: {p.accent}; }}
+/* A text link in a column of text: no padding, so it starts where the
+   text above it starts. */
+QPushButton#LinkButton {{
+    font-size: 13px;
+    color: {p.accent};
+    background: transparent;
+    border: none;
+    padding: 2px 0;
+    text-align: left;
+}}
+QPushButton#LinkButton:hover {{ text-decoration: underline; }}
+QPushButton#LinkButton:focus {{ text-decoration: underline; }}
 
 QPushButton#AnswerButton {{
     border-radius: {m.radius_md}px;
@@ -157,6 +181,36 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     letter-spacing: 0.8px;
     background: transparent;
 }}
+
+/* ------------------------------------------------------------ word history */
+
+#HistoryFact {{
+    background-color: {p.surface};
+    border: 1px solid {p.border};
+    border-radius: {m.radius_md}px;
+}}
+#HistoryFactCaption {{
+    font-size: 10px; font-weight: 600; letter-spacing: 0.6px;
+    color: {p.text_faint}; background: transparent;
+}}
+#HistoryFactValue {{ font-size: 13px; color: {p.text}; background: transparent; }}
+#HistoryWhy {{
+    font-size: 13px; color: {p.text};
+    background-color: {p.accent_soft};
+    border-radius: {m.radius_md}px;
+    padding: 10px 12px;
+}}
+#HistorySteps {{
+    background-color: {p.surface};
+    border: 1px solid {p.border};
+    border-radius: {m.radius_md}px;
+}}
+#HistoryStep {{ background: transparent; border-top: 1px solid {p.border}; }}
+#HistoryStep[first="true"] {{ border-top: none; }}
+#HistoryDay {{ font-size: 12px; color: {p.text_faint}; background: transparent; }}
+#HistoryDetail {{ font-size: 13px; color: {p.text}; background: transparent; }}
+#HistoryDetail[undone="true"] {{ color: {p.text_faint}; text-decoration: line-through; }}
+#HistoryUndone {{ font-size: 11px; color: {p.unknown_text}; background: transparent; }}
 
 /* -------------------------------------------------------------- study plan */
 

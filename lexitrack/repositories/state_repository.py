@@ -209,6 +209,14 @@ class StateRepository:
             unknown=int(row["unknown"]),
         )
 
+    def known_without_card(self) -> int:
+        """Words Known that were never studied here: known before the plan."""
+        row = self._db.connection.execute(
+            "SELECT COUNT(*) AS n FROM user_word_state "
+            "WHERE status = 'known' AND word_id NOT IN (SELECT word_id FROM srs_cards)"
+        ).fetchone()
+        return int(row["n"])
+
     def count_with_status(self, status: ReviewStatus) -> int:
         row = self._db.connection.execute(
             "SELECT COUNT(*) AS n FROM user_word_state WHERE status = ?", (status.value,)

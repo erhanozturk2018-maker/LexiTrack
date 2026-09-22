@@ -239,6 +239,8 @@ class StudyPage(QWidget):
         # session it belongs to even after that session has ended.
         self._last_session_id: str | None = None
         self._last_answer: tuple[str, Rating] | None = None
+        #: Opens a word's history; set by the main window.
+        self.history_opener = None
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -691,11 +693,23 @@ class StudyPage(QWidget):
             row_layout.addWidget(level_label, 0, Qt.AlignmentFlag.AlignTop)
             flow = ChipFlow()
             flow.set_chips(
-                chip(word.word, None if pending else "done", _meaning(word))
+                chip(
+                    word.word,
+                    None if pending else "done",
+                    _meaning(word),
+                    # Learned today has a history to show; a word still to
+                    # be confirmed has none yet.
+                    on_click=None if pending else self._history_for(word.id),
+                )
                 for word in groups[level]
             )
             row_layout.addWidget(flow, 1)
             self._level_rows.addWidget(row)
+
+    def _history_for(self, word_id: int):
+        if self.history_opener is None:
+            return None
+        return lambda: self.history_opener(word_id)
 
     def word_chips(self) -> list[str]:
         """The words shown as chips, in order. For tests and accessibility."""
@@ -738,7 +752,9 @@ class StudyPage(QWidget):
                 "hard",
                 f"Missed {item.card.lapse_count} "
                 f"{'time' if item.card.lapse_count == 1 else 'times'}"
-                + (f"\n{_meaning(item.word)}" if _meaning(item.word) else ""),
+                + (f"\n{_meaning(item.word)}" if _meaning(item.word) else "")
+                + "\nClick for its history.",
+                on_click=self._history_for(item.word.id),
             )
             for item in items
         )

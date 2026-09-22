@@ -28,6 +28,7 @@ from lexitrack.repositories import (
     WordRepository,
 )
 from lexitrack.services.learning_service import LearningService
+from lexitrack.services.progress import Group, ProgressService
 from lexitrack.services.review_session import ReviewSession
 from lexitrack.services.srs_scheduler import SrsScheduler
 
@@ -288,3 +289,124 @@ class TestUndo:
         clock.advance_to_day_start(2)
         other.answer(item.word.id, Rating.GOOD)
         assert engine.undo_last_answer() is None
+
+
+class TestJourney:
+    def test_a_word_tells_its_story_in_order(
+        self, engine: LearningService, clock: FrozenClock, database: Database, words
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.AGAIN)
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.EASY)
+        clock.advance_to_day_start(8)
+        answer_all(engine, Rating.EASY)
+        journey = ProgressService(database, engine).journey(words[0])
+        kinds = [step.kind for step in journey.steps]
+        assert kinds[0] == "introduced"
+        assert [s.rating for s in journey.steps if s.kind == "answer"][:1] == [Rating.AGAIN]
+        assert journey.answers == len([k for k in kinds if k == "answer"])
+        assert journey.agains == 1
+        assert journey.plan_name == "Test plan"
+        assert journey.group is Group.LEARNED
+        assert journey.known_on == clock.today()
+        assert kinds[-1] == "status", "Known comes after the answer that made it"
+
+    def test_an_answer_taken_back_is_shown_and_not_counted(
+        self, engine: LearningService, clock: FrozenClock, database: Database, words
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        clock.advance(hours=9)
+        engine.answer(words[0], Rating.EASY)
+        engine.undo_last_answer()
+        journey = ProgressService(database, engine).journey(words[0])
+        answers = [s for s in journey.steps if s.kind == "answer"]
+        assert len(answers) == 1 and answers[0].undone
+        assert journey.answers == 0
+        assert journey.last_answer is None
+        assert journey.due_today
+
+    def test_a_word_never_studied_says_why_it_is_not_scheduled(
+        self, engine: LearningService, database: Database, words
+    ) -> None:
+        journey = ProgressService(database, engine).journey(words[-1])
+        assert journey.card is None and journey.group is None
+        assert journey.steps[0].kind == "status", "the Unknown set up by the fixture"
+
+
+class TestProgressViews:
+    def test_the_groups_separate_learned_from_marked_and_from_known_before(
+        self, engine: LearningService, clock: FrozenClock, database: Database, words
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.EASY)
+        clock.advance_to_day_start(8)
+        answer_all(engine, Rating.EASY)  # the first five: learned here
+        engine.introduce()
+        engine.mark_known([words[5]])  # introduced today, then Known by hand
+        StateRepository(database).set_status(words[-1], ReviewStatus.KNOWN)  # never studied
+        progress = ProgressService(database, engine)
+        rows = progress.words()
+        groups = {row.word.id: row.group for row in rows}
+        assert {groups[w] for w in words[:5]} == {Group.LEARNED}
+        assert groups[words[5]] is Group.MARKED_KNOWN
+        summary = progress.summary(rows)
+        assert (summary.learned, summary.marked_known) == (5, 1)
+        assert summary.known_before == 1
+        learned = next(row for row in rows if row.word.id == words[0])
+        assert learned.days_to_known == 9
+
+    def test_every_answer_is_listed_including_those_taken_back(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.GOOD)
+        engine.undo_last_answer()
+        progress = ProgressService(database, engine)
+        rows = progress.answers()
+        assert len(rows) == 5
+        assert sum(1 for row in rows if row.entry.undone_at is not None) == 1
+        assert progress.summary().taken_back == 1
+
+    def test_the_pipeline_accounts_for_every_studied_word(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.GOOD)
+        engine.introduce()
+        stages = ProgressService(database, engine).pipeline()
+        assert sum(stage.count for stage in stages) == 10
+        assert stages[0].label == "Not answered yet" and stages[0].count == 5
+
+    def test_calibration_compares_the_forecast_with_the_answers(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        engine.introduce()
+        for _ in range(12):
+            clock.advance_to_day_start(1)
+            engine.introduce()
+            for index, item in enumerate(engine.review_queue()):
+                engine.answer(item.word.id, Rating.AGAIN if index % 4 == 0 else Rating.GOOD)
+        calibration = ProgressService(database, engine).calibration()
+        assert calibration.reviews > 0
+        assert 0 < calibration.predicted <= 1 and 0 <= calibration.actual <= 1
+        assert sum(b.count for b in calibration.bins) == calibration.reviews
+        assert not calibration.enough or calibration.reviews >= 100
+
+    def test_the_forgetting_curve_is_the_librarys_own(
+        self, engine: LearningService, clock: FrozenClock, database: Database, words
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        answer_all(engine, Rating.GOOD)
+        card = CardRepository(database).get(words[0])
+        clock.advance_to_day_start(4)
+        scheduler = engine.scheduler
+        expected = scheduler.retrievability(card, clock.now_utc())
+        elapsed = (clock.now_utc() - card.last_review_at).days
+        assert abs(scheduler.predicted_recall(card.stability, elapsed) - expected) < 1e-9

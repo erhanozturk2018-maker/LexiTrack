@@ -15,7 +15,7 @@ import pytest
 pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtCore import QSettings, Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
@@ -284,6 +284,44 @@ class TestUndo:
         assert text == "25 words reviewed."
         undo()
         assert engine.daily_plan().due_count == 1, "the last word is due again"
+
+
+class TestWordHistory:
+    def test_the_details_panel_summarises_and_opens_the_history(
+        self, window, engine, loaded, clock
+    ) -> None:
+        from lexitrack.ui.components.word_history import WordHistoryView
+
+        with_plan(engine, loaded)
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        for item in engine.review_queue():
+            engine.answer(item.word.id, Rating.GOOD)
+        word = loaded.list_words(loaded.lists()[0].id)[0]
+        panel = window.review.table.panel
+        panel.show_word(loaded.get_word(word.id))
+        assert not panel.learning.isHidden()
+        assert panel.learning.text().startswith("In progress: 1 answers so far")
+        view = WordHistoryView()
+        view.show_journey(window._progress.journey(word.id))
+        assert view.title.text() == word.word
+        assert "Next on" in view.why.text()
+        # marked Unknown by the fixture, introduced, answered once
+        assert view.steps.count() == 3
+
+    def test_learned_words_on_the_study_page_open_their_history(
+        self, window, engine, loaded
+    ) -> None:
+        opened: list[int] = []
+        window.study.history_opener = opened.append
+        with_plan(engine, loaded)
+        engine.introduce()
+        window.show_page(STUDY)
+        window.study.refresh()
+        first = window.study._level_rows.itemAt(0).widget()
+        chip_widget = first.layout().itemAt(1).widget().findChildren(QLabel)[0]
+        chip_widget._on_click()
+        assert opened, "a learned word opens its history"
 
 
 class TestStudyPlanDialog:

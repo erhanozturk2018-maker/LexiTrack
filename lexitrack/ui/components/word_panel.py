@@ -9,6 +9,8 @@ here never changes it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
@@ -26,6 +28,7 @@ from ...models.user_word_state import ReviewStatus
 from ...repositories.word_repository import StoredWord
 from ..theme.palette import METRICS
 from .status import StatusBadge
+from .word_history import WordHistoryDialog, journey_summary
 
 PANEL_WIDTH = 320
 
@@ -42,6 +45,9 @@ class WordPanel(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(PANEL_WIDTH)
         self.word: StoredWord | None = None
+        #: Supplies a word's learning history; set by the main window, so
+        #: the panel itself needs no service.
+        self._history_source: Callable[[int], object] | None = None
         self._build()
 
     def _build(self) -> None:
@@ -91,6 +97,19 @@ class WordPanel(QFrame):
         self.lists = self._field(layout, "LISTS")
         self.source = self._field(layout, "SOURCE")
         self.language = self._field(layout, "LANGUAGE")
+        self.learning_title = _section("LEARNING")
+        layout.addWidget(self.learning_title)
+        self.learning = _text()
+        layout.addWidget(self.learning)
+        self.history_button = QPushButton("Show history \u2192")
+        self.history_button.setObjectName("LinkButton")
+        self.history_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.history_button.setToolTip("Every answer and every change of status")
+        self.history_button.clicked.connect(self.open_history)
+        layout.addWidget(self.history_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.learning_title.hide()
+        self.learning.hide()
+        self.history_button.hide()
         layout.addStretch(1)
 
         buttons = QHBoxLayout()
@@ -156,6 +175,28 @@ class WordPanel(QFrame):
         self.language.setText(language_name(word.language))
         for status, button in self.buttons.items():
             button.setEnabled(status is not word.status)
+        self._show_learning(word)
+
+    def set_history_source(self, source: Callable[[int], object]) -> None:
+        self._history_source = source
+        if self.word is not None:
+            self._show_learning(self.word)
+
+    def _show_learning(self, word: StoredWord) -> None:
+        journey = self._history_source(word.id) if self._history_source else None
+        visible = journey is not None
+        self.learning_title.setVisible(visible)
+        self.learning.setVisible(visible)
+        self.history_button.setVisible(visible)
+        if journey is not None:
+            self.learning.setText(journey_summary(journey))
+
+    def open_history(self) -> None:
+        if self.word is None or self._history_source is None:
+            return
+        journey = self._history_source(self.word.id)
+        if journey is not None:
+            WordHistoryDialog(journey, parent=self.window()).exec()
 
     def hide_status(self, status: ReviewStatus) -> None:
         """Leave out a status that makes no sense where the panel is shown."""
