@@ -205,6 +205,18 @@ class SessionRepository:
 
     # -- Telegram idempotency ---------------------------------------------
 
+    def release_update(self, update_key: str) -> None:
+        """Forget a claimed key, so the same answer can be given again.
+
+        Used by Undo: the word goes back on screen, and without this its next
+        answer would be taken for a re-delivery of the one just undone.
+        """
+        key = (update_key or "").strip()
+        if not key:
+            return
+        with self._db.transaction() as conn:
+            conn.execute("DELETE FROM telegram_updates WHERE update_key = ?", (key,))
+
     def claim_update(self, update_key: str) -> bool:
         """Record a Telegram update key, returning whether it is new.
 

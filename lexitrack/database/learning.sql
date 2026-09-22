@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS srs_cards (
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
--- Append-only history. The database is the source of truth; the CSV files in
--- data/logs/reviews are generated from this table.
+-- Append-only history of every Study and Telegram answer. There are no log
+-- files: Settings -> Data -> Export history writes this table as one CSV.
 CREATE TABLE IF NOT EXISTS review_logs (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     word_id           INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,

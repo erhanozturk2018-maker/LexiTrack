@@ -29,7 +29,7 @@ from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class MigrationError(StorageError):
@@ -373,9 +373,64 @@ def seed_settings(connection: sqlite3.Connection) -> None:
         list(DEFAULT_SETTINGS.items()),
     )
 
+# -- version 3 -> 4 ----------------------------------------------------------
+#
+# Version 4 records every status change (word_status_events) and lets a plan
+# draw on every list (study_plans.all_lists). Nothing existing changes.
+#
+# Words that became Known through the schedule before the table existed get
+# one reconstructed event each, dated by the review whose stability first
+# reached the mastery threshold. Words marked Known by hand left no trace and
+# get no event: an invented date would be worse than an honest gap.
+
+_PROGRESS_SCHEMA = Path(__file__).with_name("progress.sql")
+
+
+def _migrate_3_to_4(connection: sqlite3.Connection) -> None:
+    _run_sql(connection, _PROGRESS_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+    reconstruct_mastery_events(connection)
+
+
+def reconstruct_mastery_events(connection: sqlite3.Connection) -> int:
+    """Infer a mastery event for Known words whose reviews crossed the threshold.
+
+    Returns the number of events written. Safe to run twice: a word that
+    already has a mastery event is skipped.
+    """
+    row = connection.execute(
+        "SELECT value FROM app_settings WHERE key = 'mastery_stability_days'"
+    ).fetchone()
+    try:
+        threshold = float(row[0]) if row else 21.0
+    except (TypeError, ValueError):
+        threshold = 21.0
+    cursor = connection.execute(
+        """
+        INSERT INTO word_status_events
+            (word_id, at, from_status, to_status, cause, plan_id, reconstructed)
+        SELECT st.word_id,
+               (SELECT r.reviewed_at FROM review_logs r
+                 WHERE r.word_id = st.word_id AND r.stability_after >= ?
+                 ORDER BY r.reviewed_at, r.id LIMIT 1),
+               'unknown', 'known', 'mastery', c.origin_plan_id, 1
+        FROM user_word_state st
+        JOIN srs_cards c ON c.word_id = st.word_id
+        WHERE st.status = 'known'
+          AND EXISTS (SELECT 1 FROM review_logs r
+                       WHERE r.word_id = st.word_id AND r.stability_after >= ?)
+          AND NOT EXISTS (SELECT 1 FROM word_status_events e
+                           WHERE e.word_id = st.word_id AND e.cause = 'mastery')
+        """,
+        (threshold, threshold),
+    )
+    return cursor.rowcount
+
+
 _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
+    3: _migrate_3_to_4,
 }
 
 

@@ -14,6 +14,8 @@ from habit: see ``docs/LEARNING_ENGINE.md`` §H.
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -32,6 +34,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "evening_reminder_hour": "21",
     # -- scheduling
     "desired_retention": "0.9",
+    # Parameters fitted to the user's own reviews, as a JSON list of 21
+    # numbers; empty means the published FSRS defaults. See optimizer.py.
+    "fsrs_parameters": "",
     "mastery_stability_days": "21",
     "review_known_words": "true",
     # -- struggling words (leeches): any one of these is enough
@@ -63,6 +68,7 @@ class Setting(StrEnum):
     NOTIFY_HOUR = "notify_hour"
     EVENING_REMINDER_HOUR = "evening_reminder_hour"
     DESIRED_RETENTION = "desired_retention"
+    FSRS_PARAMETERS = "fsrs_parameters"
     MASTERY_STABILITY_DAYS = "mastery_stability_days"
     REVIEW_KNOWN_WORDS = "review_known_words"
     LEECH_CONSECUTIVE = "leech_consecutive"
@@ -91,6 +97,8 @@ class LearningSettings:
     notify_hour: int = 6
     evening_reminder_hour: int = 21
     desired_retention: float = 0.9
+    #: Fitted parameters, or None for the FSRS defaults.
+    fsrs_parameters: tuple[float, ...] | None = None
     mastery_stability_days: float = 21.0
     review_known_words: bool = True
     leech_consecutive: int = 4
@@ -137,6 +145,7 @@ class LearningSettings:
             notify_hour=min(max(integer(Setting.NOTIFY_HOUR), 0), 23),
             evening_reminder_hour=min(max(integer(Setting.EVENING_REMINDER_HOUR), 0), 23),
             desired_retention=min(max(number(Setting.DESIRED_RETENTION), 0.7), 0.99),
+            fsrs_parameters=_parameters(merged[Setting.FSRS_PARAMETERS]),
             mastery_stability_days=max(number(Setting.MASTERY_STABILITY_DAYS), 1.0),
             review_known_words=flag(Setting.REVIEW_KNOWN_WORDS),
             leech_consecutive=max(integer(Setting.LEECH_CONSECUTIVE), 1),
@@ -148,6 +157,24 @@ class LearningSettings:
             debug_logging=flag(Setting.DEBUG_LOGGING),
             active_plan_id=int(plan) if plan.isdigit() else None,
         )
+
+
+def _parameters(value: object) -> tuple[float, ...] | None:
+    """Read stored FSRS parameters, or None when absent or unusable.
+
+    Anything but a list of exactly 21 finite numbers falls back to the
+    defaults rather than stopping the scheduler.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        numbers = tuple(float(item) for item in json.loads(text))
+    except (TypeError, ValueError):
+        return None
+    if len(numbers) != 21 or not all(math.isfinite(n) for n in numbers):
+        return None
+    return numbers
 
 
 def serialize(value: object) -> str:

@@ -33,6 +33,7 @@ optimisation — or a library upgrade — a change to one file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -80,7 +81,11 @@ class SrsScheduler:
     def __init__(self, settings: LearningSettings, clock: DayClock) -> None:
         self._settings = settings
         self._clock = clock
+        extra = {}
+        if settings.fsrs_parameters is not None:
+            extra["parameters"] = settings.fsrs_parameters
         self._scheduler = Scheduler(
+            **extra,
             desired_retention=settings.desired_retention,
             learning_steps=_STEP,
             relearning_steps=_STEP,
@@ -98,6 +103,44 @@ class SrsScheduler:
     @property
     def version(self) -> str:
         return SCHEDULER_VERSION
+
+    @property
+    def parameters(self) -> tuple[float, ...]:
+        return tuple(float(value) for value in self._scheduler.parameters)
+
+    @property
+    def personalised(self) -> bool:
+        """True when the parameters were fitted to the user's own reviews."""
+        return self._settings.fsrs_parameters is not None
+
+    @property
+    def params_hash(self) -> str:
+        """A short fingerprint of everything that shapes an interval.
+
+        Written on every review, so a schedule can be traced to the exact
+        parameters and retention that produced it after either changes.
+        """
+        payload = json.dumps(
+            {
+                "w": [round(value, 6) for value in self.parameters],
+                "retention": round(self._settings.desired_retention, 4),
+                "version": SCHEDULER_VERSION,
+            },
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+    def retrievability(self, card: SrsCard, now: datetime) -> float | None:
+        """How likely the word is to be remembered now, from 0 to 1.
+
+        None for a card never rated: before the first answer FSRS has no
+        estimate, and inventing one would be the same mistake as inventing a
+        rating for the introduction.
+        """
+        if not card.fsrs_state or card.stability is None:
+            return None
+        engine = self._to_engine(card, now)
+        return float(self._scheduler.get_card_retrievability(engine, _utc(now)))
 
     # -- introduction ------------------------------------------------------
 

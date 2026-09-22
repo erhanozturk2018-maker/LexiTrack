@@ -168,7 +168,7 @@ class Maintenance:
             SELECT r.reviewed_on, r.reviewed_at, w.display_word AS word, r.rating,
                    r.channel, r.state_before, r.state_after, r.elapsed_days,
                    r.scheduled_days, r.stability_after, r.difficulty_after,
-                   r.due_after, r.session_id
+                   r.due_after, r.session_id, r.undone_at, r.params_hash
             FROM review_logs r
             JOIN words w ON w.id = r.word_id
             ORDER BY r.reviewed_at, r.id
@@ -184,6 +184,7 @@ class Maintenance:
                     "date", "time_utc", "word", "rating", "answer", "channel",
                     "state_before", "state_after", "elapsed_days", "interval_days",
                     "stability", "difficulty", "next_due_utc", "session",
+                    "undone_utc", "parameters",
                 ]
             )
             for row in rows:
@@ -195,6 +196,7 @@ class Maintenance:
                         _num(row["elapsed_days"]), _num(row["scheduled_days"]),
                         _num(row["stability_after"]), _num(row["difficulty_after"]),
                         row["due_after"] or "", row["session_id"] or "",
+                        row["undone_at"] or "", row["params_hash"] or "",
                     ]
                 )
         return len(rows)

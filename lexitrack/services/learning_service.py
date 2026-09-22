@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from ..core.clock import DayClock
 from ..database.connection import Database
@@ -40,7 +41,7 @@ from ..models.srs import (
     SrsCard,
     StudyPlan,
 )
-from ..models.user_word_state import ReviewStatus
+from ..models.user_word_state import ReviewStatus, StatusCause
 from ..repositories import (
     CardRepository,
     ListRepository,
@@ -152,6 +153,20 @@ class AnswerOutcome:
     marked_known: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class _LastAnswer:
+    """Enough of the last answer to take it back exactly."""
+
+    word_id: int
+    card_before: SrsCard
+    log_id: int
+    status_before: ReviewStatus
+    marked_known: bool
+    session_id: str | None
+    update_key: str | None
+    answered_at: datetime
+
+
 class LearningService:
     """Plans the day, hands out reviews and records answers."""
 
@@ -168,6 +183,9 @@ class LearningService:
         self._settings = self._settings_repo.load()
         self._clock = clock or DayClock(self._settings.timezone, self._settings.day_start_hour)
         self._scheduler = SrsScheduler(self._settings, self._clock)
+        # One answer can be taken back, and only by the client that gave it:
+        # the desk and the Telegram thread each hold their own service.
+        self._last_answer: _LastAnswer | None = None
 
     # -- configuration -----------------------------------------------------
 
@@ -496,7 +514,7 @@ class LearningService:
         now = self._clock.now_utc()
         result = self._scheduler.review(card, rating, now)
         self._cards.save(result.card)
-        self._cards.log(
+        log_id = self._cards.log(
             ReviewLogEntry(
                 word_id=card.word_id,
                 session_id=session_id,
@@ -513,6 +531,7 @@ class LearningService:
                 stability_after=result.card.stability,
                 difficulty_after=result.card.difficulty,
                 scheduler_version=result.card.scheduler_version,
+                params_hash=self._scheduler.params_hash,
             )
         )
         if session_id:
@@ -520,8 +539,25 @@ class LearningService:
 
         marked_known = False
         if result.reached_mastery and word.status is not ReviewStatus.KNOWN:
-            self._state.set_status(word.id, ReviewStatus.KNOWN)
+            plan = self.active_plan()
+            self._state.set_status(
+                word.id,
+                ReviewStatus.KNOWN,
+                cause=StatusCause.MASTERY,
+                plan_id=plan.id if plan else card.origin_plan_id,
+                at=now,
+            )
             marked_known = True
+        self._last_answer = _LastAnswer(
+            word_id=word.id,
+            card_before=card,
+            log_id=log_id,
+            status_before=word.status,
+            marked_known=marked_known,
+            session_id=session_id,
+            update_key=update_key,
+            answered_at=now,
+        )
 
         due_on = self._clock.local_date(result.card.due_at)
         return AnswerOutcome(
@@ -534,6 +570,51 @@ class LearningService:
             reached_mastery=result.reached_mastery,
             marked_known=marked_known,
         )
+
+    # -- undo --------------------------------------------------------------
+
+    def can_undo(self, session_id: str | None = None) -> bool:
+        """True when the last answer given here, in this session, can be taken back."""
+        return self._undoable(session_id) is not None
+
+    def undo_last_answer(self, session_id: str | None = None) -> StoredWord | None:
+        """Take back the last answer: the card, the status and the session as before.
+
+        The answer's row in ``review_logs`` is kept and marked as undone, so
+        the history still shows the slip; statistics and parameter fitting
+        leave it out. Returns the word, now due again, or None when there is
+        nothing to take back - no answer yet, a different session, or the
+        word has been answered again since.
+        """
+        last = self._undoable(session_id)
+        if last is None:
+            return None
+        now = self._clock.now_utc()
+        with self._db.transaction():
+            self._cards.save(last.card_before)
+            self._cards.mark_undone(last.log_id, now)
+            if last.marked_known:
+                self._state.set_status(
+                    last.word_id, last.status_before, cause=StatusCause.UNDO, at=now
+                )
+            if last.session_id:
+                self._sessions.update(
+                    last.session_id, done_increment=-1, current_word_id=last.word_id
+                )
+            if last.update_key:
+                self._sessions.release_update(last.update_key)
+        self._last_answer = None
+        return self._words.get(last.word_id)
+
+    def _undoable(self, session_id: str | None) -> _LastAnswer | None:
+        last = self._last_answer
+        if last is None or last.session_id != session_id:
+            return None
+        card = self._cards.get(last.word_id)
+        # Answered again since, from the other client: the record is stale.
+        if card is None or card.last_review_at != last.answered_at:
+            return None
+        return last
 
     def preview_intervals(self, word_id: int) -> dict[Rating, int]:
         """How many days away each answer would put the word.
@@ -564,7 +645,9 @@ class LearningService:
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         if not ids:
             return 0
-        changed = self._state.set_status_many(ids, ReviewStatus.KNOWN)
+        changed = self._state.set_status_many(
+            ids, ReviewStatus.KNOWN, cause=StatusCause.MANUAL, at=self._clock.now_utc()
+        )
         if not self._settings.review_known_words:
             self._cards.set_state(ids, CardState.ARCHIVED)
         return changed

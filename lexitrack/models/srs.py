@@ -148,4 +148,6 @@ class ReviewLogEntry:
     difficulty_after: float | None = None
     scheduler_version: str | None = None
     params_hash: str | None = None
+    #: Set when the answer was taken back. The row stays, for the record.
+    undone_at: datetime | None = None
     id: int | None = None

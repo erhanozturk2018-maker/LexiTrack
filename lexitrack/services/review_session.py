@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models.user_word_state import Progress, ReviewStatus
+from ..models.user_word_state import Progress, ReviewStatus, StatusCause
 from ..repositories.state_repository import StateRepository
 from ..repositories.word_repository import StoredWord, WordRepository
 
@@ -125,7 +125,8 @@ class ReviewSession:
         if item is None:
             return None
         status = ReviewStatus.KNOWN if known else ReviewStatus.UNKNOWN
-        self._state.set_status(item.word.id, status)
+        # Sorting, not learning: the Review tab says what the user already knows.
+        self._state.set_status(item.word.id, status, cause=StatusCause.SORTING)
         self.last_answer = known
 
         if self.is_live:

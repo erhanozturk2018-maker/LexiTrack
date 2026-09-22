@@ -398,7 +398,8 @@ class CardRepository:
     def logs_on(self, local_date: str) -> list[ReviewLogEntry]:
         rows = self._db.connection.execute(
             """
-            SELECT * FROM review_logs WHERE reviewed_on = ? ORDER BY reviewed_at, id
+            SELECT * FROM review_logs WHERE reviewed_on = ? AND undone_at IS NULL
+            ORDER BY reviewed_at, id
             """,
             (local_date,),
         ).fetchall()
@@ -406,11 +407,14 @@ class CardRepository:
 
     def count_logs_on(self, local_date: str) -> int:
         row = self._db.connection.execute(
-            "SELECT COUNT(*) AS n FROM review_logs WHERE reviewed_on = ?", (local_date,)
+            "SELECT COUNT(*) AS n FROM review_logs "
+            "WHERE reviewed_on = ? AND undone_at IS NULL",
+            (local_date,),
         ).fetchone()
         return int(row["n"])
 
     def logs_for_word(self, word_id: int, limit: int = 50) -> list[ReviewLogEntry]:
+        """A word's answers, newest first, including any taken back."""
         rows = self._db.connection.execute(
             "SELECT * FROM review_logs WHERE word_id = ? ORDER BY reviewed_at DESC, id DESC "
             "LIMIT ?",
@@ -418,15 +422,36 @@ class CardRepository:
         ).fetchall()
         return [_to_log(row) for row in rows]
 
+    def all_logs(self, *, include_undone: bool = True) -> list[ReviewLogEntry]:
+        """Every answer, oldest first. The Progress page shows all of them."""
+        where = "" if include_undone else " WHERE undone_at IS NULL"
+        rows = self._db.connection.execute(
+            f"SELECT * FROM review_logs{where} ORDER BY reviewed_at, id"
+        ).fetchall()
+        return [_to_log(row) for row in rows]
+
+    def mark_undone(self, log_id: int, at: datetime) -> None:
+        """Mark an answer as taken back. The row itself is kept."""
+        try:
+            with self._db.transaction() as conn:
+                conn.execute(
+                    "UPDATE review_logs SET undone_at = ? WHERE id = ?",
+                    (_stamp(at), int(log_id)),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("That answer could not be taken back.") from exc
+
     def rating_counts(self, since_local_date: str | None = None) -> dict[int, int]:
         """How many Again / Hard / Good / Easy answers, for the Again rate."""
         if since_local_date is None:
             rows = self._db.connection.execute(
-                "SELECT rating, COUNT(*) AS n FROM review_logs GROUP BY rating"
+                "SELECT rating, COUNT(*) AS n FROM review_logs WHERE undone_at IS NULL "
+                "GROUP BY rating"
             ).fetchall()
         else:
             rows = self._db.connection.execute(
-                "SELECT rating, COUNT(*) AS n FROM review_logs WHERE reviewed_on >= ? "
+                "SELECT rating, COUNT(*) AS n FROM review_logs "
+                "WHERE reviewed_on >= ? AND undone_at IS NULL "
                 "GROUP BY rating",
                 (since_local_date,),
             ).fetchall()
@@ -438,7 +463,7 @@ class CardRepository:
     def reviews_per_day(self, days: int = 30) -> dict[str, int]:
         rows = self._db.connection.execute(
             "SELECT reviewed_on AS day, COUNT(*) AS n FROM review_logs "
-            "GROUP BY reviewed_on ORDER BY day DESC LIMIT ?",
+            "WHERE undone_at IS NULL GROUP BY reviewed_on ORDER BY day DESC LIMIT ?",
             (days,),
         ).fetchall()
         return {row["day"]: int(row["n"]) for row in reversed(rows)}
@@ -500,4 +525,5 @@ def _to_log(row: sqlite3.Row) -> ReviewLogEntry:
         difficulty_after=row["difficulty_after"],
         scheduler_version=row["scheduler_version"],
         params_hash=row["params_hash"],
+        undone_at=_parse(row["undone_at"]),
     )

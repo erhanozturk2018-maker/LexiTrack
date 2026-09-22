@@ -20,6 +20,33 @@ class ReviewStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class StatusCause(StrEnum):
+    """Why a word's status changed. Stored with every change."""
+
+    #: The schedule judged the word learned: stability passed the threshold.
+    MASTERY = "mastery"
+    #: A status button: the details panel, the word list, Unknown Words.
+    MANUAL = "manual"
+    #: An answer on the Review tab's flashcards, I Know / I Don't Know.
+    SORTING = "sorting"
+    #: An answer taken back.
+    UNDO = "undo"
+
+
+@dataclass(frozen=True, slots=True)
+class StatusEvent:
+    """One change of one word's status."""
+
+    word_id: int
+    at: datetime
+    from_status: ReviewStatus | None
+    to_status: ReviewStatus
+    cause: StatusCause
+    plan_id: int | None = None
+    #: Inferred by the version 4 upgrade from the review log, not recorded live.
+    reconstructed: bool = False
+
+
 @dataclass(slots=True)
 class UserWordState:
     word_id: int
