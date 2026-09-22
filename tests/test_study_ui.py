@@ -267,6 +267,54 @@ class TestStudyPlanDialog:
         assert engine.active_plan().name == "Renamed"
         assert engine.daily_plan().introduced_today
 
+    def test_the_summary_counts_what_will_be_taught_not_the_whole_list(
+        self, qapp, engine, loaded
+    ) -> None:
+        """The old summary called every word not Known "still to learn"."""
+        with_plan(engine, loaded)
+        engine.introduce()
+        dialog = StudyPlanDialog(engine, loaded)
+        text = dialog.summary.text()
+        assert "79 words to learn" in text, "104 unknown, 25 already introduced"
+        assert "25 in progress" in text
+        assert "About 4 days of new words at 25 a day" in text
+        assert engine.daily_plan().pool_remaining == 79, "the same rule as the engine"
+
+    def test_a_list_nobody_has_sorted_says_how_to_include_it(
+        self, qapp, engine, loaded
+    ) -> None:
+        loaded.set_status([w.id for w in loaded.list_words(loaded.lists()[0].id)[:4]],
+                          ReviewStatus.NOT_REVIEWED)
+        dialog = StudyPlanDialog(engine, loaded)
+        row = next(iter(dialog._checks.values())).parentWidget()
+        assert "4 never answered: sort them on the Review tab first" in row.meta.text()
+
+    def test_all_my_lists_ticks_every_list_and_gives_the_choices_back(
+        self, qapp, engine, loaded
+    ) -> None:
+        dialog = StudyPlanDialog(engine, loaded)
+        only = next(iter(dialog._checks.values()))
+        assert not only.isChecked()
+        dialog._all_row.check.setChecked(True)
+        assert only.isChecked() and not only.parentWidget().isEnabled()
+        dialog._all_row.check.setChecked(False)
+        assert not only.isChecked() and only.parentWidget().isEnabled()
+
+    def test_a_plan_over_all_lists_takes_lists_added_later(
+        self, qapp, engine, loaded
+    ) -> None:
+        dialog = StudyPlanDialog(engine, loaded)
+        dialog._all_row.check.setChecked(True)
+        dialog._save()
+        plan = engine.active_plan()
+        assert plan.all_lists and plan.list_label == "All my lists"
+        before = engine.daily_plan().pool_remaining
+        later = loaded.create_list("Made later")
+        for word in ("zebra", "yonder", "quartz"):
+            loaded.add_word(later.id, word)
+        loaded.set_status([w.id for w in loaded.list_words(later.id)], ReviewStatus.UNKNOWN)
+        assert engine.daily_plan().pool_remaining == before + 3
+
 
 class TestSettingsDialog:
     def test_the_window_shows_the_stored_values(self, qapp, engine, loaded) -> None:

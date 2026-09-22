@@ -36,6 +36,7 @@ from ..models.settings import LearningSettings, Setting
 from ..models.srs import (
     CardState,
     Channel,
+    PlanOutlook,
     Rating,
     ReviewLogEntry,
     SrsCard,
@@ -231,9 +232,14 @@ class LearningService:
         list_ids: Sequence[int],
         description: str | None = None,
         make_active: bool = True,
+        all_lists: bool = False,
     ) -> StudyPlan:
         plan = self._plans.create(
-            name, description=description, list_ids=list_ids, make_active=make_active
+            name,
+            description=description,
+            list_ids=list_ids,
+            make_active=make_active,
+            all_lists=all_lists,
         )
         self.refresh_settings()
         return plan
@@ -244,9 +250,11 @@ class LearningService:
         name: str | None = None,
         description: str | None = None,
         list_ids: Sequence[int] | None = None,
+        all_lists: bool | None = None,
     ) -> StudyPlan:
         return self._plans.update(
-            plan_id, name=name, description=description, list_ids=list_ids
+            plan_id, name=name, description=description, list_ids=list_ids,
+            all_lists=all_lists,
         )
 
     def set_active_plan(self, plan_id: int) -> StudyPlan:
@@ -267,6 +275,21 @@ class LearningService:
 
     def plan_counts(self, plan_id: int) -> dict[str, int]:
         return self._plans.counts(plan_id)
+
+    def selection_outlook(
+        self, list_ids: Sequence[int], *, all_lists: bool = False
+    ) -> PlanOutlook:
+        """What a selection of lists would give, before it is saved.
+
+        Uses the engine's own rule for which words are offered, including
+        the *Offer words you have never answered* setting, so the numbers
+        are the ones the Study page will then show.
+        """
+        return self._plans.selection_outlook(
+            list_ids,
+            all_lists=all_lists,
+            include_not_reviewed=self._settings.new_words_include_not_reviewed,
+        )
 
     # -- the day -----------------------------------------------------------
 

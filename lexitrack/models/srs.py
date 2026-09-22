@@ -71,6 +71,30 @@ class Channel(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PlanOutlook:
+    """What a selection of lists means for learning, in words.
+
+    Every figure comes from the same query the engine uses to pick the
+    day's new words, so the Study Plan window and the Study page cannot
+    disagree about how many words are left.
+    """
+
+    total: int = 0
+    known: int = 0
+    unknown: int = 0
+    not_reviewed: int = 0
+    #: Introduced and still being learned: a card, not yet Known.
+    in_progress: int = 0
+    #: Known through the schedule or marked Known after being introduced.
+    learned_here: int = 0
+    #: The new-word pool: words that will be offered, not yet introduced.
+    to_introduce: int = 0
+
+    def days_at(self, per_day: int) -> int:
+        return -(-self.to_introduce // max(per_day, 1))
+
+
+@dataclass(frozen=True, slots=True)
 class StudyPlan:
     """What the user is actively learning: a name and the lists it draws from."""
 
@@ -83,9 +107,13 @@ class StudyPlan:
     list_ids: tuple[int, ...] = ()
     #: Names of the selected lists, for display.
     list_names: tuple[str, ...] = ()
+    #: Draws on every list, including lists imported later.
+    all_lists: bool = False
 
     @property
     def list_label(self) -> str:
+        if self.all_lists:
+            return "All my lists"
         return ", ".join(self.list_names)
 
 

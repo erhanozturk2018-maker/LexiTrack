@@ -157,6 +157,11 @@ QPushButton[variant="known-solid"] #AnswerKey {{
 #PlanListRow[selected="true"] {{ border-color: {p.accent}; background-color: {p.accent_soft}; }}
 #PlanListName {{ font-size: 14px; font-weight: 600; color: {p.text}; background: transparent; }}
 #PlanListMeta {{ font-size: 12px; color: {p.text_faint}; background: transparent; }}
+/* Rows stand aside while All my lists is ticked. The labels carry the state
+   themselves: Qt ignores :disabled on an ancestor in a descendant selector. */
+#PlanListName:disabled {{ color: {p.text_faint}; }}
+#PlanListMeta:disabled {{ color: {p.text_faint}; }}
+#PlanListRow:disabled {{ background-color: {p.surface_sunken}; }}
 #SummaryBox {{
     background-color: {p.accent_soft};
     border-radius: {m.radius_md}px;
