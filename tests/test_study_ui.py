@@ -22,7 +22,7 @@ from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.models.user_word_state import ReviewStatus  # noqa: E402
 from lexitrack.services.learning_service import LearningService  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
-from lexitrack.ui.main_window import HOME, STUDY, MainWindow  # noqa: E402
+from lexitrack.ui.main_window import HOME, PROGRESS, STUDY, MainWindow  # noqa: E402
 from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
 from lexitrack.ui.study_page import DAY, EMPTY, SESSION, _interval  # noqa: E402
 from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
@@ -322,6 +322,61 @@ class TestWordHistory:
         chip_widget = first.layout().itemAt(1).widget().findChildren(QLabel)[0]
         chip_widget._on_click()
         assert opened, "a learned word opens its history"
+
+
+class TestProgressPage:
+    @pytest.fixture
+    def studied(self, window, engine, loaded, clock):
+        with_plan(engine, loaded)
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        for index, item in enumerate(engine.review_queue()):
+            engine.answer(item.word.id, Rating.AGAIN if index % 5 == 0 else Rating.GOOD)
+        engine.undo_last_answer()
+        return window
+
+    def test_it_is_the_second_tab_with_its_own_key(self, window) -> None:
+        tabs = list(window.tab_buttons)
+        assert tabs[:2] == [STUDY, PROGRESS]
+        assert window.tab_buttons[PROGRESS].toolTip() == "Progress (Alt+P)"
+
+    def test_the_numbers_come_from_the_record(self, studied) -> None:
+        studied.show_page(PROGRESS)
+        page = studied.progress
+        assert page.tile_progress.value_label.text() == "25"
+        assert page.tile_learned.value_label.text() == "0"
+        assert "24 answers given" in page.totals_line.text()
+        assert "1 taken back" in page.totals_line.text()
+
+    def test_it_opens_on_a_filter_that_has_words(self, studied) -> None:
+        studied.show_page(PROGRESS)
+        page = studied.progress
+        assert page.filter_buttons["in_progress"].isChecked()
+        assert page.words_table.rowCount() == 25
+
+    def test_every_answer_is_listed_and_the_one_taken_back_says_so(self, studied) -> None:
+        studied.show_page(PROGRESS)
+        table = studied.progress.answers_table
+        assert table.rowCount() == 25
+        marks = [table.item(row, 6).text() for row in range(table.rowCount())]
+        assert marks.count("taken back") == 1
+
+    def test_a_row_opens_the_words_history(self, studied) -> None:
+        opened: list[int] = []
+        studied.progress.history_opener = opened.append
+        studied.show_page(PROGRESS)
+        studied.progress.words_table._open(0)
+        assert len(opened) == 1
+
+    def test_a_note_appears_when_learned_words_are_never_tested(
+        self, studied, engine
+    ) -> None:
+        from lexitrack.models.settings import Setting
+
+        engine.save_settings({Setting.REVIEW_KNOWN_WORDS: False})
+        studied.show_page(PROGRESS)
+        assert not studied.progress.testing_note.isHidden()
+        assert not studied.progress.settings_link.isHidden()
 
 
 class TestStudyPlanDialog:

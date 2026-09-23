@@ -35,7 +35,14 @@ from lexitrack.ui.components.vocabulary_table import (  # noqa: E402
 )
 from lexitrack.ui.dialogs import AddWordDialog, ListDialog  # noqa: E402
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
-from lexitrack.ui.main_window import HOME, REVIEW, STUDY, UNKNOWN, MainWindow  # noqa: E402
+from lexitrack.ui.main_window import (  # noqa: E402
+    HOME,
+    PROGRESS,
+    REVIEW,
+    STUDY,
+    UNKNOWN,
+    MainWindow,
+)
 from lexitrack.ui.progress_widget import StatsBar  # noqa: E402
 from lexitrack.ui.review_widget import ReviewWidget  # noqa: E402
 from lexitrack.ui.theme import ThemeManager, ThemeName, build_stylesheet  # noqa: E402
@@ -979,9 +986,11 @@ def test_ctrl_tab_cycles_pages(window) -> None:
     window.cycle_page(1)
     assert window.current_page == STUDY, "cycling wraps round to the first tab"
     window.cycle_page(1)
+    assert window.current_page == PROGRESS
+    window.cycle_page(1)
     assert window.current_page == HOME
     window.cycle_page(-1)
-    assert window.current_page == STUDY
+    assert window.current_page == PROGRESS
 
 
 def test_ctrl_l_switches_list_from_the_keyboard(window, loaded, monkeypatch) -> None:

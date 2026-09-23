@@ -68,6 +68,7 @@ STUDY_KEYS: Section = (
         ("Space", "Show the meaning; once it is showing, answer Good"),
         ("1 / 2 / 3 / 4", "Again / Hard / Good / Easy"),
         ("Esc", "End the session and keep what you answered"),
+        ("Ctrl+Z", "Take back your last answer"),
     ),
 )
 

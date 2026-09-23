@@ -59,6 +59,7 @@ from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
 from .home_page import HomePage
 from .list_actions import ListActions
+from .progress_page import ProgressPage
 from .review_page import ReviewPage
 from .settings_dialog import SettingsDialog
 from .shortcuts_dialog import FLASHCARD_KEYS, HOME_KEYS, STUDY_KEYS, TABLE_KEYS, ShortcutsDialog
@@ -72,9 +73,9 @@ from .unknown_page import UnknownPage
 
 log = logging.getLogger(__name__)
 
-STUDY, HOME, REVIEW, UNKNOWN = "study", "home", "review", "unknown"
+STUDY, PROGRESS, HOME, REVIEW, UNKNOWN = "study", "progress", "home", "review", "unknown"
 #: Tab order, and the order Ctrl+Tab cycles through.
-PAGE_ORDER = (STUDY, HOME, REVIEW, UNKNOWN)
+PAGE_ORDER = (STUDY, PROGRESS, HOME, REVIEW, UNKNOWN)
 
 _SETTINGS_LIST = "review/list_id"
 _SETTINGS_MODE = "review/mode"
@@ -142,6 +143,9 @@ class MainWindow(QMainWindow):
         return [
             Command("Go to Study", "Today's new words and today's reviews",
                     lambda: self.show_page(STUDY), "Alt+S", "today plan srs due"),
+            Command("Go to Progress", "What you have learned here, and every answer",
+                    lambda: self.show_page(PROGRESS), "Alt+P",
+                    "statistics history learned answers log calibration"),
             Command("Go to Home", "Continue learning, see your progress and your lists",
                     lambda: self.show_page(HOME), "Alt+H", "start overview"),
             Command("Go to Review", "Review the current list as flashcards or a table",
@@ -177,7 +181,7 @@ class MainWindow(QMainWindow):
         ]
 
     def _build_actions(self) -> None:
-        """Window-wide shortcuts. The tabs carry Alt+S / Alt+H / Alt+R / Alt+U themselves."""
+        """Window-wide shortcuts. The tabs carry their own Alt+S / P / H / R / U."""
         self._shortcut_actions: list[QAction] = []
         for keys, slot in (
             ("Ctrl+K", self.open_palette),
@@ -258,6 +262,9 @@ class MainWindow(QMainWindow):
 
         self.study = StudyPage(self._engine)
         self.study.history_opener = self.open_word_history
+        self.progress = ProgressPage(self._progress, self._engine)
+        self.progress.history_opener = self.open_word_history
+        self.progress.settings_requested.connect(self.open_settings)
         self.study.manage_plan.connect(self.manage_plan)
         self.study.data_changed.connect(self._on_data_changed)
         self.study.notify.connect(self._toast)
@@ -268,6 +275,7 @@ class MainWindow(QMainWindow):
 
         self._page_widgets = {
             STUDY: self.study,
+            PROGRESS: self.progress,
             HOME: self.home,
             REVIEW: self.review,
             UNKNOWN: self.unknown,
@@ -300,6 +308,7 @@ class MainWindow(QMainWindow):
         # style underlines permanently.
         for key, text, shortcut in (
             (STUDY, "Study", "Alt+S"),
+            (PROGRESS, "Progress", "Alt+P"),
             (HOME, "Home", "Alt+H"),
             (REVIEW, "Review", "Alt+R"),
             (UNKNOWN, "Unknown Words", "Alt+U"),
@@ -369,6 +378,8 @@ class MainWindow(QMainWindow):
         if page == STUDY:
             self.study.refresh()
             self.study.setFocus()
+        elif page == PROGRESS:
+            self.progress.refresh()
         elif page == HOME:
             self.home.refresh(self._current_list_id, self._mode)
         elif page == REVIEW:
