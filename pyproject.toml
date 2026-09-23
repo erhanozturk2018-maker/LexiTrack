@@ -34,6 +34,11 @@ dev = [
     "pytest-qt>=4.4",
     "ruff>=0.5",
 ]
+# Fitting the scheduler to your own answers (Settings -> Advanced). Brings in
+# PyTorch, a large download, so it is not installed by default.
+optimizer = [
+    "fsrs[optimizer]>=6.3,<7",
+]
 
 [project.scripts]
 lexitrack = "lexitrack.main:main"

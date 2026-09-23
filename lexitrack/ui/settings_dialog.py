@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import replace
 from html import escape
 
-from PySide6.QtCore import QLocale, Qt, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QLocale, QObject, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -50,6 +50,7 @@ from ..core.logging_config import set_file_logging
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
+from ..services.optimizer import FitResult, Personaliser
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
 from ..services.vocabulary_service import VocabularyService
 from ..telegram.config import env_file_candidates
@@ -427,6 +428,32 @@ class SettingsDialog(QDialog):
         diagnostics.add("Logs folder", str(paths.logs_dir()), self.logs_button)
         layout.addWidget(diagnostics)
 
+        # Not behind Developer mode: it only ever acts on a button press, asks
+        # before using anything, and says where it stands at every stage.
+        personal = _Group("FITTED TO YOU")
+        self.personal_status = QLabel()
+        self.personal_status.setObjectName("SettingHint")
+        self.personal_status.setWordWrap(True)
+        self.personal_status.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.personal_button = QPushButton("Fit to my answers")
+        self.personal_button.clicked.connect(self._personal_action)
+        personal.add("Scheduler parameters", self.personal_status, self.personal_button)
+        self.personal_result = QLabel()
+        self.personal_result.setObjectName("SettingHint")
+        self.personal_result.setWordWrap(True)
+        self.personal_use = QPushButton("Use these")
+        self.personal_use.setProperty("variant", "primary")
+        self.personal_use.clicked.connect(self._use_fit)
+        personal.add("Result", self.personal_result, self.personal_use)
+        self._personal_result_row = self.personal_use.parentWidget()
+        # The hairline above the result row goes and comes back with it.
+        self._personal_divider = personal._rows.itemAt(personal._rows.count() - 2).widget()
+        layout.addWidget(personal)
+        self._fit: FitResult | None = None
+        self._fit_thread: QThread | None = None
+
         # Everything below is disabled, not hidden, outside Developer mode.
         self._advanced_box = QWidget()
         self._advanced_box.setObjectName("PanelBody")
@@ -534,6 +561,136 @@ class SettingsDialog(QDialog):
         index = self.theme_combo.findData(self._theme.current.value)
         self.theme_combo.setCurrentIndex(max(index, 0))
         self._apply_developer_mode(s.developer_mode)
+        self._show_personal()
+
+    # -- fitted parameters ---------------------------------------------------
+
+    def _personaliser(self) -> Personaliser:
+        return Personaliser(self._service.database, self._engine)
+
+    def _show_personal(self) -> None:
+        """Say where fitting stands, and offer only what can be done now."""
+        personaliser = self._personaliser()
+        note = personaliser.fit_note()
+        self._personal_result_row.setVisible(self._fit is not None)
+        self._personal_divider.setVisible(self._fit is not None)
+        if note is not None:
+            when = note.get("on", "earlier")
+            count = note.get("reviews")
+            before, after = note.get("loss_before"), note.get("loss_after")
+            better = (
+                f" They predicted your answers {round((before - after) / before * 100)}% "
+                f"better than the defaults."
+                if before and after
+                else ""
+            )
+            self.personal_status.setText(
+                f"Fitted to your answers on {when}"
+                + (f", from {count:,} of them." if count else ".")
+                + better
+            )
+            self.personal_button.setText("Use the defaults")
+            self.personal_button.setEnabled(True)
+            return
+        ready = personaliser.readiness()
+        self.personal_button.setText("Fit to my answers")
+        if not ready.enough:
+            self.personal_status.setText(
+                f"Using the published FSRS defaults. Fitting needs {ready.required:,} "
+                f"answers given on a later day than the word's previous answer; you "
+                f"have {ready.usable:,}. Until then it could only return the defaults."
+            )
+            self.personal_button.setEnabled(False)
+        elif not ready.installed:
+            self.personal_status.setText(
+                f"You have {ready.usable:,} answers, enough to fit. Fitting needs the "
+                f"optional optimizer, a large download: pip install \"lexitrack[optimizer]\" "
+                f"in LexiTrack's environment, then restart."
+            )
+            self.personal_button.setEnabled(False)
+        else:
+            self.personal_status.setText(
+                f"Using the published FSRS defaults. You have {ready.usable:,} answers: "
+                f"enough to fit parameters to your memory. Nothing changes until you "
+                f"choose to use the result."
+            )
+            self.personal_button.setEnabled(self._fit_thread is None)
+
+    def _personal_action(self) -> None:
+        if self._personaliser().fit_note() is not None:
+            if confirm(
+                self,
+                "Use the Defaults",
+                "Go back to the published FSRS parameters? Your fitted ones are "
+                "discarded; you can fit again at any time.",
+                "Use the defaults",
+            ):
+                self._personaliser().revert()
+                self._fit = None
+                self.changed.emit()
+            self._show_personal()
+            return
+        self._start_fit()
+
+    def _start_fit(self) -> None:
+        """Fit on a worker thread; the answers are read here, first."""
+        personaliser = self._personaliser()
+        logs = personaliser.snapshot()
+        self.personal_button.setEnabled(False)
+        self.personal_button.setText("Fitting\u2026")
+        self.personal_status.setText(
+            "Fitting to your answers. This can take a minute; the window stays usable."
+        )
+        worker = _FitWorker(personaliser, logs)
+        # Owned by the application, not this window: closing Settings mid-fit
+        # must not destroy a running thread. A result for a closed window is
+        # simply dropped, and _RUNNING keeps the worker alive until it ends.
+        thread = QThread(QCoreApplication.instance())
+        _RUNNING.add(worker)
+        thread.finished.connect(lambda: _RUNNING.discard(worker))
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._fit_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._fit_thread_done)
+        self._fit_worker = worker
+        self._fit_thread = thread
+        thread.start()
+
+    def _fit_thread_done(self) -> None:
+        self._fit_thread = None
+
+    def _fit_finished(self, result: object) -> None:
+        if isinstance(result, Exception):
+            self._fit = None
+            self._show_personal()
+            show_error(self.error, f"Fitting failed: {result}")
+            return
+        self._fit = result
+        self._show_personal()
+        share = round(result.improvement * 100)
+        if result.improvement > 0:
+            self.personal_result.setText(
+                f"Fitted to {result.reviews:,} answers, these parameters predict your "
+                f"answers {share}% better than the ones in use (log loss "
+                f"{result.loss_before:.3f} \u2192 {result.loss_after:.3f}). Use them?"
+            )
+            self.personal_use.setEnabled(True)
+        else:
+            self.personal_result.setText(
+                "The fitted parameters did not predict your answers better than the ones "
+                "in use, so there is nothing to gain yet. Try again after more reviews."
+            )
+            self.personal_use.setEnabled(False)
+
+    def _use_fit(self) -> None:
+        if self._fit is None:
+            return
+        self._personaliser().apply(self._fit)
+        self._fit = None
+        self.changed.emit()
+        self._show_personal()
 
     def _open_logs(self) -> None:
         folder = paths.logs_dir()
@@ -678,6 +835,27 @@ class SettingsDialog(QDialog):
         self._service.reset_progress()
         self.changed.emit()
         self.simulation_result.setText("")
+
+
+#: Fits still running, kept alive whatever happens to the window that started them.
+_RUNNING: set = set()
+
+
+class _FitWorker(QObject):
+    """Runs a fit off the window's thread, on answers already read."""
+
+    finished = Signal(object)
+
+    def __init__(self, personaliser: Personaliser, logs: list) -> None:
+        super().__init__()
+        self._personaliser = personaliser
+        self._logs = logs
+
+    def run(self) -> None:
+        try:
+            self.finished.emit(self._personaliser.fit(self._logs))
+        except Exception as exc:  # reported in the window, never lost
+            self.finished.emit(exc)
 
 
 class _Group(QWidget):

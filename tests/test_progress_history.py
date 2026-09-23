@@ -28,6 +28,13 @@ from lexitrack.repositories import (
     WordRepository,
 )
 from lexitrack.services.learning_service import LearningService
+from lexitrack.services.optimizer import (
+    MIN_REVIEWS,
+    FitResult,
+    OptimizerMissing,
+    Personaliser,
+    optimizer_installed,
+)
 from lexitrack.services.progress import Group, ProgressService
 from lexitrack.services.review_session import ReviewSession
 from lexitrack.services.srs_scheduler import SrsScheduler
@@ -410,3 +417,68 @@ class TestProgressViews:
         expected = scheduler.retrievability(card, clock.now_utc())
         elapsed = (clock.now_utc() - card.last_review_at).days
         assert abs(scheduler.predicted_recall(card.stability, elapsed) - expected) < 1e-9
+
+
+class TestPersonalising:
+    def study_weeks(self, engine: LearningService, clock: FrozenClock, days: int = 12) -> None:
+        engine.introduce()
+        for _ in range(days):
+            clock.advance_to_day_start(1)
+            engine.introduce()
+            for index, item in enumerate(engine.review_queue()):
+                engine.answer(item.word.id, Rating.AGAIN if index % 4 == 0 else Rating.GOOD)
+
+    def test_readiness_counts_what_the_optimizer_counts(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        self.study_weeks(engine, clock)
+        ready = Personaliser(database, engine).readiness()
+        logs = CardRepository(database).all_logs(include_undone=False)
+        first_answers = len({log.word_id for log in logs})
+        assert ready.usable == len(logs) - first_answers, "every answer after a word's first"
+        assert ready.required == MIN_REVIEWS
+        assert not ready.enough
+
+    def test_same_day_answers_and_answers_taken_back_do_not_count(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        self.study_weeks(engine, clock, days=3)
+        before = Personaliser(database, engine).readiness().usable
+        clock.advance_to_day_start(1)
+        item = engine.review_queue()[0]
+        engine.answer(item.word.id, Rating.GOOD)
+        engine.undo_last_answer()
+        assert Personaliser(database, engine).readiness().usable == before
+
+    def test_scoring_prefers_parameters_that_predict_better(
+        self, engine: LearningService, clock: FrozenClock, database: Database
+    ) -> None:
+        self.study_weeks(engine, clock)
+        personaliser = Personaliser(database, engine)
+        default = personaliser.score(engine.scheduler.parameters)
+        assert default > 0
+        broken = list(engine.scheduler.parameters)
+        broken[:4] = [0.01, 0.01, 0.01, 0.01]  # nearly no initial memory at all
+        assert personaliser.score(broken) > default
+
+    def test_applying_a_fit_changes_the_scheduler_and_can_be_undone(
+        self, engine: LearningService, database: Database
+    ) -> None:
+        personaliser = Personaliser(database, engine)
+        fitted = tuple(value * 1.02 for value in engine.scheduler.parameters)
+        default_hash = engine.scheduler.params_hash
+        personaliser.apply(FitResult(fitted, reviews=600, loss_before=0.4, loss_after=0.35))
+        assert engine.scheduler.personalised
+        assert engine.scheduler.params_hash != default_hash
+        assert personaliser.fit_note()["reviews"] == 600
+        personaliser.revert()
+        assert not engine.scheduler.personalised
+        assert engine.scheduler.params_hash == default_hash
+        assert personaliser.fit_note() is None
+
+    @pytest.mark.skipif(optimizer_installed(), reason="the optimizer is installed here")
+    def test_without_the_optimizer_fitting_says_how_to_get_it(
+        self, engine: LearningService, database: Database
+    ) -> None:
+        with pytest.raises(OptimizerMissing, match="lexitrack\\[optimizer\\]"):
+            Personaliser(database, engine).fit([])

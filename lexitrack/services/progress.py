@@ -202,6 +202,10 @@ class ProgressService:
         self._words = WordRepository(database)
         self._plans = PlanRepository(database)
 
+    @property
+    def database(self) -> Database:
+        return self._db
+
     # -- the words ---------------------------------------------------------
 
     def words(self) -> list[WordProgress]:

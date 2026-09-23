@@ -561,6 +561,25 @@ class TestSettingsDialog:
         assert theme.current is ThemeName.DARK
         theme.apply(ThemeName.LIGHT)
 
+    def test_fitting_says_how_far_away_it_is(self, qapp, engine, loaded) -> None:
+        dialog = SettingsDialog(engine, loaded, ThemeManager())
+        assert "Fitting needs 512 answers" in dialog.personal_status.text()
+        assert not dialog.personal_button.isEnabled()
+        assert dialog._personal_result_row.isHidden()
+
+    def test_fitted_parameters_can_be_given_back(self, qapp, engine, loaded, monkeypatch) -> None:
+        from lexitrack.services.optimizer import FitResult, Personaliser
+
+        Personaliser(loaded.database, engine).apply(
+            FitResult(tuple(v * 1.01 for v in engine.scheduler.parameters), 700, 0.4, 0.36)
+        )
+        dialog = SettingsDialog(engine, loaded, ThemeManager())
+        assert "Fitted to your answers" in dialog.personal_status.text()
+        assert "10% better" in dialog.personal_status.text()
+        monkeypatch.setattr("lexitrack.ui.settings_dialog.confirm", lambda *a, **k: True)
+        dialog.personal_button.click()
+        assert not engine.scheduler.personalised
+
     def test_the_simulator_uses_the_values_on_screen(self, qapp, engine, loaded) -> None:
         dialog = SettingsDialog(engine, loaded, ThemeManager())
         dialog.developer_mode.setChecked(True)

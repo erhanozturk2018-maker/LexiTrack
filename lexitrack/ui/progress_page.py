@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 
 from ..models.srs import Channel, Rating
 from ..services.learning_service import LearningService
+from ..services.optimizer import Personaliser
 from ..services.progress import Calibration, Group, ProgressService, WordProgress
 from .components.cards import StatTile
 from .components.progress_charts import CalibrationChart, PipelineBar, TimelineChart
@@ -260,6 +261,8 @@ class ProgressPage(QWidget):
         self.calibration_note = _label("", None, wrap=True)
         self.calibration_note.setObjectName("CalibrationNote")
         panel_layout.addWidget(self.calibration_note)
+        self.parameters_note = _label("", "Faint", wrap=True)
+        panel_layout.addWidget(self.parameters_note)
         self.testing_note = _label("", "Faint", wrap=True)
         panel_layout.addWidget(self.testing_note)
         self.settings_link = QPushButton("Open Learning settings →")
@@ -355,6 +358,7 @@ class ProgressPage(QWidget):
         calibration = self._progress.calibration()
         self.calibration.set_calibration(calibration)
         self.calibration_note.setText(_verdict(calibration))
+        self.parameters_note.setText(self._parameters_text())
         keeps = self._engine.settings.review_known_words
         self.testing_note.setText(
             ""
@@ -370,6 +374,23 @@ class ProgressPage(QWidget):
             self.filter_buttons[self._filter].setChecked(True)
         self._fill_words()
         self._fill_answers()
+
+    def _parameters_text(self) -> str:
+        personaliser = Personaliser(self._progress.database, self._engine)
+        note = personaliser.fit_note()
+        if note is not None:
+            when = note.get("on", "an earlier day")
+            return f"In use: parameters fitted to your answers on {when}."
+        ready = personaliser.readiness()
+        if ready.enough:
+            return (
+                "In use: the published FSRS defaults. You have enough answers to fit "
+                "them to your memory in Settings → Advanced."
+            )
+        return (
+            f"In use: the published FSRS defaults. They can be fitted to your memory "
+            f"after {ready.required:,} answers given on later days; {ready.usable:,} so far."
+        )
 
     def _set_filter(self, key: str) -> None:
         self._filter = key
