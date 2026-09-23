@@ -101,7 +101,12 @@ def why_sentence(journey: WordJourney) -> str:
     if card is None:
         if journey.word.status is ReviewStatus.KNOWN:
             return "Known before you studied it here, so it is not on your schedule."
-        return "Not in your study plan yet. It is offered as a new word once it is Unknown."
+        if journey.word.status is ReviewStatus.UNKNOWN:
+            return (
+                "Unknown, and not introduced yet: a study plan that includes one of its "
+                "lists offers it as a new word."
+            )
+        return "Not sorted yet. Mark it Unknown and your study plan will teach it."
     if card.state is CardState.ARCHIVED:
         return "Marked Known by hand, so it has left the schedule. Reset it to bring it back."
     last = journey.last_answer

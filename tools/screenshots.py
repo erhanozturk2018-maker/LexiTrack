@@ -8,7 +8,8 @@ configuration, so a real token in ``.env`` is never read, and no page that
 prints a file path is captured, so no user name appears in an image.
 
 The Study screenshots run the sample plan forward a week on a frozen clock,
-so they show real reviews, a real week ahead and real hard words.
+so they show real reviews, a real week ahead and real hard words, and the
+Progress page and a word's history show that week's real record.
 
 Usage::
 
@@ -33,8 +34,8 @@ from datetime import UTC, datetime  # noqa: E402
 import pymupdf  # noqa: E402
 from design_mockups import build_sample  # noqa: E402
 from PySide6.QtCore import QSettings  # noqa: E402
-from PySide6.QtGui import QPainter  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
 from lexitrack.database.connection import Database  # noqa: E402
@@ -44,6 +45,7 @@ from lexitrack.services.learning_service import LearningService  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
 from lexitrack.telegram.config import TelegramConfig  # noqa: E402
 from lexitrack.ui.components.cards import ModeSwitch  # noqa: E402
+from lexitrack.ui.components.word_history import WordHistoryDialog  # noqa: E402
 from lexitrack.ui.export_dialog import (  # noqa: E402
     ExportDialog,
     ExportOrder,
@@ -51,11 +53,11 @@ from lexitrack.ui.export_dialog import (  # noqa: E402
     order_words,
 )
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
-from lexitrack.ui.main_window import HOME, STUDY, UNKNOWN, MainWindow  # noqa: E402
+from lexitrack.ui.main_window import HOME, PROGRESS, STUDY, UNKNOWN, MainWindow  # noqa: E402
 from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
 from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
 from lexitrack.ui.telegram_controller import TelegramController  # noqa: E402
-from lexitrack.ui.theme import ThemeManager, ThemeName  # noqa: E402
+from lexitrack.ui.theme import ThemeManager, ThemeName, current_palette  # noqa: E402
 
 OUT = ROOT / "docs" / "screenshots"
 SIZE = (1180, 780)
@@ -73,6 +75,10 @@ def main() -> int:
     data = Path(os.environ["LEXITRACK_DATA_DIR"])
     service = VocabularyService(Database(data / "vocabulary.db"))
     lists = build_sample(service)
+    # Building the sample marks statuses on today's wall clock, days after the
+    # frozen week the Study screenshots run through; left in, every word's
+    # history would show a stray "Marked Unknown by hand" in the middle.
+    service.database.connection.execute("DELETE FROM word_status_events")
     current = lists.get("Oxford 3000") or lists["German A1"]
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -217,6 +223,31 @@ def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
     app.processEvents()
     grab(settings, "settings")
     settings.reject()
+
+    # Progress, the whole page rather than the window's view of it.
+    window.resize(1180, 1400)
+    window.show_page(PROGRESS)
+    app.processEvents()
+    body = window.progress.findChild(QScrollArea).widget()
+    body.resize(window.progress.width(), body.sizeHint().height())
+    app.processEvents()
+    # The page is transparent over the window; alone it would come out on black.
+    shot = QPixmap(body.size())
+    shot.fill(QColor(current_palette().background))
+    body.render(shot)
+    shot.save(str(OUT / "progress.png"))
+    print("wrote docs/screenshots/progress.png")
+    window.resize(*SIZE)
+
+    # The history of the word with the most to show.
+    rows = window._progress.words()
+    busiest = max(rows, key=lambda row: (row.answers, row.agains))
+    history = WordHistoryDialog(window._progress.journey(busiest.word.id), parent=window)
+    history.resize(700, 860)
+    history.show()
+    app.processEvents()
+    grab(history, "word-history")
+    history.reject()
 
 
 if __name__ == "__main__":

@@ -9,10 +9,14 @@ a set number of new words each day and asks about each one again on the day
 you are most likely to forget it, using the FSRS spaced-repetition scheduler.
 You can do the day's work at the desk or on your phone through a Telegram bot.
 
-You can also go through any list freely, one word at a time — **I Know** or
-**I Don't Know** — or work through it in a table. Everything you answer is
-remembered, shared across every list a word belongs to, and exportable as a
-printable PDF, a CSV or JSON.
+Before that, you sort: go through any list one word at a time — **I Know** or
+**I Don't Know** — or work through it in a table. The words you mark Unknown
+are the ones your study plan teaches; the ones you know are never offered.
+
+Nothing is hidden. Every answer, every change of status and every word's path
+from new to Known is on the **Progress** tab, and a calibration chart shows
+how well the scheduler's forecasts fit your memory — the basis for fitting it
+to you once there are enough answers.
 
 It runs on your machine. No account and no server; your vocabulary lives in a
 local SQLite file. The only network use is the optional Telegram bot.
@@ -23,6 +27,10 @@ local SQLite file. The only network use is the optional Telegram bot.
 <summary><b>More screens</b></summary>
 
 <br>
+
+![Progress: what was learned here, and every answer](docs/screenshots/progress.png)
+
+![A word's history](docs/screenshots/word-history.png)
 
 ![A review card](docs/screenshots/study-session.png)
 
@@ -40,8 +48,9 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 ### Learning
 
-- **Study plans.** A plan is the set of lists you are working through. The
-  words of all its lists are combined, so a word in two lists is learned once.
+- **Study plans teach what you don't know.** A plan takes the Unknown words of
+  the lists you choose — or of **All my lists**, including lists added later.
+  A word in two lists is learned once; words you know are never offered.
 - **New words every day.** 25 by default, lowest CEFR level first. You study
   them however you like and confirm; LexiTrack never invents an answer for you.
 - **Spaced repetition with FSRS.** Each review is answered Again, Hard, Good or
@@ -55,6 +64,25 @@ local SQLite file. The only network use is the optional Telegram bot.
   Known by itself.
 - **Missed days are harmless.** Nothing is owed for a day you skipped. Overdue
   reviews come first, and you still get today's new words.
+- **Undo.** `Ctrl+Z`, or the button under the card, takes back your last
+  answer; on Telegram every card after the first has an Undo button. The
+  answer stays in the record, marked, and out of every count.
+
+### Progress and transparency
+
+- **Progress tab.** Words learned here, in progress, marked Known by hand and
+  known before your plan, kept apart; where the words stand; words introduced
+  and learned over time.
+- **Every answer and every change of status**, with its cause, in two complete
+  tables. Nothing the app records is out of your sight.
+- **A word's history.** When it was introduced and in which plan, every
+  answer, how long you were expected to remember it after each one, when and
+  why it became Known, and why it is due when it is.
+- **Does the schedule fit you?** The scheduler's forecasts against what you
+  then remembered, with an honest verdict when there are too few answers.
+- **Fitted to you** (optional). Once there are enough answers, the scheduler's
+  parameters can be fitted to your own memory, compared with the defaults on
+  your history first, used only if you choose, and reverted in one click.
 
 ### Telegram
 
@@ -63,6 +91,8 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **Reviews on your phone.** One card at a time, each replacing the last, with
   the meaning hidden until you tap it.
 - **An evening reminder**, only if something is still waiting.
+- **A weekly summary** on Sunday evening: the week's answers, words learned
+  and the words giving you trouble.
 - **Private.** The bot answers only your chat. Its token lives in a `.env`
   file, never in the database or the backups, and never in the log.
 
@@ -94,6 +124,8 @@ local SQLite file. The only network use is the optional Telegram bot.
   Developer mode.
 - **Daily backups** of the database; the newest ten are kept.
 - **Safe upgrades.** Older databases are upgraded automatically, with a backup.
+- **A first-run setup** that asks the three questions a plan needs, and
+  **How LexiTrack Works** (`Shift+F1`) for everything else.
 - **Light and dark themes.**
 
 ## Requirements
@@ -120,6 +152,13 @@ declared in `pyproject.toml`; there is no `requirements.txt`. For development:
 
 ```bash
 pip install -e ".[dev]"
+```
+
+Fitting the scheduler to your own answers (*Settings → Advanced → Fitted to
+you*) needs PyTorch, a large download, so it is optional:
+
+```bash
+pip install -e ".[optimizer]"
 ```
 
 > **Windows note.** PySide6 unpacks deeply nested files, so installing into a
@@ -189,6 +228,17 @@ old file is kept in the data folder first (`vocabulary.v1-backup-<date>.db`,
 
 ## Usage
 
+### Your first start
+
+With no study plan yet, the Study page asks three questions: what to learn —
+**all your Unknown words** by default, with how many that is, or only some
+lists — how many new words a day, with how long that will take, and whether
+you want the day's words on your phone. **Start learning** creates the plan.
+If nothing is Unknown yet, it says so: sort a list on the **Review** tab first.
+
+**How LexiTrack Works** (`Shift+F1`, the **⋯** menu, or `Ctrl+K`) explains
+the tabs, your day, the four answers and what is recorded.
+
 ### Studying
 
 **Study** is the first tab. The **Today** panel lists the day's two steps and
@@ -201,14 +251,15 @@ has one button for the next thing to do:
 2. **Review.** Words due today come one at a time. Press **Space** to see the
    meaning, then answer **1** Again, **2** Hard, **3** Good or **4** Easy. Each
    button shows when the word would come back. **Esc** stops and keeps
-   everything answered so far.
+   everything answered so far. Pressed the wrong one? **Ctrl+Z**, or the
+   *Undo* under the card, takes back your last answer and shows the card again.
 
 ![A review card](docs/screenshots/study-session.png)
 
 Below the panel: **This week** shows how many reviews fall on each of the next
 seven days, **Words you find hard** lists the words you keep missing (they
 come first in every session), and **The last 30 days** gives four numbers for
-the month.
+the month. Click a learned or hard word for its history.
 
 ### How a word is learned
 
@@ -248,19 +299,42 @@ These days come from the scheduler with the default settings. Change
 *Count as known after* or, in Developer mode, the target retention, and they
 move with it.
 
+### Progress
+
+**Progress** (`Alt+P`) is everything since your first new word:
+
+- four numbers kept apart — **learned here** (Known by the schedule),
+  **in progress**, **marked Known by hand**, and **known before your plan**;
+- **where your words are**, from not yet answered to Known;
+- **over time**: words introduced and words learned, as running totals;
+- **does the schedule fit you?** — for each band of predicted recall, how
+  often you actually remembered, and a one-line verdict;
+- **words**: every studied word, filterable, with when it was introduced and
+  became Known, how many answers and how many Agains;
+- **all answers**: every answer from Study and Telegram, newest first,
+  including the ones taken back.
+
+Double-click any row, or select a word in any table and choose *Show history*
+in the details panel, for that word's whole history.
+
+![A word's history](docs/screenshots/word-history.png)
+
 ### Study plans
 
-**Study plan** on the Study page (`Ctrl+P`) chooses the lists a plan draws
-from and shows what the choice means before you save it: how many words, how
-many are still to learn, and about how many days that is at your daily pace.
-You can keep several plans and switch between them; switching or deleting a
-plan never touches what you have already learned.
+**Study plan** on the Study page (`Ctrl+P`). A plan teaches the words you
+marked **Unknown** in the lists it draws from — never the ones you know. Each
+list shows how many words it would teach, how many are in progress and how
+many you know; the summary says how many are left to introduce and how long
+that takes at your daily pace, by the same rule the Study page uses. **All my
+lists** makes a plan over every list, including lists you import later. You
+can keep several plans and switch between them; switching or deleting a plan
+never touches what you have already learned.
 
 ![The Study Plan window](docs/screenshots/study-plan.png)
 
-New words come from words you marked **Unknown**. A freshly imported list is
-all "not reviewed"; turn on *Settings → Learning → Offer words you have never
-answered* to learn from it.
+A freshly imported list is all "never answered", so it has nothing Unknown to
+teach, and its row says so: sort it on the Review tab first, or turn on
+*Settings → Learning → Offer words you have never answered*.
 
 ### Telegram
 
@@ -277,6 +351,9 @@ left (both hours are settings). `/today` shows today's words and `/review`
 starts a session. It works only while LexiTrack is running, so turn on *Start
 with Windows* to have it come back after a restart. If the computer was off at
 06:00, the message comes when it starts — once, never a pile of old ones.
+Every card after the first has **↶ Undo** for a mis-tap, and on Sunday
+evening a **weekly summary** arrives (it can be switched off in *Settings →
+Telegram*).
 
 `.env` is ignored by git and never copied into a backup. If a token ever leaks,
 revoke it in @BotFather with `/revoke` and paste the new one.
@@ -297,6 +374,13 @@ simulator that runs the real scheduler forward a year over your plan and
 reports the daily load; it writes nothing. **Debug logging** writes one log
 file a day while it is on; nothing is written to disk while it is off.
 
+**Fitted to you**, on the same page, says how far away fitting the scheduler to
+your answers is: it needs 512 answers given on a later day than the word's
+previous answer, and the optional optimizer. When both are there, **Fit to my
+answers** runs in the background, then shows how much better the fitted
+parameters would have predicted your answers. Nothing changes unless you
+press **Use these**, and **Use the defaults** goes back.
+
 ### Importing
 
 **Import** in the app bar (`Ctrl+O`). Choose one or more
@@ -310,10 +394,11 @@ If a file states its language and you choose a list in another language, the
 preview explains the clash instead of importing. Nothing is written until you
 press Import.
 
-### Reviewing with flashcards
+### Sorting with flashcards
 
 **Continue** on Home, or the **Review** tab, goes through a list freely, with
-no schedule. The list you are reviewing is the name at the top — click it to
+no schedule: this is sorting, and the words you mark I Don't Know are the ones
+your study plan teaches. The list you are reviewing is the name at the top — click it to
 switch lists. Where the word came from is the small "Source" line on the card.
 
 ![Flashcards, stepped back to an earlier answer](docs/screenshots/flashcard.png)
@@ -322,7 +407,7 @@ Press **←** (or Backspace) to step back through your answers and **→** to
 come forward again. The card shows the earlier word with its current status
 and says so; nothing changes unless you answer again or press R.
 
-### Reviewing as a list
+### Sorting as a list
 
 Switch to **List** (`Ctrl+2`). Search, filter by status or CEFR level (click
 A1, B2… to combine levels), sort by any column, select rows
@@ -386,6 +471,7 @@ key in one place, with a filter.
 | Study reviews | `Space` | Show the meaning; once it shows, answer Good |
 | | `1` / `2` / `3` / `4` | Again / Hard / Good / Easy |
 | | `Esc` | Stop and keep what you answered |
+| | `Ctrl+Z` | Take back your last answer |
 | Flashcards | `K` | I Know |
 | | `U` | I Don't Know |
 | | `←` or `Backspace` | Previous word (status unchanged) |
@@ -403,8 +489,9 @@ key in one place, with a filter.
 | Home | Arrow keys, `Enter` | Move between lists, open one |
 | Everywhere | `Ctrl+K` | Search commands, lists and words |
 | | `F1` | Keyboard Shortcuts |
+| | `Shift+F1` | How LexiTrack Works |
 | | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
-| | `Alt+S` / `Alt+H` / `Alt+R` / `Alt+U` | Study / Home / Review / Unknown Words |
+| | `Alt+S` / `Alt+P` / `Alt+H` / `Alt+R` / `Alt+U` | Study / Progress / Home / Review / Unknown Words |
 | | `Ctrl+P` | Study plan |
 | | `Ctrl+,` | Settings |
 | | `Ctrl+L` | Switch list |
