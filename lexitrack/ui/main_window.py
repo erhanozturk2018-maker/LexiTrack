@@ -57,6 +57,7 @@ from .components.toast import Toast
 from .components.word_history import WordHistoryDialog
 from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
+from .help_dialog import HelpDialog
 from .home_page import HomePage
 from .list_actions import ListActions
 from .progress_page import ProgressPage
@@ -171,6 +172,8 @@ class MainWindow(QMainWindow):
             Command("Switch to Dark Mode" if going_dark else "Switch to Light Mode",
                     "Change between the light and dark themes", self.toggle_theme, "Ctrl+T",
                     "theme appearance"),
+            Command("How LexiTrack Works", "The tabs, your day, the four answers, what is recorded",
+                    self.show_help, "Shift+F1", "help guide tutorial explain learn"),
             Command("Keyboard Shortcuts", "Every key LexiTrack understands, in one place",
                     self.show_shortcuts, "F1", "keys help"),
             Command("Open Data Folder", "Where your vocabulary and exports are stored",
@@ -195,6 +198,7 @@ class MainWindow(QMainWindow):
             ("Ctrl+,", self.open_settings),
             ("Ctrl+T", self.toggle_theme),
             ("F1", self.show_shortcuts),
+            ("Shift+F1", self.show_help),
             ("Ctrl+Q", self.quit),
         ):
             action = QAction(self)
@@ -212,7 +216,7 @@ class MainWindow(QMainWindow):
             ("Import\u2026", "New List\u2026", "Export\u2026"),
             ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
-             "Keyboard Shortcuts"),
+             "How LexiTrack Works", "Keyboard Shortcuts"),
             ("Open Data Folder", "Reset All Progress\u2026", "About LexiTrack"),
         )
         by_title = {command.title: command for command in self.commands()}
@@ -266,6 +270,8 @@ class MainWindow(QMainWindow):
         self.progress.history_opener = self.open_word_history
         self.progress.settings_requested.connect(self.open_settings)
         self.study.manage_plan.connect(self.manage_plan)
+        self.study.show_review.connect(lambda: self.show_page(REVIEW))
+        self.study.help_requested.connect(self.show_help)
         self.study.data_changed.connect(self._on_data_changed)
         self.study.notify.connect(self._toast)
         self.study.notify_undo.connect(
@@ -660,6 +666,9 @@ class MainWindow(QMainWindow):
             HOME_KEYS,
             ("Everywhere", everywhere),
         ]
+
+    def show_help(self) -> None:
+        HelpDialog(parent=self).exec()
 
     def show_shortcuts(self) -> None:
         ShortcutsDialog(self.shortcut_sections(), parent=self).exec()

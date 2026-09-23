@@ -45,7 +45,7 @@ lexitrack-gui = "lexitrack.main:main"
 include = ["lexitrack*"]
 
 [tool.setuptools.package-data]
-lexitrack = ["database/*.sql", "ui/theme/icons/*.svg", "ui/theme/icons/*.ico"]
+lexitrack = ["database/*.sql", "help/*.md", "ui/theme/icons/*.svg", "ui/theme/icons/*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

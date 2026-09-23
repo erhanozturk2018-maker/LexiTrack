@@ -182,6 +182,16 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     background: transparent;
 }}
 
+/* ------------------------------------------------------------ first-run setup */
+
+#SetupIntro {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
+#SetupNumber {{
+    font-size: 12px; font-weight: 600;
+    color: {p.accent}; background-color: {p.accent_soft};
+    border-radius: 12px;
+}}
+#SetupWarning {{ font-size: 13px; color: {p.unknown_text}; background: transparent; }}
+
 /* ------------------------------------------------------------ word history */
 
 #HistoryFact {{

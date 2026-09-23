@@ -379,6 +379,76 @@ class TestProgressPage:
         assert not studied.progress.settings_link.isHidden()
 
 
+class TestFirstRun:
+    def test_the_setup_counts_the_unknown_words_it_would_teach(self, window) -> None:
+        window.show_page(STUDY)
+        study = window.study
+        assert study._stack.currentWidget() is study._pages[EMPTY]
+        assert "All my Unknown words: 104" in study.setup_all.text()
+        assert "About 5 days" in study.setup_pace.text()
+        study.setup_per_day.setValue(10)
+        assert "About 11 days" in study.setup_pace.text()
+
+    def test_start_learning_makes_a_plan_over_every_list(self, window, engine) -> None:
+        window.show_page(STUDY)
+        study = window.study
+        study.setup_per_day.setValue(12)
+        study.setup_start.click()
+        plan = engine.active_plan()
+        assert plan is not None and plan.all_lists
+        assert engine.settings.new_words_per_day == 12
+        assert study._stack.currentWidget() is study._pages[DAY]
+        assert len(engine.daily_plan().new_words) == 12
+
+    def test_choosing_lists_asks_for_the_study_plan_window(self, qapp, engine) -> None:
+        # On the page alone: in the window the signal opens the real, modal dialog.
+        from lexitrack.ui.study_page import StudyPage
+
+        study = StudyPage(engine)
+        study.refresh()
+        asked: list[bool] = []
+        study.manage_plan.connect(lambda: asked.append(True))
+        study.setup_lists.setChecked(True)
+        study.setup_start.click()
+        assert asked
+        assert engine.active_plan() is None, "nothing is created behind the user's back"
+
+    def test_with_nothing_unknown_it_says_to_sort_a_list_first(
+        self, window, loaded
+    ) -> None:
+        words = loaded.list_words(loaded.lists()[0].id)
+        loaded.set_status([w.id for w in words], ReviewStatus.KNOWN)
+        window.show_page(STUDY)
+        study = window.study
+        assert not study.setup_none.isHidden()
+        assert "Review tab" in study.setup_none.text()
+        assert not study.setup_review.isHidden()
+
+
+class TestHelp:
+    def test_the_help_carries_the_readmes_explanation_word_for_word(self) -> None:
+        """One explanation, in two places: a change to one fails until both agree."""
+        from pathlib import Path
+
+        from lexitrack.ui.help_dialog import help_text
+
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+        start = readme.index("### How a word is learned\n")
+        end = readme.index("\n### ", start + 5)
+        body = readme[start:end].split("\n", 1)[1].strip()
+        assert body in help_text()
+
+    def test_the_help_opens_from_the_menu_and_the_palette(self, window) -> None:
+        titles = {command.title: command.shortcut for command in window.commands()}
+        assert titles["How LexiTrack Works"] == "Shift+F1"
+        from lexitrack.ui.help_dialog import HelpDialog
+
+        dialog = HelpDialog(parent=window)
+        assert "Sorting" in dialog.browser.toPlainText()
+        assert "How a word is learned" in dialog.browser.toPlainText()
+        dialog.reject()
+
+
 class TestStudyPlanDialog:
     def test_a_new_plan_needs_a_list(self, qapp, engine, loaded) -> None:
         dialog = StudyPlanDialog(engine, loaded)

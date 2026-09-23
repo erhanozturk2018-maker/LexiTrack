@@ -38,7 +38,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QScrollArea,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -51,7 +53,6 @@ from .components.cards import StatTile, repolish
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
 from .theme import current_palette
 from .theme.palette import METRICS
-from .widgets import WrappedLabel
 
 #: Which button style each answer gets. Amber for "not yet", green for
 #: "solid", and Easy the solid green: the flashcards' own colour language.
@@ -71,6 +72,24 @@ def _label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
         label.setObjectName(name)
     label.setWordWrap(wrap)
     return label
+
+
+def _setup_step(number: str, title: str) -> tuple[QWidget, QVBoxLayout]:
+    """One numbered question of the first-run setup."""
+    step = QWidget()
+    step.setObjectName("PanelBody")
+    row = QHBoxLayout(step)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(METRICS.space_3)
+    badge = _label(number, "SetupNumber")
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    badge.setFixedSize(24, 24)
+    row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+    body = QVBoxLayout()
+    body.setSpacing(METRICS.space_2)
+    body.addWidget(_label(title, "SectionTitle"))
+    row.addLayout(body, 1)
+    return step, body
 
 
 def _panel(name: str = "Panel") -> tuple[QFrame, QVBoxLayout]:
@@ -216,6 +235,10 @@ class StudyPage(QWidget):
 
     #: The user wants to create or change the study plan.
     manage_plan = Signal()
+    #: The setup asked for the Review tab, to sort a list first.
+    show_review = Signal()
+    #: The setup asked for How LexiTrack works.
+    help_requested = Signal()
     #: Something changed that other pages show too (statuses, counts).
     data_changed = Signal()
     #: A short message for the window's toast.
@@ -239,6 +262,7 @@ class StudyPage(QWidget):
         # session it belongs to even after that session has ended.
         self._last_session_id: str | None = None
         self._last_answer: tuple[str, Rating] | None = None
+        self._setup_pool = 0
         #: Opens a word's history; set by the main window.
         self.history_opener = None
         self._build()
@@ -259,34 +283,162 @@ class StudyPage(QWidget):
             self._stack.addWidget(widget)
 
     def _build_empty(self) -> QWidget:
+        """No plan yet: a three-step setup that is also the introduction.
+
+        Rather than a tour to click through, the first screen asks the three
+        questions a plan needs, each with one sentence of why, and the button
+        at the bottom starts learning. What is chosen here can be changed any
+        time in the Study Plan window and in Settings.
+        """
         m = METRICS
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(m.space_7, m.space_7, m.space_7, m.space_7)
-        layout.setSpacing(m.space_3)
-        layout.addStretch(1)
-        glyph = _label("◎", "EmptyGlyph")
-        glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(glyph)
-        title = _label("No study plan yet", "EmptyTitle")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        # WrappedLabel rather than a wrapping QLabel: a centred wrapping label
-        # stops Qt consulting heightForWidth and the last line gets clipped.
-        body = WrappedLabel(
-            "A study plan chooses the lists you are working through. LexiTrack "
-            "then offers you a few new words each day and asks you about them "
-            "on the days you are most likely to forget them."
+        page.setObjectName("PanelBody")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(m.space_7, m.space_6, m.space_7, m.space_6)
+        outer.addStretch(1)
+        column = QVBoxLayout()
+        column.setSpacing(m.space_4)
+        holder = QWidget()
+        holder.setObjectName("PanelBody")
+        # A fixed width, not a maximum: centred by alignment, the column is
+        # given its size hint, and wrapped text measured at another width left
+        # too little height for the choices below it.
+        holder.setFixedWidth(640)
+        holder.setLayout(column)
+        outer.addWidget(holder, 0, Qt.AlignmentFlag.AlignHCenter)
+        outer.addStretch(2)
+        scroll.setWidget(page)
+
+        column.addWidget(_label("Set up your study plan", "EmptyTitle"))
+        column.addWidget(
+            _label(
+                "LexiTrack teaches the words you mark Unknown, a few new ones a day, "
+                "and asks about each again on the day you are most likely to forget it. "
+                "Words you already know are never offered.",
+                "SetupIntro",
+                wrap=True,
+            )
         )
-        body.setObjectName("EmptyBody")
-        layout.addWidget(body, 0, Qt.AlignmentFlag.AlignHCenter)
-        button = QPushButton("Create a study plan")
-        button.setProperty("variant", "primary")
-        button.clicked.connect(self.manage_plan.emit)
-        layout.addSpacing(m.space_2)
-        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch(2)
-        return page
+
+        panel, panel_layout = _panel()
+        panel_layout.setSpacing(m.space_4)
+
+        # 1. what to learn
+        step, body = _setup_step("1", "WHAT TO LEARN")
+        self.setup_all = QRadioButton()
+        self.setup_all.setChecked(True)
+        body.addWidget(self.setup_all)
+        self.setup_lists = QRadioButton(
+            "Only some of my lists: choose them in the Study Plan window"
+        )
+        body.addWidget(self.setup_lists)
+        # The global radio style pads each option; its size hint here leaves
+        # the descenders a pixel short, so the height is given outright.
+        for radio in (self.setup_all, self.setup_lists):
+            radio.setMinimumHeight(32)
+        self.setup_none = _label("", "SetupWarning", wrap=True)
+        body.addWidget(self.setup_none)
+        self.setup_review = QPushButton("Go to Review to sort a list \u2192")
+        self.setup_review.setObjectName("LinkButton")
+        self.setup_review.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_review.clicked.connect(self.show_review.emit)
+        body.addWidget(self.setup_review, 0, Qt.AlignmentFlag.AlignLeft)
+        panel_layout.addWidget(step)
+
+        # 2. how many a day
+        step, body = _setup_step("2", "HOW MANY A DAY")
+        row = QHBoxLayout()
+        row.setSpacing(m.space_3)
+        self.setup_per_day = QSpinBox()
+        self.setup_per_day.setRange(1, 200)
+        self.setup_per_day.setSuffix(" words a day")
+        self.setup_per_day.setFixedWidth(160)
+        self.setup_per_day.valueChanged.connect(self._show_setup_pace)
+        row.addWidget(self.setup_per_day)
+        self.setup_pace = _label("", "Faint", wrap=True)
+        row.addWidget(self.setup_pace, 1)
+        body.addLayout(row)
+        panel_layout.addWidget(step)
+
+        # 3. on the phone
+        step, body = _setup_step("3", "ON YOUR PHONE  \u00b7  OPTIONAL")
+        body.addWidget(
+            _label(
+                "A Telegram bot can send the day's words each morning and run your "
+                "reviews on your phone. Set it up whenever you like in Settings \u2192 "
+                "Telegram.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        panel_layout.addWidget(step)
+        column.addWidget(panel)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(m.space_4)
+        self.setup_start = QPushButton("Start learning")
+        self.setup_start.setProperty("variant", "primary")
+        self.setup_start.clicked.connect(self._start_from_setup)
+        actions.addWidget(self.setup_start)
+        how = QPushButton("How LexiTrack works \u2192")
+        how.setObjectName("LinkButton")
+        how.setCursor(Qt.CursorShape.PointingHandCursor)
+        how.clicked.connect(self.help_requested.emit)
+        actions.addWidget(how)
+        actions.addStretch(1)
+        column.addLayout(actions)
+        return scroll
+
+    def _show_setup(self) -> None:
+        """Fill the setup with this vocabulary's numbers."""
+        outlook = self._engine.selection_outlook([], all_lists=True)
+        self._setup_pool = outlook.to_introduce
+        self.setup_all.setText(
+            f"All my Unknown words: {outlook.to_introduce:,}, from every list, "
+            f"and any list I add later"
+        )
+        nothing = outlook.to_introduce == 0
+        self.setup_none.setText(
+            "You have no Unknown words yet. Sort a list on the Review tab first: the "
+            "words you mark I Don't Know are the ones LexiTrack teaches."
+            if nothing
+            else ""
+        )
+        self.setup_none.setVisible(nothing)
+        self.setup_review.setVisible(nothing)
+        self.setup_all.setEnabled(not nothing)
+        self.setup_per_day.blockSignals(True)
+        self.setup_per_day.setValue(max(self._engine.settings.new_words_per_day, 1))
+        self.setup_per_day.blockSignals(False)
+        self._show_setup_pace()
+
+    def _show_setup_pace(self) -> None:
+        per_day = self.setup_per_day.value()
+        pool = self._setup_pool
+        if not pool:
+            self.setup_pace.setText("You can change this any time in Settings.")
+            return
+        days = -(-pool // per_day)
+        self.setup_pace.setText(
+            f"About {days:,} days for all of them. You can change this any time in Settings."
+        )
+
+    def _start_from_setup(self) -> None:
+        if self.setup_lists.isChecked() or not self._setup_pool:
+            self.manage_plan.emit()
+            return
+        from ..models.settings import Setting
+
+        self._engine.save_settings({Setting.NEW_WORDS_PER_DAY: self.setup_per_day.value()})
+        self._engine.create_plan("My Unknown words", list_ids=[], all_lists=True)
+        self.notify.emit(
+            f"Your study plan is ready: {self.setup_per_day.value()} new words a day."
+        )
+        self.data_changed.emit()
+        self.refresh()
 
     def _build_day(self) -> QWidget:
         m = METRICS
@@ -549,6 +701,7 @@ class StudyPage(QWidget):
         plan = self._engine.daily_plan()
         self._plan = plan
         if not plan.has_plan:
+            self._show_setup()
             self._stack.setCurrentWidget(self._pages[EMPTY])
             return
         self._show_day(plan)
