@@ -538,3 +538,91 @@ panel ever comes back, `git show f3539ce` has the whole of it — a pure
 `services/schedule_preview.py` walking a throwaway card, with tests.
 
 **Verification:** reverted, lint clean, 576 tests.
+
+
+# Version 0.4
+
+## 2026-09-22 — Asked for: see what was learned, and how
+
+**Asked for.** A way to follow the learning: which words went from Unknown to
+Known, when and through which answers; the words failed again and again; the
+difference between words known before and words learned through the plan;
+transparency about everything the app records, the review log included; and
+the scheduler trained on the user's own data. Also: the Study Plan window
+looked as if it took every word of every list, and a new user would not know
+how the app worked.
+
+**What an audit of the existing data found.**
+
+- `review_logs` already held every Study and Telegram answer with the state
+  before and after and the stability; `srs_cards` held the introduction date
+  and plan. A word's path to Known was there, unshown.
+- **The gap:** `user_word_state` held only the latest status. When a word
+  became Known, and whether by the schedule or a click, was not recorded.
+- Answers on the Review tab and status buttons are not answers to the
+  scheduler and never reached `review_logs`; Reset All Progress deleted the
+  whole log without saying it was also the training data.
+- `params_hash` existed on every log row and was never filled.
+- Fitting FSRS was not built: the installed `fsrs` has an optimizer, but it
+  needs PyTorch and silently returns the defaults below 512 answers given on
+  a later day than the word's previous answer. The user had 174 answers over
+  four days; with *Keep reviewing known words* off, Known words were never
+  asked again, so no prediction about them could ever be tested.
+- The setting's own wording was why it was off: it read as if it would pull
+  4,907 long-known words into the schedule. It never could; they have no card.
+- The Study Plan window counted every word not Known as "still to learn",
+  words already being learned included.
+
+## 2026-09-22 to 23 — Done
+
+In order, each step committed and, for every screen, rendered in both themes
+and reviewed before the next.
+
+1. **Schema 4.** `word_status_events` (cause and plan, written with the
+   status), `review_logs.undone_at`, `study_plans.all_lists`; the 3 → 4
+   upgrade reconstructs mastery events from the log. `params_hash` filled.
+2. **Wording.** The Review tab reads SORTING and says what it is for; the
+   setting reads *Keep reviewing words learned here*; Reset names the answers
+   and history it deletes and points at Export history.
+3. **Study Plan window** in words to teach, one scope rule with the engine,
+   *All my lists*, and a warning on lists nobody has sorted.
+4. **Undo** at the desk (the card's footer names the answer; Ctrl+Z; the
+   closing message) and on Telegram (every card after the first).
+5. **A word's history**, from the details panel, the Study page and Progress.
+6. **Progress tab**: groups, where the words are, over time, calibration,
+   every word, every answer.
+7. **First-run setup** and **How LexiTrack Works**.
+8. **Fitted to you**: readiness, fitting on a worker thread, a fair
+   comparison, consent, revert; the optimizer as an optional extra.
+9. **Weekly summary** on Telegram.
+
+**Problems and solutions**
+
+- The Study Plan window, rendered, put *All my lists* inside the scrolling
+  list, and the window opens scrolled to the plan's own list: the new option
+  was out of sight. It now sits above the list.
+- Rows stood aside under *All my lists* but still looked selectable; a
+  `:disabled` rule on the row did nothing to its labels, because Qt ignores
+  pseudo-states on an ancestor in a descendant selector (the 0.3 lesson). The
+  labels carry the rule themselves.
+- The first-run choices were clipped: centred by alignment, the column got
+  its size hint, and wrapped text measured at another width left too little
+  height. A fixed width fixed it.
+- The Undo button was drawn at button size in a footer of 12-pixel text, and
+  "Undo Easy on a" read as a sentence; it is footer-sized and quotes the word.
+- A test hung: choosing "some of my lists" opens the real, modal Study Plan
+  window. That path is tested on the page alone.
+- Fitting on a worker thread must not touch the shared SQLite connection, and
+  closing Settings mid-fit must not destroy a running thread: the answers are
+  read first, under the lock, and the thread belongs to the application.
+- Screenshots: the Progress page grabbed on its own came out on black (the
+  page is transparent), and the sample's setup, marked on today's wall clock,
+  put a stray "Marked Unknown by hand" into every word's history. The tool
+  paints the page background and clears the setup's events.
+- The history of a word with no card told an Unknown word it would be offered
+  "once it is Unknown". Each status now gets its own sentence.
+
+**Verification:** 645 tests (6 `slow`), lint clean; the 3 → 4 upgrade run on a
+copy of the real database; every new and changed screen rendered in both
+themes. Not verified: an actual fit, because PyTorch is not installed here —
+readiness, scoring, apply and revert are tested, the optimizer call is not.

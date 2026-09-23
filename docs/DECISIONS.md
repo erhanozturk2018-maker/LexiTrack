@@ -2,9 +2,9 @@
 
 Significant choices, with the reasoning and the alternatives that lost.
 
-Decisions 1-22 were made for version 0.1, 23-41 for 0.2 and 42 onwards for
-0.3. Where a later decision refines an earlier one, the earlier entry points
-to it.
+Decisions 1-22 were made for version 0.1, 23-41 for 0.2, 42-59 for 0.3 and
+60 onwards for 0.4. Where a later decision refines an earlier one, the earlier
+entry points to it.
 
 ---
 
@@ -864,3 +864,129 @@ daily backup in `data/backups/` was committed to the public repository. It
 held no token, but it held the word list with the user's statuses and file
 paths containing their Windows user name. The history was rewritten and the
 repository recreated; the test makes a repeat fail loudly.
+
+---
+
+# Version 0.4
+
+## 60. Every status change is an event, written with the status
+
+**Decision.** `word_status_events` records each change of a word's status with
+its cause — the schedule (`mastery`), a button (`manual`), the Review tab
+(`sorting`) or Undo — in the same transaction as the change, by
+`StateRepository` itself.
+
+**Reason.** `user_word_state` says what a word is, never since when or why,
+so "which words did I learn here, and when?" had no answer. Writing the event
+in the repository rather than in each caller makes a change without a record
+impossible. Events are written only on a real change, so answering a Known
+word Known again leaves no noise.
+
+**Alternatives.** *Reconstruct everything from `review_logs`* — works for the
+schedule's Knowns only; a click leaves no review. *A `known_at` column* — one
+date, no cause, no history of going back to Unknown.
+
+---
+
+## 61. Undo marks an answer; it never deletes it
+
+**Decision.** Taking back an answer restores the card exactly, reverts a Known
+it caused, and sets `undone_at` on the log row. Counts, the calibration and
+fitting leave such rows out; the history and the All answers table show them.
+
+**Reason.** A mis-tap on a phone is common, and one wrong Easy moves a word a
+week away — or, twice, retires it. It must be reversible. But the user asked
+for everything recorded to be visible, and a slip is part of the record;
+deleting it would make the history quietly incomplete.
+
+---
+
+## 62. One scope rule for the plan window, the day and the pool
+
+**Decision.** `PlanRepository` builds every query about a plan's words from one
+scope expression; the Study Plan window counts an unsaved selection with the
+same rule (`selection_outlook`).
+
+**Reason.** The window used to count words itself, and its "still to learn"
+included words already being learned and words that would never be offered,
+so its estimate of days disagreed with what the Study page then did. Two
+implementations of one rule drift; one cannot.
+
+---
+
+## 63. A plan can draw on every list, as a flag
+
+**Decision.** *All my lists* is `study_plans.all_lists`, not the list of every
+list id at the time.
+
+**Reason.** "Teach me every word I don't know" should include a list imported
+next month without the plan being edited. The engine already teaches only
+Unknown words, so a plan over every list is exactly the Unknown Words page.
+
+---
+
+## 64. Progress is a tab of its own, and history opens from anywhere
+
+**Decision.** A Progress tab beside Study, and a word's history as a window
+that opens from the details panel, the Study page and both Progress tables —
+not a section of the Study page or of the Study Plan window.
+
+**Reason.** Study is what to do today, and the Study Plan window is a setting;
+the record is neither. A separate tab keeps both uncluttered, and opening the
+same history from every place a word appears means it is never more than a
+click away.
+
+---
+
+## 65. Measure the fit before fitting; fit only with enough, and consent
+
+**Decision.** Progress shows a calibration — predicted recall against what
+happened — from the first days. Fitting parameters is gated at 512 answers
+given on a later day than the word's previous answer, needs an optional
+install, compares both parameter sets on the whole history first, and changes
+nothing until the user chooses; the defaults are one button away.
+
+**Reason.** The library's optimizer returns its defaults below 512 such
+answers, so an always-available button would appear to work and do nothing.
+The calibration answers "does it fit me?" without training anything, and
+says when there are too few answers for its verdict to mean much. PyTorch is
+a large download few users need, so it is an extra.
+
+---
+
+## 66. The first run asks questions instead of giving a tour
+
+**Decision.** With no plan, the Study page asks what to learn, how many a day
+and about the phone, and *Start learning* creates the plan. Everything else is
+in How LexiTrack Works, whose central section is the README's, word for word,
+checked by a test.
+
+**Reason.** A tour is clicked through and forgotten; three questions whose
+answers make the plan teach while they explain. One text in two places is
+kept identical by a test rather than by memory. Explaining the engine in its
+own panel of the Settings window had been tried and removed (the user found
+the documentation enough); the help page is for users who never open it.
+
+---
+
+## 67. The Review tab sorts, and says so
+
+**Decision.** The Review tab's label reads SORTING, with one line under it:
+the words marked Unknown are what the Study tab teaches, and nothing here is
+scheduled. The setting that covered Known words reads *Keep reviewing words
+learned here*, and says words known before are never scheduled.
+
+**Reason.** Two things were called reviewing, and one setting read as if it
+would pull thousands of long-known words into the schedule — which kept the
+user from turning on the only thing that lets the scheduler test its
+predictions. Both confusions came from words, so the fix was words.
+
+---
+
+## 68. The weekly summary is owed only on its day
+
+**Decision.** Sunday at the evening reminder hour, once; a Sunday the app was
+off gets no late summary, and a week with nothing in it stays quiet.
+
+**Reason.** The same rule as the daily messages (ARCHITECTURE §11, notifications
+are decisions): a message is a decision made now, never a backlog replayed.

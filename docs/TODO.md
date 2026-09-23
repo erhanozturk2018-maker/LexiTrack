@@ -7,8 +7,8 @@ listed; what exists is described in [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 ## Now
 
-Nothing outstanding. Version 0.3 — study plans, FSRS, the Study tab, the
-Telegram bot, the tray and the daily backups — is complete and in daily use.
+Nothing outstanding. Version 0.4 — the record of the learning, Progress, a
+word's history, undo, the first-run setup and fitting — is complete.
 
 ---
 
@@ -16,23 +16,22 @@ Telegram bot, the tray and the daily backups — is complete and in daily use.
 
 Small, well-scoped, and likely to matter in the first weeks of real use.
 
-- [ ] **Fit FSRS parameters** to `review_logs` once a few thousand reviews
-      exist. `SrsScheduler` is the only file that would change.
+- [ ] **Run a real fit** once there are 512 usable answers, with the optional
+      optimizer installed, and record the result in the development log: the
+      one path of 0.4 not yet exercised.
 - [ ] **Edit a word's details.** Part of speech, level, definition and example
       cannot be edited after adding. Needs a `word_sources` write for the
       manual source and a flattening rule that lets manual edits win.
 - [ ] **Silence "Task was destroyed but it is pending!"** when the bot is
       restarted: wait for the polling task before closing the event loop.
 - [ ] **Check a plain `pip install .`** end to end in a fresh environment:
-      the data folder in `%LOCALAPPDATA%`, the shortcut, Start with Windows.
+      the data folder in `%LOCALAPPDATA%`, the shortcut, the packaged help.
 - [ ] **Run `pip-audit`** on the dependencies before each release.
 
 ## Later
 
 Larger, and worth doing only once the engine has been used for a while.
 
-- [ ] **Queue inspector** in Developer mode: every card with its due date,
-      stability and why it is in today's queue.
 - [ ] **A time-zone control** in Settings; the zone is a stored setting today.
 - [ ] **Filter flashcards by CEFR level.** A parameter on
       `WordRepository.next_unreviewed` and a control in the Review strip.

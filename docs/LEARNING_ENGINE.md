@@ -37,10 +37,20 @@ read [ARCHITECTURE.md](ARCHITECTURE.md) §10–13; for why, [DECISIONS.md](DECIS
 
 ### Not built
 
-- **Queue inspector** and **runtime-state view** in Developer mode.
+- **A queue inspector** as its own screen. Since 0.4 a word's history answers
+  its question for any word — why it is due when it is, and the chance of
+  remembering it now — and Progress lists every studied word.
+- **A runtime-state view** in Developer mode.
 - **A time-zone control** in Settings; the zone is a stored setting only.
-- **Fitting FSRS parameters** to the user's own review log.
 - **A "send the brief now" button**; `/today` in Telegram does the same.
+
+### Added in 0.4
+
+- **Fitting FSRS parameters** to the user's own review log, gated at the
+  optimizer's own minimum and used only with consent (DECISIONS §65).
+- **The record**: every status change with its cause, answers taken back kept
+  and marked, a word's history, the Progress tab and a calibration check
+  (§60, §61, §64).
 
 ---
 

@@ -1,102 +1,79 @@
 # Project Status
 
-**Last updated:** 18 September 2026
-**Version:** 0.3.0 · schema version 3
+**Last updated:** 23 September 2026
+**Version:** 0.4.0 · schema version 4
 
 ---
 
 ## Current Phase
 
-**Version 0.3 complete.** LexiTrack is now a learning engine as well as a
-vocabulary manager: a study plan introduces 25 new words a day, FSRS schedules
-their reviews, and an optional Telegram bot delivers the day's words and runs
-review sessions from a phone. Version 0.2 databases upgrade automatically.
+**Version 0.4 complete.** LexiTrack now keeps, and shows, the whole record of
+the learning: every change of a word's status with its cause, every answer
+including those taken back, each word's history from introduction to Known,
+and a Progress tab that separates words learned here from words known before.
+The scheduler's forecasts are checked against the answers, and its parameters
+can be fitted to the user once there are enough of them. Version 0.3 databases
+upgrade automatically.
 
 ## Overall Progress
 
 | Area | Status |
 | --- | --- |
-| Schema version 3 and the v2 → v3 migration | Done, run on the real database with a backup |
-| Local learning day (00:00 Europe/Istanbul) and a test clock | Done |
-| FSRS scheduling with day steps, no fuzz | Done |
-| Study plans, 25 new words a day, review limit | Done |
-| Struggling words and mastery (Known at 21 days) | Done |
-| Workload simulator | Done — set the review limit to 250 |
-| Study tab, Study Plan window, Settings | Done, redesigned in the app's visual language |
-| Telegram bot: brief, reviews, reminders, commands | Done, tested with the real bot |
-| Tray, single instance, Start with Windows, headless mode | Done |
-| Daily backups (ten kept), integrity check, key pruning | Done |
-| Debug log: off by default, one file a day in `logs/` | Done |
-| Desktop shortcut with the app icon | Done |
-| Installed copy keeps its data in `%LOCALAPPDATA%` | Done |
-| Tests | 581 (6 marked `slow`) |
-| Documentation | Updated for 0.3 |
+| Schema version 4 and the v3 → v4 upgrade | Done, run on a copy of the real database |
+| Status history with causes; answers taken back kept and marked | Done |
+| Undo at the desk and on Telegram | Done |
+| Study Plan window in words to teach, one rule with the engine, All my lists | Done |
+| A word's history | Done |
+| Progress tab: groups, pipeline, over time, calibration, every word, every answer | Done |
+| First-run setup, How LexiTrack Works | Done |
+| Fitting FSRS to the user (optional extra) | Done; the fit itself untested here (no PyTorch) |
+| Weekly Telegram summary | Done |
+| Clearer wording: the Review tab sorts; the Known-words setting; Reset | Done |
+| Everything from 0.3 (engine, Telegram, tray, backups) | Unchanged, still working |
+| Tests | 645 (6 marked `slow`) |
+| Documentation | Updated for 0.4 |
 
 ---
 
 ## Completed
 
-Version 0.1 and 0.2 are described in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md);
+Version 0.1 to 0.3 are described in [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md);
 everything from them still works as described there.
 
-### Learning engine
+### The record
 
-- **Study plans.** A plan is an ordered set of lists; words are offered in list
-  order, 25 a day. A word already known or already scheduled is skipped.
-- **Introduction.** The day's words are offered; a card is created only when
-  the user confirms they have studied them. No rating is recorded for that.
-- **Reviews.** FSRS 6 through `SrsScheduler`: one-day learning and relearning
-  steps, due times snapped to a day start and never today, no fuzz. One card
-  per word, whatever the plan.
-- **Review limit.** When today's due reviews reach 250, new words pause and the
-  Study page and the morning message say so.
-- **Words you find hard.** Four Agains in a row, eight in total with a fresh
-  one, or weak stability after four reviews; cleared only when the streak is
-  gone *and* stability has recovered. They come first in every session.
-- **Mastery.** A word becomes Known when its stability reaches 21 days. Known
-  by hand archives the card.
-- **Reset All Progress** also clears cards, sessions and review logs.
+- **Status history** (`word_status_events`): every change of status with its
+  cause — the schedule, a button, the Review tab, Undo — and plan, written in
+  the same transaction as the change. The upgrade reconstructs the schedule's
+  past Knowns from the review log and marks them so.
+- **Every answer kept.** Undo marks an answer undone; counts, calibration and
+  fitting leave it out; the history and All answers show it.
+- **`params_hash`** on every answer: the parameters that scheduled it.
 
-### Study, Study Plan and Settings
+### Seeing it
 
-- **Study** (first tab): a Today panel with one primary button whose label is
-  the next thing to do; today's words as chips with *Copy with meanings* and
-  *Export*; the week ahead as day tiles; words you find hard; the last 30 days.
-- **Review session** in the window with the flashcards' answer colours and the
-  interval each answer would give.
-- **Study Plan** window (Ctrl+P): choose and order lists, with a summary of
-  how long the plan will take.
-- **Settings** (Ctrl+,): Learning, Telegram, Appearance, Data, Advanced,
-  About. Developer mode unlocks target retention, leech thresholds, the
-  365-day simulator and Debug logging.
+- **Progress tab** (Alt+P): learned here, in progress, marked Known by hand,
+  known before the plan; where the words stand; introduced and learned over
+  time; does the schedule fit you; every studied word; every answer.
+- **A word's history**: introduction and plan, every answer, stability after
+  each against the Known line, status changes with causes, why it is due now
+  and the chance of remembering it — from the details panel, the Study page
+  and both Progress tables.
+- **Export history** now includes answers taken back and the parameters.
 
-### Telegram
+### Doing it
 
-- Token from `.env` or `LEXITRACK_TELEGRAM_TOKEN`, never stored in the
-  database. The first chat to send `/start` becomes the owner.
-- Morning brief at 06:00 with the day's words; confirming starts the day.
-  Review sessions card by card with Again / Hard / Good / Easy; a summary at
-  the end; an evening reminder only if work is left.
-- `/start`, `/today`, `/review`, `/help`. Repeated deliveries are ignored
-  through idempotency keys.
-- Runs on a thread inside the app with long polling: no server, no Docker.
-
-### Running in the background
-
-- Tray icon; the close button hides the window only while the bot is on;
-  Quit (menu, Ctrl+Q, tray) always quits.
-- One instance: a second launch brings the first forward.
-- Start with Windows (`--minimized`), `--headless` for the bot alone,
-  `--create-shortcut` for a desktop shortcut.
-
-### Files
-
-- A clone keeps `data/` and `logs/` in the project; an installed copy keeps
-  them in `%LOCALAPPDATA%\LexiTrack`.
-- Daily online backup to `data/backups/`, the newest ten kept, skipped if the
-  integrity check fails. Export history writes the review log as CSV.
-- The debug log is written only while Debug logging is on: one file a day,
-  seven kept, tokens masked.
+- **Undo**: Ctrl+Z or the footer button in a Study session, the closing
+  message after the last card, ↶ Undo on Telegram cards.
+- **Study Plan window**: what each list would teach, in progress and known;
+  a summary by the engine's own rule; *All my lists*; a warning when a list
+  has never been sorted.
+- **First-run setup** that creates the plan; **How LexiTrack Works**
+  (Shift+F1), its central section identical to the README's.
+- **Fitted to you** (Settings → Advanced): readiness against the optimizer's
+  512-answer minimum, fitting in the background, a fair comparison, consent,
+  one-click revert.
+- **Weekly summary** on Telegram, Sunday evening, switchable.
 
 ---
 
@@ -118,17 +95,16 @@ Nothing.
 
 Deliberate; see [DECISIONS.md](DECISIONS.md).
 
-- **The bot runs only while the computer is on.** Telegram keeps undelivered
-  updates for a day, so a sleeping laptop catches up.
-- **The time zone is fixed** to Europe/Istanbul (a stored setting, no control
-  in Settings).
-- **FSRS uses its default parameters**; they are not fitted to the user's own
-  reviews yet.
-- **Word details cannot be edited after adding.** Status and notes can; POS,
-  level, definition and example cannot.
-- **Learning status is shared across lists**, and one card per word is shared
-  across plans.
-- **Deleting a list deletes words that are only in it**, with their status.
+- **Fitting needs 512 answers given on later days** and the optional
+  optimizer (`pip install "lexitrack[optimizer]"`, which brings PyTorch).
+  The fitting call itself has not been run in this environment.
+- **Only the last answer can be undone**, once, in the session that gave it.
+- **Manual Knowns from before 0.4 have no date**; the upgrade reconstructs
+  only the schedule's Knowns.
+- **The bot runs only while the computer is on.**
+- **The time zone is fixed** to Europe/Istanbul (a stored setting only).
+- **Word details cannot be edited after adding**; status and notes can.
+- **Learning status is shared across lists**, one card per word across plans.
 - **No lemmatization, no language-specific normalization, no OCR.**
 - **Windows only, in practice.**
 
@@ -148,9 +124,8 @@ pytest -m slow
 ruff check lexitrack tests tools
 ```
 
-**575 run by default and 6 more with `-m slow`** (year-long simulations), lint
-clean. Tests needing the real Oxford PDFs in `pdfs/` skip when the files are
-absent.
+**639 run by default and 6 more with `-m slow`**, lint clean. Tests needing
+the real Oxford PDFs in `pdfs/` skip when the files are absent.
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -159,7 +134,7 @@ absent.
 | `test_generic_parser.py` | 16 | Tokenising, punctuation, document failures |
 | `test_oxford_parser.py` | 28 | Entry grammar, real PDF quirks |
 | `test_database.py` | 22 | Schema, constraints, rollback, the transaction lock |
-| `test_migrations.py` | 23 | v1 → v2 → v3, backups, parity with a fresh schema |
+| `test_migrations.py` | 23 | v1 → v2 → v3 → v4, backups, parity with a fresh schema |
 | `test_lists.py` | 29 | Lists, membership, language identity |
 | `test_json.py` | 36 | JSON parsing, export, round trip |
 | `test_import_workflow.py` | 20 | Preview, targets, atomic rollback |
@@ -169,44 +144,44 @@ absent.
 | `test_srs_scheduler.py` | 17 | Day steps, snapping, previews, state round trip |
 | `test_learning_repositories.py` | 29 | Plans, cards, logs, sessions, settings, keys |
 | `test_learning_service.py` | 37 | Intake, queue, review limit, leeches, mastery, missed days |
+| `test_progress_history.py` | 33 | Status events, reconstruction, parameters, undo, journeys, Progress views, calibration, fitting readiness and scoring |
 | `test_simulation.py` | 14 + 6 `slow` | Workload over time |
-| `test_telegram.py` | 45 | Owner binding, brief, sessions, idempotency, notifications |
+| `test_telegram.py` | 53 | Owner binding, brief, sessions, idempotency, undo, notifications, weekly summary |
 | `test_maintenance.py` | 12 | Backups, integrity check, pruning |
 | `test_logging.py` | 9 | Off by default, daily files, token masking |
 | `test_paths.py` | 5 | Clone vs installed data folder |
 | `test_repository_hygiene.py` | 3 | Git tracks no database, `.env` or log |
-| `test_study_ui.py` | 42 | Study page, session, Study Plan, Settings, tray, shortcut |
+| `test_study_ui.py` | 65 | Study, session and undo, Study Plan window, Settings, Progress, history, first run, help |
 | `test_ui.py` | 88 | The 0.2 screens, dialogs and themes |
 
 ### What has genuinely been verified
 
-- **The migration on the real database**, with its v2 backup kept.
-- **The real bot** with the user's own chat: `/start`, the morning brief,
-  confirmation, a review session and the summary.
-- **Every new screen in both themes**, by rendering and looking; several
-  defects were found that way and fixed (unreadable dark-mode buttons,
-  stretched key caps, unequal button widths).
-- **The public repository after the history rewrite**: the removed backup and
-  the old commits are no longer reachable.
+- **The 3 → 4 upgrade on a copy of the real database**: all words, cards and
+  answers intact, integrity check clean.
+- **Every new and changed screen in both themes**, by rendering and looking;
+  the defects found that way are in the development log.
+- **Undo on Telegram** through the bot's core with a recorded outbox.
+- **Not verified:** a real fit, because PyTorch is not installed here.
 
 ---
 
 ## Next Exact Steps
 
-1. **Use it for a few weeks** before changing the engine; the defaults came
-   from a simulation, not from real reviews.
-2. **Fit FSRS parameters** once a few thousand reviews exist in `review_logs`.
-3. **Edit word details** (see [TODO.md](TODO.md)).
+1. **Turn on *Keep reviewing words learned here*** so the scheduler's Known
+   predictions are tested, and keep studying.
+2. **Watch the calibration** on Progress; after about 100 checked answers its
+   verdict starts to mean something.
+3. **Fit the parameters** once *Fitted to you* says there are 512 answers:
+   `pip install "lexitrack[optimizer]"`, then *Fit to my answers*.
 
 ---
 
 ## How to Continue
 
 1. Read this file.
-2. Read [ARCHITECTURE.md](ARCHITECTURE.md), especially §10–13 for the learning
-   engine, Telegram, the process and files.
-3. Read [DECISIONS.md](DECISIONS.md) 42–59 before changing the engine or the bot,
-   and [LEARNING_ENGINE.md](LEARNING_ENGINE.md) for the reasoning and numbers.
+2. Read [ARCHITECTURE.md](ARCHITECTURE.md): §4 for schema 4, §10 for undo,
+   the record and fitting, §14 for the screens.
+3. Read [DECISIONS.md](DECISIONS.md) 60–68 before changing any of it.
 4. Read the latest [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) entry.
 5. Set up and test:
 
@@ -223,24 +198,26 @@ absent.
 
 | Looking for | Go to |
 | --- | --- |
-| Schema and upgrades | `lexitrack/database/schema.sql`, `learning.sql`, `migrations.py` |
-| The learning day | `lexitrack/core/clock.py` |
-| FSRS | `lexitrack/services/srs_scheduler.py` |
-| Intake, queue, leeches, mastery | `lexitrack/services/learning_service.py` |
-| Workload simulation | `lexitrack/services/simulation.py` |
-| Backups and pruning | `lexitrack/services/maintenance.py` |
+| Schema and upgrades | `lexitrack/database/schema.sql`, `learning.sql`, `progress.sql`, `migrations.py` |
+| Status changes and their history | `lexitrack/repositories/state_repository.py` |
+| Intake, queue, undo, mastery | `lexitrack/services/learning_service.py` |
+| FSRS, recall predictions | `lexitrack/services/srs_scheduler.py` |
+| The record: groups, journeys, calibration, the week | `lexitrack/services/progress.py` |
+| Fitting to the user | `lexitrack/services/optimizer.py` |
 | Telegram | `lexitrack/telegram/` (`core.py` decides, `runtime.py` talks) |
-| Paths, logs, autostart, shortcut | `lexitrack/core/` |
-| Screens | `lexitrack/ui/study_page.py`, `settings_dialog.py`, `study_plan_dialog.py`, and the 0.2 pages |
+| Screens | `lexitrack/ui/study_page.py`, `progress_page.py`, `study_plan_dialog.py`, `settings_dialog.py`, `components/word_history.py`, `help_dialog.py` |
+| The help text | `lexitrack/help/how_lexitrack_works.md` |
 | Styles | `lexitrack/ui/theme/` |
 
 ### Conventions to keep
 
-- The UI and the bot never issue SQL; both go through `LearningService`.
+- The UI and the bot never issue SQL; both go through the services.
+- Every status change goes through `StateRepository`, with its cause.
+- Answers are marked, never deleted, except by Reset All Progress.
+- Figures shown to the user come from the rule the engine uses, never a copy.
 - Days are local learning days from `DayClock`; timestamps are stored in UTC.
 - The token never goes into the database, the log or a test.
 - Nothing under `data/` or `logs/` is ever committed.
-- Seeing a word never changes its status; navigation never changes status.
 - Schema changes need a migration step and keep the parity test passing.
 - No feature without a use. Status is never communicated by colour alone.
 - Never add an AI co-author trailer to a commit.

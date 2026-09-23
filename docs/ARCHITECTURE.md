@@ -1,6 +1,6 @@
 # Architecture
 
-This describes LexiTrack **as it is actually built**, at version 0.3. Where the
+This describes LexiTrack **as it is actually built**, at version 0.4. Where the
 implementation departs from a specification it was built from, the departure
 is named and explained. The reasoning behind each choice is in
 [DECISIONS.md](DECISIONS.md); the learning engine's design, with the numbers
@@ -68,12 +68,12 @@ the bot counts a session's ratings for its summary.
 | `models` | `WordEntry`, `Source`, `VocabularyList`, `ReviewStatus`, `Progress`, language codes; `StudyPlan`, `SrsCard`, `Rating`, `CardState`, `ReviewLogEntry`; `LearningSettings` |
 | `normalization` | Word identity and runtime deduplication |
 | `parsers` | Opening files, the parser protocol, JSON / Oxford / generic parsers, registry |
-| `database` | Connection, `schema.sql` and `learning.sql`, migrations, nested transactions under one lock |
+| `database` | Connection, `schema.sql`, `learning.sql` and `progress.sql`, migrations, nested transactions under one lock |
 | `repositories` | All SQL: words, sources, lists, review state; plans, cards and review logs, sessions and Telegram keys, settings and runtime state |
-| `services` | Imports, free review sessions, exports, the `VocabularyService` facade; the learning engine (`LearningService`, `SrsScheduler`, `WorkloadSimulator`); backups and maintenance |
+| `services` | Imports, free review sessions, exports, the `VocabularyService` facade; the learning engine (`LearningService`, `SrsScheduler`, `WorkloadSimulator`); the record (`ProgressService`) and fitting (`Personaliser`); backups and maintenance |
 | `telegram` | The bot: configuration from `.env`, messages as data, when to speak, `BotCore`, the polling runtime |
 | `exporters` | PDF, CSV and JSON writers |
-| `ui` | Pages, dialogs, shared components, the tray, single instance, the Telegram controller, theme system |
+| `ui` | Pages (Study, Progress, Home, Review, Unknown Words), dialogs, a word's history, the in-app help, shared components, the tray, single instance, the Telegram controller, theme system |
 
 ---
 
@@ -110,7 +110,7 @@ shows provenance as a quiet "Source: …" line. A JSON list says
 
 ---
 
-## 4. Data model (schema version 3)
+## 4. Data model (schema version 4)
 
 ```sql
 sources         (id, key UNIQUE, name, parser_type, file_path, created_at)
@@ -154,6 +154,21 @@ app_settings     (key PRIMARY KEY, value, updated_at)
 runtime_state    (key PRIMARY KEY, value, updated_at)
 ```
 
+Version 4 adds the record of how each word got where it is, from
+`progress.sql`, again run by both a new database and the 3 → 4 migration:
+
+```sql
+word_status_events (id, word_id, at, from_status, to_status,
+                    cause CHECK IN ('mastery','manual','sorting','undo'),
+                    plan_id, reconstructed)
+review_logs        + undone_at         -- an answer taken back, kept and marked
+study_plans        + all_lists         -- a plan over every list, present and future
+```
+
+`params_hash` on `review_logs`, present since version 3, is now filled: a
+short fingerprint of the FSRS parameters and retention that scheduled the
+answer.
+
 Timestamps are stored in UTC as `YYYY-MM-DDTHH:MM:SS` with no offset, one
 format everywhere, because `due_at` is compared as text in SQL. Days are
 stored as local dates (`introduced_on`, `reviewed_on`). `state` is one of
@@ -176,7 +191,14 @@ stored as local dates (`introduced_on`, `reviewed_on`). `state` is one of
 6. **Introduction happens once.** Introducing a word that already has a card
    changes nothing, so a repeated confirmation cannot reset a schedule.
 7. **Reset All Progress clears statuses and the schedule together** — cards,
-   sessions and review logs — in one transaction, so the two never disagree.
+   sessions, review logs and the status history — in one transaction, so they
+   never disagree.
+8. **No status changes without a record.** `StateRepository` writes the
+   `word_status_events` row in the same transaction as the change, and only
+   when the status really changes; callers state the cause.
+9. **An answer is never deleted** except by Reset. Undo marks it `undone_at`;
+   every count, the calibration and fitting leave such rows out, the history
+   and the All answers table show them.
 
 ### Learning status is word-level
 
@@ -234,6 +256,20 @@ freshly created one.
 
 Verified on a copy of the real 6,825-word database, then on the database
 itself when the user first started 0.3.
+
+**Version 3 → 4:**
+
+1. Back up to `vocabulary.v3-backup-<timestamp>.db`.
+2. Run `progress.sql`: the events table, `review_logs.undone_at`,
+   `study_plans.all_lists`.
+3. Reconstruct one `mastery` event, marked `reconstructed`, for every Known
+   word whose review log shows its stability crossing the mastery threshold,
+   dated by that review. Words marked Known by hand before version 4 left no
+   trace and get no event: an invented date would be worse than a gap.
+
+Verified on a copy of the real database: 6,825 words, 185 cards and 174
+answers intact, integrity check clean, no event reconstructed because no word
+had yet reached 21 days.
 
 ---
 
@@ -518,11 +554,42 @@ until it has no current failure streak *and* its stability has recovered.
 **Mastery** — stability of 21 days by default — marks the word Known by
 itself, once.
 
-**Intake.** New words come from the plan's lists, deduplicated, in CEFR order
-then list order, from words marked Unknown (optionally also never-answered
-ones). There is no pointer to keep in step: "not yet introduced" is simply the
+**Intake.** New words come from the plan's lists — or every list, for a plan
+over *All my lists* — deduplicated, in CEFR order then list order, from words
+marked Unknown (optionally also never-answered ones). `PlanRepository` builds
+every query from one scope expression, so the saved plan, an unsaved selection
+in the Study Plan window (`selection_outlook`) and the day's intake count words
+by the same rule. There is no pointer to keep in step: "not yet introduced" is simply the
 absence of a card. When today's due reviews already reach the review limit
 (250 by default) intake pauses, and the plan says so in words.
+
+**Undo.** `LearningService.answer` keeps the card as it was before the
+answer, the log id and the status before. `undo_last_answer(session)` restores
+the card, marks the log row undone, reverts a Known the answer caused (as an
+`undo` event), steps the session back and releases the Telegram idempotency
+key, so the same word can be answered again. Only the last answer, only once,
+only in the session and client that gave it, and not if the word has been
+answered since from elsewhere.
+
+**Reading the record.** `services/progress.py` (`ProgressService`) derives,
+read-only, what the Progress page and a word's history show: the studied
+words in three groups (learned here — Known by `mastery`; marked Known — by
+hand or on the Review tab; in progress) plus the count known before any plan;
+where the words stand by stability; running totals by day; the week for the
+Telegram summary; every answer; one word's journey; and the calibration —
+for each answer after a word's first, the recall FSRS predicted from the
+previous stability and the elapsed days (`SrsScheduler.predicted_recall`, the
+library's own curve and parameters) against whether it was remembered.
+
+**Fitting to the user.** `services/optimizer.py` (`Personaliser`) counts
+answers given on a later day than the word's previous answer — the library's
+optimizer returns the defaults below 512 of them — fits on a snapshot of the
+log (the fsrs optimizer, an optional extra that needs PyTorch), and scores the
+current and fitted parameters by replaying the whole history through a
+scheduler built with LexiTrack's own steps, as mean log loss. Nothing is used
+until `apply`, which stores the parameters as the `fsrs_parameters` setting;
+`revert` returns to the defaults. `SrsScheduler` builds FSRS with stored
+parameters when present.
 
 **The simulator.** `services/simulation.py` runs the real scheduler forward
 over an imaginary pool with a fixed seed and one of three answer profiles, in
@@ -538,8 +605,8 @@ database, one writer. Five modules:
 | Module | Role |
 | --- | --- |
 | `telegram/config.py` | The token and optional chat id, from `LEXITRACK_TELEGRAM_TOKEN` / `LEXITRACK_TELEGRAM_CHAT_ID` or a `.env` in the data folder (and the clone, when running from one). Never from the database. |
-| `telegram/messages.py` | Every message as plain data: Telegram HTML text and button rows. Callback data: `intro:<date>`, `start`, `ans:<session>:<word>:<rating>`, `end:<session>`. |
-| `telegram/schedule.py` | Whether the morning brief or the evening reminder is owed now, from the clock, the settings and what `runtime_state` says was sent today. |
+| `telegram/messages.py` | Every message as plain data: Telegram HTML text and button rows. Callback data: `intro:<date>`, `start`, `ans:<session>:<word>:<rating>`, `end:<session>`, `undo:<session>`. Each card is a new message, so a spoiler starts hidden. |
+| `telegram/schedule.py` | Whether the morning brief, the evening reminder or the Sunday weekly summary is owed now, from the clock, the settings and what `runtime_state` says was sent. |
 | `telegram/core.py` | `BotCore`: commands, button presses and the half-minute tick, spoken through an `Outbox` protocol. No Telegram types, so it is tested with a list. |
 | `telegram/runtime.py` | The only module importing `python-telegram-bot`: an asyncio loop on a daemon thread, long polling, every tap acknowledged before it is handled, a clean stop. |
 
@@ -556,7 +623,11 @@ Rules `BotCore` keeps:
   `ans:<session>:<word>` in `telegram_updates` before anything is written.
 - **Notifications are decisions, not timers.** A brief is owed once a day after
   the notify hour; five days offline produce one brief; a brief sent after the
-  reminder hour, or on `/start`, also counts for the day.
+  reminder hour, or on `/start`, also counts for the day. The weekly summary
+  is owed only on Sunday after the reminder hour, once, and a week with
+  nothing in it stays quiet.
+- **Undo reaches one answer.** Every card after the first carries Undo; it
+  sends the word's card back as a new message and deletes the current one.
 
 `ui/telegram_controller.py` starts and stops the thread from two facts — the
 `telegram_enabled` setting and whether a token exists — and turns the
@@ -619,16 +690,22 @@ through a formatter that masks anything shaped like a bot token.
 
 ```text
 MainWindow
-├── app bar     LexiTrack · Study | Home | Review | Unknown Words
+├── app bar     LexiTrack · Study | Progress | Home | Review | Unknown Words
 │               · Search or run a command (Ctrl+K) · Import · theme icon · ⋯ menu
 ├── StudyPage
-│   ├── no plan             one explanation, Create a study plan
+│   ├── no plan             the first-run setup: what to learn (all Unknown
+│   │                       words, or some lists), how many a day, the phone;
+│   │                       Start learning creates the plan
 │   ├── the day             Today panel (two steps, a progress line, one primary
 │   │                       button whose label is the next thing to do) · New
 │   │                       words as CEFR-grouped chips · This week (day tiles)
 │   │                       · Words you find hard · The last 30 days (stat tiles)
 │   └── session             one card: progress line, word, meaning behind Space,
-│                           Again / Hard / Good / Easy with keys and intervals
+│                           Again / Hard / Good / Easy with keys and intervals,
+│                           "Undo <answer> on <word>" in the footer (Ctrl+Z)
+├── ProgressPage            four tiles · where the words are · over time · does
+│                           the schedule fit you (and which parameters are in
+│                           use) · Words table with filters · All answers table
 ├── HomePage
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
 │   ├── Overview            four totals; the Unknown tile opens Unknown Words
@@ -636,14 +713,22 @@ MainWindow
 │                           right-click: review, open, add words, import into,
 │                           export, edit, delete)
 ├── ReviewPage
-│   ├── context strip       REVIEWING · <list ▾ switcher> · language · List Actions
-│   │                       · Flashcard|List
+│   ├── context strip       SORTING · <list ▾ switcher> · language · List Actions
+│   │                       · Flashcard|List, and one line saying that this page
+│   │                       sorts and the Study tab teaches
 │   ├── Flashcard mode      ReviewWidget / list complete / empty list
 │   ├── List mode           VocabularyTable (details panel, floating bar) + Add Words
 │   └── StatsBar            known · unknown · remaining · total for the list
 └── UnknownPage             VocabularyTable (all unknown words, no status
                             column) + list filter
 ```
+
+A word's history (`ui/components/word_history.py`, `WordHistoryDialog`) opens
+from the details panel — which now summarises the word's learning — from
+learned and hard words on the Study page, and from both Progress tables. How
+LexiTrack Works (`ui/help_dialog.py`, Shift+F1) renders `lexitrack/help/
+how_lexitrack_works.md`, whose central section is the README's *How a word is
+learned*, word for word; a test fails if they drift.
 
 `MainWindow` owns only shared context: the current list and review mode
 (persisted in `QSettings`), the theme and the commands. There is no menu bar:
