@@ -183,6 +183,24 @@ class Summary:
 
 
 @dataclass(frozen=True, slots=True)
+class WeekSummary:
+    """Seven days ending today, for the Sunday message."""
+
+    first_day: str
+    last_day: str
+    answers: int
+    agains: int
+    introduced: int
+    learned: tuple[str, ...]
+    hard: tuple[str, ...]
+    in_progress: int
+
+    @property
+    def again_rate(self) -> float | None:
+        return self.agains / self.answers if self.answers else None
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerRow:
     """One answer, for the All answers table."""
 
@@ -371,6 +389,34 @@ class ProgressService:
         ]
         rows.reverse()
         return rows
+
+    def week(self) -> WeekSummary:
+        """The last seven learning days, today included."""
+        clock = self._engine.clock
+        last = clock.today()
+        first = clock.shift_days(-6)
+        logs = [
+            log
+            for log in self._cards.all_logs(include_undone=False)
+            if first <= log.reviewed_on <= last
+        ]
+        rows = self.words()
+        learned = sorted(
+            row.word.word
+            for row in rows
+            if row.group is Group.LEARNED and row.known_on and first <= row.known_on <= last
+        )
+        hard = [row.word.word for row in sorted(rows, key=lambda r: -r.agains) if row.struggling]
+        return WeekSummary(
+            first_day=first,
+            last_day=last,
+            answers=len(logs),
+            agains=sum(1 for log in logs if log.rating is Rating.AGAIN),
+            introduced=sum(1 for row in rows if first <= row.introduced_on <= last),
+            learned=tuple(learned),
+            hard=tuple(hard),
+            in_progress=sum(1 for row in rows if row.group is Group.IN_PROGRESS),
+        )
 
     # -- charts --------------------------------------------------------------
 

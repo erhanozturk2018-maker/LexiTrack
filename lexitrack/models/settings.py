@@ -47,6 +47,8 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "hide_meaning_in_study": "true",
     # -- clients
     "telegram_enabled": "false",
+    # Sunday evening on Telegram: the week's answers, words learned, hard words.
+    "weekly_summary": "true",
     # -- diagnostics: two switches, never one
     "developer_mode": "false",
     "debug_logging": "false",
@@ -76,6 +78,7 @@ class Setting(StrEnum):
     LEECH_WEAK_STABILITY_DAYS = "leech_weak_stability_days"
     HIDE_MEANING_IN_STUDY = "hide_meaning_in_study"
     TELEGRAM_ENABLED = "telegram_enabled"
+    WEEKLY_SUMMARY = "weekly_summary"
     DEVELOPER_MODE = "developer_mode"
     DEBUG_LOGGING = "debug_logging"
     ACTIVE_PLAN_ID = "active_plan_id"
@@ -106,6 +109,7 @@ class LearningSettings:
     leech_weak_stability_days: float = 7.0
     hide_meaning_in_study: bool = True
     telegram_enabled: bool = False
+    weekly_summary: bool = True
     developer_mode: bool = False
     debug_logging: bool = False
     active_plan_id: int | None = None
@@ -153,6 +157,7 @@ class LearningSettings:
             leech_weak_stability_days=max(number(Setting.LEECH_WEAK_STABILITY_DAYS), 0.0),
             hide_meaning_in_study=flag(Setting.HIDE_MEANING_IN_STUDY),
             telegram_enabled=flag(Setting.TELEGRAM_ENABLED),
+            weekly_summary=flag(Setting.WEEKLY_SUMMARY),
             developer_mode=flag(Setting.DEVELOPER_MODE),
             debug_logging=flag(Setting.DEBUG_LOGGING),
             active_plan_id=int(plan) if plan.isdigit() else None,

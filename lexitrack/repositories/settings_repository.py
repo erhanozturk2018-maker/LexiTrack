@@ -106,6 +106,8 @@ class RuntimeRepository:
     LAST_NOTIFIED_ON = "last_notified_on"
     #: The evening reminder has been sent for this local date.
     LAST_REMINDER_ON = "last_reminder_on"
+    #: The Sunday the weekly summary was last sent on.
+    LAST_WEEKLY_ON = "last_weekly_on"
     #: New words have been offered for this local date.
     LAST_INTAKE_ON = "last_intake_on"
     #: The last moment the application was known to be running.

@@ -1,4 +1,5 @@
-"""When the bot speaks unprompted: the morning brief and the evening reminder.
+"""When the bot speaks unprompted: the morning brief, the evening reminder,
+and on Sunday evening the week's summary.
 
 This is a decision, not a timer. The bot ticks every half minute and asks
 :func:`due_notifications` what, if anything, is owed *now*. The answer depends
@@ -32,6 +33,11 @@ from ..repositories import RuntimeRepository
 class Notification(StrEnum):
     MORNING = "morning"
     EVENING = "evening"
+    WEEKLY = "weekly"
+
+
+#: Sunday, as ``date.weekday()`` counts: the last day of the week.
+SUNDAY = 6
 
 
 def due_notifications(
@@ -54,6 +60,15 @@ def due_notifications(
         and hour >= settings.evening_reminder_hour
     ):
         due.append(Notification.EVENING)
+    # Sunday, from the evening hour, once. Like the rest, it is owed only on
+    # its day: a week the app was off on Sunday gets no late summary.
+    if (
+        settings.weekly_summary
+        and clock.now_local().weekday() == SUNDAY
+        and hour >= settings.evening_reminder_hour
+        and not runtime.was_done(RuntimeRepository.LAST_WEEKLY_ON, today)
+    ):
+        due.append(Notification.WEEKLY)
     return due
 
 
@@ -69,6 +84,9 @@ def mark_sent(
     reminder: the user has just been told everything the reminder would say.
     """
     today = clock.today()
+    if notification is Notification.WEEKLY:
+        runtime.mark_done(RuntimeRepository.LAST_WEEKLY_ON, today)
+        return
     if notification is Notification.MORNING:
         runtime.mark_done(RuntimeRepository.LAST_NOTIFIED_ON, today)
         if clock.now_local().hour >= settings.evening_reminder_hour:

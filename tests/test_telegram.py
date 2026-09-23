@@ -561,3 +561,56 @@ def test_connecting_after_the_morning_hour_does_not_send_the_list_twice(
     briefs = [m for _, m in outbox.sent if "Good morning" in m.text]
     assert len(briefs) == 1
     assert run(core.tick()) == []
+
+
+# -- the weekly summary ----------------------------------------------------------
+
+
+class TestWeeklySummary:
+    SUNDAY_EVENING = datetime(2026, 9, 20, 18, 30, tzinfo=UTC)  # 21:30 local, Sunday
+
+    def a_week_of_study(self, bot: BotCore, clock: FrozenClock) -> None:
+        engine = bot.engine
+        engine.introduce()
+        for _ in range(3):
+            clock.advance_to_day_start(1)
+            clock.advance(hours=7)
+            engine.introduce()
+            for index, item in enumerate(engine.review_queue()):
+                engine.answer(item.word.id, Rating.AGAIN if index % 3 == 0 else Rating.GOOD)
+
+    def test_it_is_owed_on_sunday_evening_once(
+        self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
+    ) -> None:
+        self.a_week_of_study(bot, clock)
+        clock.set(self.SUNDAY_EVENING)
+        sent = run(bot.tick())
+        assert Notification.WEEKLY in sent
+        weekly = [m.text for _, m in outbox.sent if "Your week" in m.text]
+        assert len(weekly) == 1
+        assert "answers (" in weekly[0] and "% Again)" in weekly[0]
+        assert "new words introduced" in weekly[0]
+        run(bot.tick())
+        assert len([m for _, m in outbox.sent if "Your week" in m.text]) == 1
+
+    def test_not_on_other_days(self, bot: BotCore, clock: FrozenClock) -> None:
+        clock.set(datetime(2026, 9, 19, 18, 30, tzinfo=UTC))  # Saturday 21:30
+        assert Notification.WEEKLY not in run(bot.tick())
+
+    def test_not_before_the_evening_hour(self, bot: BotCore, clock: FrozenClock) -> None:
+        clock.set(datetime(2026, 9, 20, 9, 0, tzinfo=UTC))  # Sunday 12:00
+        assert Notification.WEEKLY not in run(bot.tick())
+
+    def test_it_can_be_switched_off(
+        self, bot: BotCore, clock: FrozenClock, seeded: Database
+    ) -> None:
+        SettingsRepository(seeded).set(Setting.WEEKLY_SUMMARY, False)
+        clock.set(self.SUNDAY_EVENING)
+        assert Notification.WEEKLY not in run(bot.tick())
+
+    def test_a_week_with_nothing_in_it_stays_quiet(
+        self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
+    ) -> None:
+        clock.set(self.SUNDAY_EVENING)
+        assert Notification.WEEKLY in run(bot.tick()), "counted as done for the week"
+        assert not [m for _, m in outbox.sent if "Your week" in m.text]

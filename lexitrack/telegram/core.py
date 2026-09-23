@@ -33,6 +33,7 @@ from ..database.connection import Database
 from ..models.srs import Channel
 from ..repositories import RuntimeRepository
 from ..services.learning_service import AnswerOutcome, LearningService
+from ..services.progress import ProgressService
 from . import messages
 from .messages import Message
 from .schedule import Notification, due_notifications, mark_sent
@@ -318,11 +319,14 @@ class BotCore:
         sent: list[Notification] = []
         for notification in due:
             assert plan is not None
-            message = (
-                messages.morning_brief(plan)
-                if notification is Notification.MORNING
-                else messages.evening_reminder(plan)
-            )
+            if notification is Notification.MORNING:
+                message = messages.morning_brief(plan)
+            elif notification is Notification.EVENING:
+                message = messages.evening_reminder(plan)
+            else:
+                with self._db.lock:
+                    week = ProgressService(self._db, self._engine).week()
+                message = messages.weekly_summary(week)
             if message is not None:
                 await self._outbox.send(chat_id, message)
             # Marked even when the reminder stayed quiet: "nothing to remind"

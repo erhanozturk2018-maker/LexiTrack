@@ -272,6 +272,31 @@ def evening_reminder(plan: DailyPlan) -> Message | None:
     )
 
 
+def weekly_summary(week) -> Message | None:
+    """Sunday evening: the week in a few lines. ``None`` for a week with nothing."""
+    if not week.answers and not week.introduced:
+        return None
+    lines = [
+        f"<b>Your week</b> \u00b7 {escape(_pretty(week.first_day))} to "
+        f"{escape(_pretty(week.last_day))}",
+        "",
+    ]
+    rate = f" ({round(week.again_rate * 100)}% Again)" if week.again_rate is not None else ""
+    lines.append(f"{week.answers} answers{rate}")
+    lines.append(f"{week.introduced} new words introduced")
+    if week.learned:
+        shown = ", ".join(escape(word) for word in week.learned[:8])
+        more = f" and {len(week.learned) - 8} more" if len(week.learned) > 8 else ""
+        lines.append(f"<b>{len(week.learned)} learned</b>: {shown}{more}")
+    else:
+        lines.append("No word reached Known this week")
+    lines.append(f"{week.in_progress} still in progress")
+    if week.hard:
+        shown = ", ".join(escape(word) for word in week.hard[:5])
+        lines += ["", f"\u26a0 <i>Giving you trouble:</i> {shown}"]
+    return Message(_fit("\n".join(lines)))
+
+
 def not_allowed() -> str:
     return "This bot belongs to someone else's LexiTrack."
 

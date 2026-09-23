@@ -227,6 +227,13 @@ class SettingsDialog(QDialog):
             "Stays as you leave it across restarts.",
             self.telegram_enabled,
         )
+        self.weekly_summary = _switch()
+        bot.add(
+            "Weekly summary",
+            "Sunday at the evening reminder hour: the week's answers, the words "
+            "learned and the words giving you trouble.",
+            self.weekly_summary,
+        )
         self.telegram_status = QLabel()
         self.telegram_status.setTextFormat(Qt.TextFormat.RichText)
         bot.add("Status", None, self.telegram_status)
@@ -557,6 +564,7 @@ class SettingsDialog(QDialog):
         self.developer_mode.setChecked(s.developer_mode)
         self.debug_logging.setChecked(s.debug_logging)
         self.telegram_enabled.setChecked(s.telegram_enabled)
+        self.weekly_summary.setChecked(s.weekly_summary)
         self._show_telegram_state()
         index = self.theme_combo.findData(self._theme.current.value)
         self.theme_combo.setCurrentIndex(max(index, 0))
@@ -731,6 +739,7 @@ class SettingsDialog(QDialog):
                 self.developer_mode.isChecked() and self.debug_logging.isChecked()
             ),
             Setting.TELEGRAM_ENABLED: self.telegram_enabled.isChecked(),
+            Setting.WEEKLY_SUMMARY: self.weekly_summary.isChecked(),
         }
         try:
             self._engine.save_settings(values)
