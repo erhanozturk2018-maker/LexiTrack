@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -84,6 +85,16 @@ _FILTERS = (
     (ALL, "All"),
 )
 _ANSWER_FILTERS = ((ALL, "All"), (AGAIN, "Again"), (TAKEN_BACK, "Taken back"))
+
+#: The Overview's rates: (LearningMetrics field, caption).
+_RATES = (
+    ("first_attempt", "first-attempt recall"),
+    ("productive", "productive recall"),
+    ("long_interval", "recalled after a long gap"),
+    ("transfer", "recalled in a new sentence"),
+    ("relearn", "answers relearned (Forgotten)"),
+    ("recurring", "words forgotten twice or more"),
+)
 
 #: Known suggestions listed one by one; the rest are counted.
 _SUGGESTIONS_SHOWN = 5
@@ -387,6 +398,27 @@ class ProgressPage(QWidget):
         where_layout.addWidget(panel)
         layout.addWidget(where)
 
+        # How retrieval goes: the rates, each with its count
+        rates, rates_layout, _, _ = _section("HOW RETRIEVAL GOES")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(m.space_3)
+        grid.setVerticalSpacing(m.space_3)
+        self.rate_tiles: dict[str, StatTile] = {}
+        for index, (key, caption) in enumerate(_RATES):
+            tile = StatTile(caption)
+            grid.addWidget(tile, index // 3, index % 3)
+            self.rate_tiles[key] = tile
+        rates_layout.addLayout(grid)
+        rates_layout.addWidget(
+            _label(
+                "Each rate with the answers it is counted from. First questions only, "
+                "on later days: practice right after teaching is not counted.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        layout.addWidget(rates)
+
         # The last 30 days
         recent, recent_layout, _, self.recent_title = _section("THE LAST 30 DAYS")
         row = QHBoxLayout()
@@ -505,6 +537,22 @@ class ProgressPage(QWidget):
         panel_layout.addWidget(self.settings_link, 0, Qt.AlignmentFlag.AlignLeft)
         fit_layout.addWidget(panel)
         layout.addWidget(fit)
+
+        routes, routes_layout, _, _ = _section("ROUTES")
+        panel, panel_layout = _panel()
+        panel_layout.addWidget(
+            _label(
+                "Answers by the way they were asked: v1 showed the word and you rated "
+                "it; v2 asks for the word and probes a miss. Compare the share of Again.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        self.routes_label = _label("", None, wrap=True)
+        self.routes_label.setObjectName("EvidenceLine")
+        panel_layout.addWidget(self.routes_label)
+        routes_layout.addWidget(panel)
+        layout.addWidget(routes)
         return page
 
     # -- tabs ------------------------------------------------------------------
@@ -539,6 +587,7 @@ class ProgressPage(QWidget):
         self.pipeline.set_stages(self._progress.pipeline(rows))
         self._fill_skill(rows)
         self._fill_recent(rows)
+        self._fill_rates()
         self.timeline.set_days(self._progress.timeline(rows))
 
         calibration = self._progress.calibration()
@@ -657,6 +706,27 @@ class ProgressPage(QWidget):
             "one can be ahead of the other. Neither marks a word Known: you do."
         )
         self.skill_note.setText(" ".join(notes))
+
+    def _fill_rates(self) -> None:
+        metrics = self._progress.metrics()
+        for key, _caption in _RATES:
+            tile = self.rate_tiles[key]
+            if key == "recurring":
+                tile.set_value(metrics.recurring_failures)
+                tile.setToolTip("Words forgotten twice or more")
+                continue
+            rate = getattr(metrics, key)
+            share = rate.share
+            tile.value_label.setText(
+                f"{round(share * 100)}%  ({rate.hits:,} of {rate.total:,})"
+                if share is not None else "— none yet"
+            )
+        lines = [
+            f"<b>{line.route}</b>: {line.answers:,} answers, "
+            + (f"{round(line.again_rate * 100)}% Again" if line.again_rate is not None else "—")
+            for line in metrics.routes
+        ]
+        self.routes_label.setText("<br>".join(lines) or "No answers yet.")
 
     def _fill_recent(self, rows: list[WordProgress]) -> None:
         recent = self._progress.recent(rows)

@@ -36,7 +36,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..database.connection import Database
-from ..models.attempt import MemoryResult, Role, Task
+from ..models.attempt import Level, MemoryResult, Phase, Role, Task
 from ..models.skill import SkillStage, WordSkill
 from ..models.srs import CardState, Channel, Rating, ReviewLogEntry, SrsCard
 from ..models.user_word_state import ReviewStatus, StatusCause, StatusEvent
@@ -143,6 +143,11 @@ class WordJourney:
     last_answer: JourneyStep | None
     #: What the record shows the learner can do with it; None before study.
     skill: WordSkill | None = None
+    #: Firsts in its record, in order: recalled, in a context, used, after a
+    #: long gap.
+    milestones: tuple[Milestone, ...] = ()
+    #: Answers that ended Forgotten, taken back ones left out.
+    forgotten: int = 0
 
     @property
     def introduced_on(self) -> str | None:
@@ -255,6 +260,59 @@ class SkillOverview:
     #: Words whose only evidence is answers from before version 5, which
     #: asked word → meaning and so show recognition at most.
     only_v1: int
+
+
+@dataclass(frozen=True, slots=True)
+class Rate:
+    """``hits`` of ``total``: every figure keeps its count, so it can be read
+    for what it is (3 of 4 is not 75 % of anything much)."""
+
+    hits: int
+    total: int
+
+    @property
+    def share(self) -> float | None:
+        return self.hits / self.total if self.total else None
+
+
+@dataclass(frozen=True, slots=True)
+class RouteLine:
+    """One learning route's answers, for comparing v1 with v2."""
+
+    route: str
+    answers: int
+    agains: int
+
+    @property
+    def again_rate(self) -> float | None:
+        return self.agains / self.answers if self.answers else None
+
+
+@dataclass(frozen=True, slots=True)
+class LearningMetrics:
+    """How retrieval goes, across every studied word (answers taken back left out)."""
+
+    #: First questions of reviews at level 2 and above that were answered right.
+    first_attempt: Rate
+    #: First questions at levels 4–5 (a collocation, a sentence) that succeeded.
+    productive: Rate
+    #: Answers after the long-gap threshold that were recalls.
+    long_interval: Rate
+    #: First questions in a context never used before that succeeded: transfer.
+    transfer: Rate
+    #: Answers that ended Forgotten (Again), so the word was relearned.
+    relearn: Rate
+    #: Words forgotten twice or more.
+    recurring_failures: int
+    routes: tuple[RouteLine, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Milestone:
+    """A first in one word's record."""
+
+    label: str
+    day: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +505,8 @@ class ProgressService:
             mastery_days=threshold,
             last_answer=last,
             skill=self._skills.skill(word.id) if card is not None or logs else None,
+            milestones=self._milestones(word.id, live),
+            forgotten=sum(1 for log in live if _forgot(log)),
         )
 
     # -- everything answered -----------------------------------------------
@@ -518,6 +578,63 @@ class ProgressService:
                 1 for row in rows if row.stability is not None and row.stability >= threshold
             ),
         )
+
+    def metrics(self) -> LearningMetrics:
+        """The rates on the Overview and the route comparison on Scheduler."""
+        threshold = self._engine.settings.mastery_stability_days
+        firsts = [
+            attempt for attempt in self._attempts.all()
+            if attempt.phase is Phase.REVIEW and attempt.role is Role.PRIMARY
+        ]
+        recall = [a for a in firsts if a.level >= Level.MEANING_TO_WORD]
+        productive = [a for a in firsts if a.level >= Level.COLLOCATION]
+        novel = [a for a in firsts if a.novel_context]
+        logs = self._cards.all_logs(include_undone=False)
+        late = [log for log in logs if (log.elapsed_days or 0) >= threshold]
+        forgot = Counter(log.word_id for log in logs if _forgot(log))
+        routes: dict[str, list[int]] = {}
+        for log in logs:
+            line = routes.setdefault(log.route_version or "v1", [0, 0])
+            line[0] += 1
+            line[1] += log.rating is Rating.AGAIN
+
+        def rate(items, hit) -> Rate:
+            return Rate(sum(1 for item in items if hit(item)), len(items))
+
+        return LearningMetrics(
+            first_attempt=rate(recall, lambda a: a.success),
+            productive=rate(productive, lambda a: a.success),
+            long_interval=rate(late, _recalled),
+            transfer=rate(novel, lambda a: a.success),
+            relearn=rate(logs, _forgot),
+            recurring_failures=sum(1 for count in forgot.values() if count >= 2),
+            routes=tuple(RouteLine(route, answers, agains)
+                         for route, (answers, agains) in sorted(routes.items())),
+        )
+
+    def _milestones(self, word_id: int, live: list[ReviewLogEntry]) -> tuple[Milestone, ...]:
+        """The firsts in one word's record, from its delayed retrievals and answers."""
+        found: list[Milestone] = []
+
+        def first(label: str, days) -> None:
+            day = min(days, default=None)
+            if day:
+                found.append(Milestone(label, day))
+
+        firsts = [
+            a for a in self._attempts.for_word(word_id)
+            if a.phase is Phase.REVIEW and a.role in (Role.PRIMARY, Role.PROBE) and a.success
+        ]
+        first("First recalled", (a.on_day for a in firsts if a.level >= Level.MEANING_TO_WORD))
+        first("First recalled from a sentence",
+              (a.on_day for a in firsts if a.level is Level.CONTEXT_TO_WORD))
+        first("First used (a collocation or a sentence)",
+              (a.on_day for a in firsts if a.level >= Level.COLLOCATION))
+        threshold = self._engine.settings.mastery_stability_days
+        first(f"First recalled after {threshold:g}+ days",
+              (log.reviewed_on for log in live
+               if (log.elapsed_days or 0) >= threshold and _recalled(log)))
+        return tuple(sorted(found, key=lambda m: m.day))
 
     def skill_overview(self, rows: list[WordProgress] | None = None) -> SkillOverview:
         """Where the studied words' skill stands, and the evidence beside it."""
@@ -679,6 +796,19 @@ def _asked(attempts) -> dict[int, Task]:
         if attempt.review_log_id is not None and attempt.role is Role.PRIMARY:
             found.setdefault(attempt.review_log_id, attempt.task)
     return found
+
+
+def _forgot(log: ReviewLogEntry) -> bool:
+    """An answer that ended Forgotten: Again, the only rating it gives."""
+    return log.rating is Rating.AGAIN
+
+
+def _recalled(log: ReviewLogEntry) -> bool:
+    """A recall, not only a recognition: not Again, and recorded as recalled
+    when the answer recorded what it showed."""
+    if log.rating is Rating.AGAIN:
+        return False
+    return log.memory_result in (None, "RECALLED", "RECALLED_EFFORT")
 
 
 def _memory_result(value: str | None) -> MemoryResult | None:

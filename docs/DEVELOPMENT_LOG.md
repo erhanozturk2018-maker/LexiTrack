@@ -1019,3 +1019,14 @@ give their words the record the offer needs (`flow_helpers.record_known_evidence
 - A test answered Easy for 60 days expecting a long-gap recall; with Easy the
   third review falls past day 60, so no gap was ever survived. It now runs
   200 days.
+
+## 2026-09-26 — Learning plan gaps, step 8: metrics and milestones
+
+`ProgressService.metrics()` — first-attempt recall, productive recall,
+long-gap recall, transfer, relearn rate (each a `Rate` of hits and total),
+words forgotten twice or more, and answers by route — on the Overview
+(*How retrieval goes*) and the Scheduler tab (*Routes*). A word's history
+lists its milestones (first recalled, from a sentence, used, after a long
+gap) and how often it was forgotten. The history still called the stability
+line "Known" and said "21 needed": after step 7 that line is long-term
+memory, and it is labelled so.

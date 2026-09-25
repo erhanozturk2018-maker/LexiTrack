@@ -378,7 +378,10 @@ tabs:
   shown you can do with it (recognise it, recall it, use it). Beside them,
   evidence that is neither: words retrieved instantly on several days, words
   remembered after 30 days or more without a review, words recognised in a
-  sentence they had not been seen in. Then **the last 30 days** and the words
+  sentence they had not been seen in. Then **how retrieval goes**, each rate
+  with the answers it counts: first-attempt recall, productive recall,
+  recall after a long gap, recall in a new sentence, answers relearned, and
+  words forgotten twice or more. Then **the last 30 days** and the words
   introduced and learned **over time**.
 - **Words** — every studied word, filterable (learned here, in progress,
   marked Known, ready for Known, hard for you), with when it was introduced
@@ -389,7 +392,8 @@ tabs:
   or the answers taken back, find a word, or export them all as CSV.
 - **Scheduler** — does the schedule fit you: for each band of predicted
   recall, how often you actually remembered, a one-line verdict, and which
-  parameters are in use.
+  parameters are in use; and the answers of each route (v1, v2) with their
+  share of Again.
 
 Double-click any row, or select a word in any table and choose *Show history*
 in the details panel, for that word's whole history.

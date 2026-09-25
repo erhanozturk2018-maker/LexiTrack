@@ -197,3 +197,36 @@ def test_answers_filter_by_again_and_by_word(page) -> None:
     word = page.answers_table.item(0, 1).text()
     page.answer_search.setText(word)
     assert page.answers_table.rowCount() == 1
+
+
+def test_the_rates_come_with_their_counts(
+    database: Database, engine: LearningService, studied  # noqa: F811
+) -> None:
+    """studied: meaning→word right, word→meaning right, a sentence missed
+    (nothing else tried: Forgotten), and one answer the old way."""
+    metrics = ProgressService(database, engine).metrics()
+    # First questions at level 2+: meaning→word right, the sentence missed.
+    assert (metrics.first_attempt.hits, metrics.first_attempt.total) == (1, 2)
+    assert metrics.productive.total == 0 and metrics.productive.share is None
+    assert (metrics.relearn.hits, metrics.relearn.total) == (1, 4)
+    assert metrics.recurring_failures == 0
+    routes = {line.route: (line.answers, line.agains) for line in metrics.routes}
+    assert routes == {"v1": (1, 0), "v2": (3, 1)}
+
+
+def test_a_word_lists_its_milestones_and_how_often_it_was_forgotten(
+    database: Database, engine: LearningService, studied, clock  # noqa: F811
+) -> None:
+    progress = ProgressService(database, engine)
+    recalled = progress.journey(studied[0])
+    labels = [m.label for m in recalled.milestones]
+    assert labels == ["First recalled"] and recalled.forgotten == 0
+    missed = progress.journey(studied[2])
+    assert missed.milestones == () and missed.forgotten == 1
+    # A context recalled later, and a long gap survived.
+    clock.advance_to_day_start(25)
+    _review(engine, studied[2], Task.CONTEXT_CLOZE)
+    later = progress.journey(studied[2])
+    assert [m.label for m in later.milestones] == [
+        "First recalled", "First recalled from a sentence", "First recalled after 21+ days",
+    ]

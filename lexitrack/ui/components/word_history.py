@@ -119,6 +119,14 @@ def skill_sentence(journey: WordJourney) -> str:
     return text + "."
 
 
+def milestones_sentence(journey: WordJourney) -> str:
+    """The firsts in the word's record, and how often it was forgotten."""
+    parts = [f"{m.label} {pretty_day(m.day)}" for m in journey.milestones]
+    if journey.forgotten:
+        parts.append(f"forgotten {_times(journey.forgotten)}")
+    return ("Milestones: " + " · ".join(parts) + ".") if parts else ""
+
+
 def _times(count: int) -> str:
     return "once" if count == 1 else f"{count} times"
 
@@ -238,7 +246,7 @@ class StabilityChart(QWidget):
         painter.drawText(
             QRectF(area.left() + 4, threshold_y - 16, area.width(), 14),
             Qt.AlignmentFlag.AlignLeft,
-            "Known",
+            "Long-term",
         )
 
         # the step line
@@ -330,6 +338,10 @@ class WordHistoryView(QWidget):
         self.skill.setObjectName("HistorySkill")
         self.skill.setWordWrap(True)
         layout.addWidget(self.skill)
+        self.milestones = QLabel()
+        self.milestones.setObjectName("HistorySkill")
+        self.milestones.setWordWrap(True)
+        layout.addWidget(self.milestones)
 
         self.why = QLabel()
         self.why.setObjectName("HistoryWhy")
@@ -370,6 +382,9 @@ class WordHistoryView(QWidget):
         skill = skill_sentence(journey)
         self.skill.setText(skill)
         self.skill.setVisible(bool(skill))
+        marks = milestones_sentence(journey)
+        self.milestones.setText(marks)
+        self.milestones.setVisible(bool(marks))
         self.why.setText(why_sentence(journey))
         points = [
             (step.day, step.stability, step.rating)
@@ -473,7 +488,7 @@ def _facts(journey: WordJourney) -> list[tuple[str, str]]:
             remembered_for(card.stability) if card is not None else "—",
         )
         if card is not None and card.stability is not None:
-            third = (third[0], f"{third[1]} ({journey.mastery_days:g} needed)")
+            third = (third[0], f"{third[1]} (long-term from {journey.mastery_days:g})")
     if card is None or card.state is CardState.ARCHIVED:
         fourth = ("NEXT", "Not scheduled")
     elif journey.due_today:
