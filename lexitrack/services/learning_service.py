@@ -32,6 +32,7 @@ from datetime import datetime
 
 from ..core.clock import DayClock
 from ..database.connection import Database
+from ..models.attempt import ROUTE_V1, Effort, LearningAttempt, Phase, Role, Task
 from ..models.settings import LearningSettings, Setting
 from ..models.srs import (
     CardState,
@@ -44,6 +45,7 @@ from ..models.srs import (
 )
 from ..models.user_word_state import ReviewStatus, StatusCause
 from ..repositories import (
+    AttemptRepository,
     CardRepository,
     ListRepository,
     PlanRepository,
@@ -178,6 +180,7 @@ class LearningService:
         self._plans = PlanRepository(database)
         self._cards = CardRepository(database)
         self._sessions = SessionRepository(database)
+        self._attempts = AttemptRepository(database)
         self._words = WordRepository(database)
         self._state = StateRepository(database)
         self._lists = ListRepository(database)
@@ -551,42 +554,48 @@ class LearningService:
             )
 
         now = self._clock.now_utc()
+        today = self._clock.today()
         result = self._scheduler.review(card, rating, now)
-        self._cards.save(result.card)
-        log_id = self._cards.log(
-            ReviewLogEntry(
-                word_id=card.word_id,
-                session_id=session_id,
-                channel=channel,
-                reviewed_at=now,
-                reviewed_on=self._clock.today(),
-                rating=rating,
-                state_before=result.previous_state,
-                state_after=result.card.state,
-                due_before=result.previous_due_at,
-                due_after=result.card.due_at,
-                elapsed_days=result.elapsed_days,
-                scheduled_days=result.scheduled_days,
-                stability_after=result.card.stability,
-                difficulty_after=result.card.difficulty,
-                scheduler_version=result.card.scheduler_version,
-                params_hash=self._scheduler.params_hash,
-            )
-        )
-        if session_id:
-            self._sessions.update(session_id, done_increment=1, clear_current=True)
-
         marked_known = False
-        if result.reached_mastery and word.status is not ReviewStatus.KNOWN:
-            plan = self.active_plan()
-            self._state.set_status(
-                word.id,
-                ReviewStatus.KNOWN,
-                cause=StatusCause.MASTERY,
-                plan_id=plan.id if plan else card.origin_plan_id,
-                at=now,
+        # One answer is one event: the card, its log, the attempt, the
+        # session count and any status change are written together or not at
+        # all, and Undo takes all of them back.
+        with self._db.transaction():
+            self._cards.save(result.card)
+            log_id = self._cards.log(
+                ReviewLogEntry(
+                    word_id=card.word_id,
+                    session_id=session_id,
+                    channel=channel,
+                    reviewed_at=now,
+                    reviewed_on=today,
+                    rating=rating,
+                    state_before=result.previous_state,
+                    state_after=result.card.state,
+                    due_before=result.previous_due_at,
+                    due_after=result.card.due_at,
+                    elapsed_days=result.elapsed_days,
+                    scheduled_days=result.scheduled_days,
+                    stability_after=result.card.stability,
+                    difficulty_after=result.card.difficulty,
+                    scheduler_version=result.card.scheduler_version,
+                    params_hash=self._scheduler.params_hash,
+                )
             )
-            marked_known = True
+            self._attempts.add(_v1_attempt(word.id, rating, now, today, session_id, log_id))
+            if session_id:
+                self._sessions.update(session_id, done_increment=1, clear_current=True)
+
+            if result.reached_mastery and word.status is not ReviewStatus.KNOWN:
+                plan = self.active_plan()
+                self._state.set_status(
+                    word.id,
+                    ReviewStatus.KNOWN,
+                    cause=StatusCause.MASTERY,
+                    plan_id=plan.id if plan else card.origin_plan_id,
+                    at=now,
+                )
+                marked_known = True
         self._last_answer = _LastAnswer(
             word_id=word.id,
             card_before=card,
@@ -632,6 +641,7 @@ class LearningService:
         with self._db.transaction():
             self._cards.save(last.card_before)
             self._cards.mark_undone(last.log_id, now)
+            self._attempts.mark_undone_for_log(last.log_id, now)
             if last.marked_known:
                 self._state.set_status(
                     last.word_id, last.status_before, cause=StatusCause.UNDO, at=now
@@ -748,3 +758,41 @@ class LearningService:
             return []
         found = {word.id: word for word in self._words.get_many(word_ids)}
         return [found[word_id] for word_id in word_ids if word_id in found]
+
+
+#: What each answer of the V1 route says about the effort of the retrieval.
+_V1_EFFORT = {
+    Rating.HARD: Effort.EFFORTFUL,
+    Rating.GOOD: Effort.NORMAL,
+    Rating.EASY: Effort.INSTANT,
+}
+
+
+def _v1_attempt(
+    word_id: int,
+    rating: Rating,
+    at: datetime,
+    on_day: str,
+    session_id: str | None,
+    log_id: int,
+) -> LearningAttempt:
+    """The attempt a V1 review is: the word shown, its meaning recalled.
+
+    V1 asks one thing — word to meaning, level 1 — and the answer is the
+    learner's own judgement of it. That is recorded as it happened, route
+    ``v1``, and counts as recognition; it is not stretched into evidence of
+    anything the review did not ask.
+    """
+    return LearningAttempt(
+        word_id=int(word_id),
+        at=at,
+        on_day=on_day,
+        phase=Phase.REVIEW,
+        role=Role.PRIMARY,
+        task=Task.WORD_TO_MEANING,
+        success=rating is not Rating.AGAIN,
+        session_id=session_id,
+        effort=_V1_EFFORT.get(rating),
+        review_log_id=log_id,
+        route_version=ROUTE_V1,
+    )

@@ -693,3 +693,15 @@ that saves itself on the session row after every step and can be restored.
 The page's existing tests passed without a change, which is the check that
 behaviour is the same; new tests cover the flow alone, its saved state,
 restoring it, and a guard that the page holds no session state again.
+
+## 2026-09-25 — Learning Engine V2, phase 3: skill, from the record
+
+`SkillTracker` derives a word's stage — encountered, recognised, recalled,
+productive — and automaticity evidence from `learning_attempts`, recomputed on
+every read so it cannot drift and Undo shows at once. Every answer now writes
+its attempt; the card, log, attempt, session count and status change of one
+answer are one transaction, where they used to be separate writes. Reset
+clears attempts with the logs they belonged to.
+
+Old answers are not copied into attempts: the tracker reads them from the log
+as recognition, the only thing they measured.

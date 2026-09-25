@@ -95,6 +95,50 @@ class AttemptRepository:
         ).fetchall()
         return {int(row["context_id"]): from_storage(row["last"]) for row in rows}
 
+    def legacy_recognition(
+        self, word_ids: Sequence[int]
+    ) -> dict[int, tuple[int, int, str | None]]:
+        """Answers with no attempt behind them: ``(successes, failures, last day)``.
+
+        Those are the answers from before schema 5. They only ever asked
+        word → meaning, so they are evidence of recognition and nothing more;
+        they are read from ``review_logs`` rather than copied into attempts,
+        so nothing is recorded that did not happen. Undone answers are left
+        out, and Again is a failure.
+        """
+        found: dict[int, tuple[int, int, str | None]] = {}
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            marks = ",".join("?" * len(chunk))
+            for row in self._db.connection.execute(
+                f"""
+                SELECT l.word_id,
+                       SUM(CASE WHEN l.rating > 1 THEN 1 ELSE 0 END) AS good,
+                       SUM(CASE WHEN l.rating = 1 THEN 1 ELSE 0 END) AS bad,
+                       MAX(l.reviewed_on) AS last_on
+                FROM review_logs l
+                WHERE l.word_id IN ({marks})
+                  AND l.undone_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM learning_attempts a WHERE a.review_log_id = l.id
+                  )
+                GROUP BY l.word_id
+                """,
+                chunk,
+            ):
+                found[int(row["word_id"])] = (int(row["good"]), int(row["bad"]), row["last_on"])
+        return found
+
+    def mark_undone_for_log(self, log_id: int, at: datetime) -> int:
+        """Undo reaches every attempt that belonged to the answer taken back."""
+        with self._db.transaction() as conn:
+            return conn.execute(
+                "UPDATE learning_attempts SET undone_at = ? "
+                "WHERE review_log_id = ? AND undone_at IS NULL",
+                (to_storage(at), int(log_id)),
+            ).rowcount
+
     def mark_undone(self, attempt_ids: Sequence[int], at: datetime) -> int:
         ids = [int(attempt_id) for attempt_id in attempt_ids]
         if not ids:

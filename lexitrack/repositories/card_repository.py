@@ -352,13 +352,15 @@ class CardRepository:
         return removed
 
     def clear_all(self) -> int:
-        """Remove every card, session and review. Part of "reset all progress".
+        """Remove every card, session, review and attempt. Part of "reset all progress".
 
         Returns the number of cards removed. The caller wraps this in the same
         transaction as the status reset, so the two can never disagree.
         """
         try:
             with self._db.transaction() as conn:
+                # The skill record goes with the answers it was part of.
+                conn.execute("DELETE FROM learning_attempts")
                 conn.execute("DELETE FROM review_logs")
                 conn.execute("DELETE FROM review_sessions")
                 return conn.execute("DELETE FROM srs_cards").rowcount

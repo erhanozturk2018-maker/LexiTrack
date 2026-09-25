@@ -52,6 +52,41 @@ read [ARCHITECTURE.md](ARCHITECTURE.md) §10–13; for why, [DECISIONS.md](DECIS
   and marked, a word's history, the Progress tab and a calibration check
   (§60, §61, §64).
 
+### Added in V2 (in progress)
+
+Version 2 separates three things that 0.4 kept in one number:
+
+| | Answers | Kept in | Decided by |
+| --- | --- | --- | --- |
+| **Memory** | *When will this word be forgotten?* | `srs_cards`, `review_logs` | FSRS, unchanged |
+| **Skill** | *What can I do with it?* | `learning_attempts` | derived, never stored |
+| **Status** | *Do I count it as known?* | `user_word_state` | the user |
+
+**Skill stages** (`models/skill.py`, `services/skill_tracker.py`), from the
+hardest *delayed* success:
+
+| Stage | Shown by |
+| --- | --- |
+| Not started | nothing yet |
+| Encountered | introduced or answered, no delayed success |
+| Recognised | the meaning retrieved from the word (level 1) |
+| Recalled | the word retrieved from its meaning or a context (levels 2–3), or used once |
+| Productive | the word used (collocation, sentence: levels 4–5) in **two different** contexts or tasks |
+
+- Only retrievals in a **review** count — the first attempt, or the probe
+  inside it. Retrievals straight after teaching (introduction, relearning,
+  repair) are recorded as practice but measure working memory, not learning.
+- **Automatic** is evidence, not a stage: instant successes above level 1 on
+  two different days.
+- Failing never lowers a stage. A stage says what has been shown; forgetting
+  is memory's question, and FSRS answers it.
+- Every answer now records its attempt with its log, in one transaction, and
+  Undo takes both back. A V1 review is recorded as what it is — word to
+  meaning, level 1, route `v1` — with Easy / Good / Hard as instant / normal
+  / effortful and Again as a failure.
+- Answers from before schema 5 have no attempt. They are read from the log,
+  and only as recognition: that is all a V1 review ever asked.
+
 ---
 
 ## The original design
