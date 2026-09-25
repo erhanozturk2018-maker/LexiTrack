@@ -81,6 +81,8 @@ def _to(flow: ReviewFlow, word: str) -> None:
             flow.rate(Rating.GOOD)
         elif step.kind is StepKind.TEACH:
             flow.proceed()
+        elif step.kind is StepKind.WRITE:
+            flow.grade(True)
         else:
             flow.submit(step.prompt.accepted[0], response_ms=6000)
 
@@ -296,3 +298,31 @@ def test_an_open_session_is_restored_with_the_words_not_yet_rated(
     assert again.total == flow.total and again.position == 1
     assert again.current.word.id == flow.current.word.id
     assert first.id not in {s.word.id for s in again._steps}
+
+
+def test_an_easy_recall_is_followed_next_time_by_a_sentence(
+    engine: LearningService, database: Database, clock: FrozenClock
+) -> None:
+    ids = _ids(database)
+    word_id = ids["arid"]
+    ContentRepository(database).add_contexts([
+        WordContext(word_id=word_id, text="The land was {{arid}} after years without rain."),
+    ])
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "arid")
+    step = flow.current
+    assert step.prompt.task is Task.MEANING_TO_WORD
+    assert step.reason.startswith("First question")
+    flow.submit("arid", response_ms=1500)  # at once: Easy
+    flow.finish()
+
+    card = CardRepository(database).get(word_id)
+    clock.advance_to_day_start(engine.clock.days_between(clock.now_utc(), card.due_at) + 1)
+    clock.advance(hours=4)
+    again = ReviewFlow(engine)
+    assert again.start()
+    _to(again, "arid")
+    step = again.current
+    assert step.prompt.task is Task.CONTEXT_CLOZE
+    assert "one step harder" in step.reason

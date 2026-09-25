@@ -475,6 +475,13 @@ class LearningService:
             if card.word_id in words
         ]
 
+    def retrievability(self, word_id: int) -> float | None:
+        """FSRS's chance that the word is recalled now; None without a card."""
+        card = self._cards.get(int(word_id))
+        if card is None:
+            return None
+        return self._scheduler.retrievability(card, self._clock.now_utc())
+
     def study_item(self, word_id: int) -> StudyItem | None:
         """One word's card as a review item: what Undo puts back on screen."""
         card = self._cards.get(int(word_id))

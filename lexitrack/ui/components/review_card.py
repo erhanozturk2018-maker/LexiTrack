@@ -428,6 +428,11 @@ class ReviewCard(QFrame):
         word = step.word
         self.session_flag.setVisible(step.is_struggling and step.phase is Phase.REVIEW)
         self.task_label.setText(step.label.upper())
+        # Why this question: hover the task's name.
+        self.task_label.setToolTip(step.reason or "")
+        self.task_label.setCursor(
+            Qt.CursorShape.WhatsThisCursor if step.reason else Qt.CursorShape.ArrowCursor
+        )
 
         shows_word = kind in (StepKind.RECALL, StepKind.TEACH, StepKind.WRITE)
         self.word_label.setVisible(shows_word)

@@ -40,7 +40,6 @@ from ..models.attempt import (
     Task,
 )
 from ..models.content import WordTeaching
-from ..models.skill import SkillStage
 from ..models.srs import Rating
 from ..repositories import AttemptRepository, ContentRepository
 from ..repositories.word_repository import StoredWord
@@ -58,12 +57,11 @@ from .review_route import (
     collocation_prompt,
     context_prompt,
     effort_for,
-    has_meaning,
     meaning_prompt,
     next_probe,
     resolve,
 )
-from .skill_tracker import SkillTracker
+from .task_selector import available_levels, choose_level, prompt_for
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +93,8 @@ class Step:
     #: For RECALL: whether the meaning starts hidden.
     hide_meaning: bool = True
     is_struggling: bool = False
+    #: Why this question, for the learner (see services/task_selector.py).
+    reason: str | None = None
 
     @property
     def label(self) -> str:
@@ -145,7 +145,6 @@ class _Run:
 
     item: StudyItem
     teaching: WordTeaching
-    stage: SkillStage
     results: list[Result] = field(default_factory=list)
     attempts: list[LearningAttempt] = field(default_factory=list)
     #: Prompts already used this session, so a retrieval uses another one.
@@ -165,7 +164,6 @@ class ReviewFlow:
         self._engine = engine
         self._content = ContentRepository(engine.database)
         self._attempts = AttemptRepository(engine.database)
-        self._skills = SkillTracker(engine.database)
         self._steps: list[Step] = []
         self._runs: dict[int, _Run] = {}
         self._order: list[int] = []
@@ -238,13 +236,11 @@ class ReviewFlow:
         self._last_answer = None
         self._runs = {}
         self._order = [item.word.id for item in queue]
-        stages = self._skills.skills(self._order)
         self._steps = []
         for item in queue:
             run = _Run(
                 item=item,
                 teaching=self._content.teaching(item.word.id),
-                stage=stages[item.word.id].stage,
             )
             self._runs[item.word.id] = run
             self._steps.append(self._primary(run))
@@ -337,7 +333,7 @@ class ReviewFlow:
         if self.active and word.id in self._runs:
             old = self._runs[word.id]
             item = self._engine.study_item(word.id) or old.item
-            run = _Run(item=item, teaching=old.teaching, stage=old.stage)
+            run = _Run(item=item, teaching=old.teaching)
             self._runs[word.id] = run
             self._steps = [s for s in self._steps if s.word.id != word.id]
             self._steps.insert(0, self._primary(run))
@@ -355,23 +351,32 @@ class ReviewFlow:
         return step
 
     def _primary(self, run: _Run) -> Step:
-        """The first question for a word (TaskSelector refines this in phase 5)."""
+        """The first question for a word, chosen from its record (TaskSelector)."""
         word = run.item.word
         struggling = run.item.is_struggling
-        if not has_meaning(word, run.teaching):
+        history = self._attempts.for_word(word.id)
+        choice = choose_level(
+            history,
+            available_levels(word, run.teaching),
+            self._engine.retrievability(word.id),
+        )
+        if choice is None:
             return Step(word, StepKind.RECALL, hide_meaning=run.item.hide_meaning,
-                        is_struggling=struggling)
-        prompt = None
-        if run.stage >= SkillStage.PRODUCTIVE:
-            prompt = collocation_prompt(word, run.teaching)
-        if prompt is None and run.stage >= SkillStage.RECALLED:
-            prompt = context_prompt(word, run.teaching, used=self._attempts.context_uses(word.id))
-        if prompt is None:
-            prompt = meaning_prompt(word, run.teaching)
-        return self._ask(run, prompt, Role.PRIMARY, Phase.REVIEW, struggling)
+                        is_struggling=struggling,
+                        reason="No meaning is stored to ask from, so the word is shown.")
+        prompt = prompt_for(
+            choice.level, word, run.teaching, history, self._attempts.context_uses(word.id)
+        ) or meaning_prompt(word, run.teaching)
+        return self._ask(run, prompt, Role.PRIMARY, Phase.REVIEW, struggling, choice.reason)
 
     def _ask(
-        self, run: _Run, prompt: Prompt, role: Role, phase: Phase, struggling: bool = False
+        self,
+        run: _Run,
+        prompt: Prompt,
+        role: Role,
+        phase: Phase,
+        struggling: bool = False,
+        reason: str | None = None,
     ) -> Step:
         run.sources.add(prompt.source)
         if prompt.context_id is not None:
@@ -380,7 +385,7 @@ class ReviewFlow:
             run.collocations.add(prompt.answer)
         kind = StepKind.WRITE if prompt.task is Task.PRODUCTION else StepKind.TYPE
         return Step(run.item.word, kind, phase=phase, role=role, prompt=prompt,
-                    teaching=run.teaching, is_struggling=struggling)
+                    teaching=run.teaching, is_struggling=struggling, reason=reason)
 
     def _choice(self, run: _Run) -> Step:
         word = run.item.word
@@ -559,13 +564,12 @@ class ReviewFlow:
         flow._answered = int(data.get("answered", 0))
         order = [int(word_id) for word_id in data.get("order", [])]
         pending = {int(word_id) for word_id in data.get("pending", [])}
-        stages = flow._skills.skills(order)
         for word_id in order:
             item = engine.study_item(word_id)
             if item is None:
                 continue
             run = _Run(item=item, teaching=flow._content.teaching(word_id),
-                       stage=stages[word_id].stage, rated=word_id not in pending)
+                       rated=word_id not in pending)
             flow._runs[word_id] = run
             flow._order.append(word_id)
             if not run.rated:

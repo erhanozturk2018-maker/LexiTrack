@@ -94,12 +94,18 @@ that the rating says how well the **memory** held and the attempts say what
 the learner could **do** (`services/review_route.py` for the rules,
 `services/review_flow.py` for the session).
 
-1. **The first question** depends on the word's skill: its meaning → type
-   the word (level 2); once recalled, a context with the word blanked (3);
-   once productive, a collocation with its partner blanked (4). *Phase 5
-   replaces this simple choice with the TaskSelector.* The meaning is the
-   Turkish core meaning when there is one, otherwise the English definition
-   with the word and its forms hidden ("showing ___" for *reluctance*).
+1. **The first question** is chosen from the word's own record by the
+   TaskSelector (`services/task_selector.py`) — no calendar rule. One level
+   harder after a first question answered without effort; the same after a
+   miss or effort; one easier after forgetting; never harder while FSRS gives
+   less than a 75 % chance of recall today; only what the content can ask (a
+   context needs contexts, a collocation collocations, a sentence of one's own
+   an example to compare it with — so a word with no content stays on the
+   short route, the word from its meaning). The context used longest ago
+   comes first and collocations take turns. The reason is shown on the card
+   (hover the question's name). The meaning is the one in the learner's
+   language when there is one, otherwise the English definition with the word
+   and its forms hidden ("showing ___" for *reluctance*).
 2. **Probes** follow a failure, each a fresh question: after level 3 or
    above, the word from its meaning; after that, **the word chosen among
    four**. The answer stays hidden until the word is rated, so no probe can

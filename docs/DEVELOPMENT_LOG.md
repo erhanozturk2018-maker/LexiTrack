@@ -741,3 +741,16 @@ phase 12.
 **Verification:** full suite and lint clean; every face of the card
 rendered in both themes; README screenshot regenerated.
 
+## 2026-09-25 — Learning Engine V2, phase 5: the TaskSelector
+
+The first question of a review now comes from the word's record: harder by
+one level after an effortless success, the same after effort or a miss,
+easier after forgetting, never harder below a 75 % chance of recall, and only
+what the content can ask. Each choice carries a reason, shown on the card.
+
+**Problem and solution:** stepping over levels with nothing to ask from sent
+a word with only a definition from "meaning → word" straight to "write a
+sentence" after one easy answer. A sentence of one's own now needs an example
+sentence to compare it with, so a word without content stays on the short
+route, as the design says.
+
