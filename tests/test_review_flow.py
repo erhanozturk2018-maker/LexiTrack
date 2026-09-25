@@ -420,3 +420,77 @@ def test_no_kind_of_question_comes_three_times_in_a_row(
         assert not (first is second is third), in_session
     assert Task.SITUATION_TO_WORD in tasks
     assert all(step.prompt.task.level <= Level.CONTEXT_TO_WORD for step in ordered)
+
+
+# -- a session restored whole (flow state version 2) --------------------------------
+
+
+def _restored(engine: LearningService, flow: ReviewFlow) -> ReviewFlow:
+    again = ReviewFlow.restore(engine, flow.session_id)
+    assert again is not None
+    return again
+
+
+def test_a_word_interrupted_between_its_probes_goes_on_from_there(
+    engine: LearningService, database: Database
+) -> None:
+    """Not back to its first question: the learner has seen the choices."""
+    flow = ReviewFlow(engine)
+    flow.start()
+    word = flow.current.word
+    flow.submit("no idea", response_ms=5000)
+    probe = flow.current
+    assert probe.kind is StepKind.CHOOSE
+
+    again = _restored(engine, flow)
+    assert again.current.kind is StepKind.CHOOSE and again.current.word.id == word.id
+    assert [o.id for o in again.current.options] == [o.id for o in probe.options]
+    assert again.step_number > flow.step_number, "a card from before is not this one"
+    right = next(i for i, o in enumerate(again.current.options) if o.id == word.id)
+    feedback = again.choose(right)
+    assert feedback.resolution.memory is MemoryResult.RECOGNIZED
+    attempts = AttemptRepository(database).for_word(word.id)
+    assert [(a.role, a.success) for a in attempts] == [
+        (Role.PRIMARY, False), (Role.PROBE, True)
+    ], "the missed first question was kept through the restart"
+
+
+def test_a_right_answer_waiting_for_its_report_survives_a_restart(
+    engine: LearningService,
+) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    first = flow.current
+    assert flow.submit(first.word.word, response_ms=7000).awaiting
+    again = _restored(engine, flow)
+    assert again.awaiting and again.pending_feedback().answer == first.prompt.answer
+    assert again.assess(SelfReport.INSTANT).outcome.rating is Rating.EASY
+
+
+def test_repair_owed_and_the_order_to_come_are_restored(engine: LearningService) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    word = flow.current.word
+    flow.submit("", response_ms=4000)
+    right = next(i for i, o in enumerate(flow.current.options) if o.id == word.id)
+    flow.choose(right)
+    assert flow.current.kind is StepKind.TEACH
+    before = [(s.word.id, s.kind, s.phase, s.role) for s in flow._steps]
+    again = _restored(engine, flow)
+    assert [(s.word.id, s.kind, s.phase, s.role) for s in again._steps] == before
+    assert again._runs[word.id].rated and again._runs[word.id].cycles == 1
+    assert again.answered == flow.answered and again.can_undo() == flow.can_undo()
+
+
+def test_a_state_saved_by_version_one_still_restores(engine: LearningService) -> None:
+    import json
+
+    flow = ReviewFlow(engine)
+    flow.start()
+    old = {key: value for key, value in flow.state().items()
+           if key in ("route", "kind", "order", "pending", "new_pending", "answered",
+                      "learned", "last_answer")}
+    old["version"] = 1
+    engine.save_flow_state(flow.session_id, json.dumps(old))
+    again = _restored(engine, flow)
+    assert again.current.role is Role.PRIMARY and again.total == flow.total

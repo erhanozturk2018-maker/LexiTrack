@@ -1256,3 +1256,18 @@ for; timing measured the keyboard as much as the memory). The last
 rated — is gone: recognising something after seeing it is not recall.
 The *Hide the meaning until I ask* setting therefore has nothing left to do;
 its row is removed from Settings and the stored value is left as it is.
+
+## 81. A session is saved whole, and resumed on both clients
+
+**Decision.** The flow state (version 2) saves every step still to come as it
+will be asked, each word's attempts and results so far, and a step half
+answered. A restored session asks the same question; a word interrupted
+between its probes goes on from the probe, keeping the missed first
+question. The desktop resumes a session left open; the bot already did.
+
+**Reason.** Replaces "a word part-way through its probes starts again at its
+first question". By then the learner may have seen the word among the four
+choices, so asking the first question again records a recall that is really
+recognition, and the missed first question was lost from the skill record.
+Version-1 states still restore the old way, so nothing open is lost by the
+upgrade.

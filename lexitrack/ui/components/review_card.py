@@ -165,6 +165,8 @@ class ReviewCard(QFrame):
     chosen = Signal(int, int)
     #: The learner's report (a SelfReport) on the step on screen.
     assessed = Signal(object)
+    #: A sentence written for a WRITE step, before its report.
+    written_sentence = Signal(str)
     #: Enter after feedback, or on a teaching page.
     continue_requested = Signal()
     undo_requested = Signal()
@@ -541,6 +543,14 @@ class ReviewCard(QFrame):
         if step is None or step.kind is not StepKind.WRITE or self.written:
             return
         if not self.write_input.text().strip():
+            return
+        self.written_sentence.emit(self.write_input.text().strip())
+        self.show_written()
+
+    def show_written(self) -> None:
+        """The written sentence beside what it is checked against, and the reports."""
+        step = self.step
+        if step is None or step.kind is not StepKind.WRITE:
             return
         self.written = True
         self.write_input.setEnabled(False)

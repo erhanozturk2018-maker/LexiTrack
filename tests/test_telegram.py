@@ -548,6 +548,33 @@ class TestInterruptions:
         assert _session_of(outbox.sent[-1][1]) == session
         assert "Picking up where you left off" in outbox.sent[-1][1].text
 
+    def test_a_restart_between_probes_shows_the_same_probe(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        run(due.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        respond(due, outbox, session, right=False)  # the first question missed
+        probe = due._flows[session].current
+        assert probe.kind is StepKind.CHOOSE
+        restarted = BotCore(seeded, outbox, clock=clock)
+        run(restarted.command(OWNER, "/review"))
+        card = outbox.sent[-1][1]
+        options = [label for row in card.buttons for label, _ in row][:4]
+        assert options == [o.word for o in probe.options], "the same four, not a new question"
+
+    def test_a_right_answer_waiting_for_its_report_comes_back_after_a_restart(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        run(due.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        step = due._flows[session].current
+        run(due.text(OWNER, step.prompt.accepted[0]))
+        assert "How did it come?" in outbox.sent[-1][1].text
+        restarted = BotCore(seeded, outbox, clock=clock)
+        run(restarted.command(OWNER, "/review"))
+        assert "How did it come?" in outbox.sent[-1][1].text
+        assert sum(restarted.engine.rating_counts().values()) == 0, "not yet recorded"
+
     def test_the_next_day_starts_afresh(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
@@ -641,20 +668,20 @@ class TestCards:
         class Flow:
             session_id = "s"
             awaiting = False
+            written = "a sentence"
             current = Step(TestCards.word, StepKind.WRITE)
 
             def assess(self, report):
                 reported.append(report)
                 return True
 
-        bot._written["s"] = "a sentence"
         for value in ("forgot", "effortful", "remembered", "instant"):
-            bot._written["s"] = "a sentence"
             bot._act(Flow(), value)
         assert reported == list(SelfReport)
         # Without a sentence written first, a report is not taken.
-        bot._written.pop("s", None)
-        assert bot._act(Flow(), "instant") is None
+        unwritten = Flow()
+        unwritten.written = None
+        assert bot._act(unwritten, "instant") is None
 
 
 # -- notifications -------------------------------------------------------------

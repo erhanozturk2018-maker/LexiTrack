@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..models.attempt import SelfReport
-from ..models.srs import Rating
+from ..models.srs import Channel, Rating
 from ..models.word_entry import CEFR_ORDER
 from ..repositories import ContentRepository
 from ..services.first_learning import choose_depth, estimate
@@ -479,6 +479,7 @@ class StudyPage(QWidget):
         card.submitted.connect(self._on_submitted)
         card.chosen.connect(self._on_chosen)
         card.assessed.connect(self._on_assessed)
+        card.written_sentence.connect(self._on_written)
         card.continue_requested.connect(self._continue)
         card.undo_requested.connect(self.undo_last)
         # The card's parts, by the names the page has always had.
@@ -742,13 +743,28 @@ class StudyPage(QWidget):
     # -- the session -------------------------------------------------------
 
     def start_session(self) -> None:
-        if not self.flow.start():
+        """The session left open (the app closed in the middle) if there is
+        one, as it stood; otherwise the day's."""
+        resumed = self._resume()
+        if not resumed and not self.flow.start():
             self.refresh()
             return
         plan = self._engine.active_plan()
         self.session_title.setText(plan.name if plan else "Today")
         self._stack.setCurrentWidget(self._pages[SESSION])
         self._show_card()
+
+    def _resume(self) -> bool:
+        existing = self._engine.open_session(Channel.DESKTOP)
+        if existing is None or self.flow.active:
+            return False
+        flow = ReviewFlow.restore(self._engine, existing.id)
+        if flow is None or flow.current is None:
+            # Nothing left in it, or saved by an older version: closed.
+            self._engine.finish_session(existing.id)
+            return False
+        self.flow = flow
+        return True
 
     def end_session(self) -> None:
         summary = self.flow.finish()
@@ -785,6 +801,14 @@ class StudyPage(QWidget):
         self.card.show_step(step, intervals=self.flow.intervals())
         self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
+        # A step half answered before the app closed comes back as it stood.
+        pending = self.flow.pending_feedback()
+        if pending is not None:
+            self.card.answer_input.setText(pending.answer or "")
+            self.card.show_feedback(pending)
+        elif self.flow.written is not None:
+            self.card.write_input.setText(self.flow.written)
+            self.card.show_written()
         if step.kind not in (StepKind.TYPE, StepKind.WRITE):
             self.setFocus()
 
@@ -813,6 +837,9 @@ class StudyPage(QWidget):
 
     def _on_submitted(self, text: str, response_ms: int, hinted: bool) -> None:
         self._show_feedback(self.flow.submit(text, response_ms, hinted))
+
+    def _on_written(self, sentence: str) -> None:
+        self.flow.note_written(sentence)
 
     def _on_chosen(self, index: int, response_ms: int) -> None:
         self._show_feedback(self.flow.choose(index, response_ms))

@@ -87,8 +87,6 @@ class BotCore:
         #: Open sessions' flows, by session id. Rebuilt from the saved state
         #: when missing (after a restart), never trusted across one.
         self._flows: dict[str, ReviewFlow] = {}
-        #: A sentence written for a WRITE step, waiting for its grade.
-        self._written: dict[str, str] = {}
 
     @property
     def engine(self) -> LearningService:
@@ -198,7 +196,6 @@ class BotCore:
         if flow is None:
             return None, False
         self._flows[session_id] = flow
-        self._written.pop(session_id, None)
         return flow, True
 
     def _card(
@@ -211,6 +208,17 @@ class BotCore:
     ) -> messages.Message:
         step = flow.current
         assert step is not None and flow.session_id is not None
+        position = min(flow.position + 1, flow.total)
+        # A step half answered — a right answer, a sentence written — comes
+        # back as it stood, even after a restart.
+        pending = flow.pending_feedback()
+        if pending is not None:
+            line, _tone = feedback_text(step, pending)
+            return messages.assess_card(
+                step, flow.session_id, flow.step_number, line, position, flow.total
+            )
+        if flow.written is not None:
+            return messages.write_check(step, flow.written, flow.session_id, flow.step_number)
         return messages.step_card(
             step,
             flow.session_id,
@@ -311,8 +319,7 @@ class BotCore:
             return flow.choose(int(value))
         if kind is StepKind.RECALL and report is not None:
             return flow.assess(report)
-        if kind is StepKind.WRITE and report is not None and flow.session_id in self._written:
-            self._written.pop(flow.session_id, None)
+        if kind is StepKind.WRITE and report is not None and flow.written is not None:
             return flow.assess(report)
         return None
 
@@ -339,8 +346,8 @@ class BotCore:
             elif step.kind is StepKind.TYPE:
                 # No time is passed: see the module docstring.
                 result = flow.submit(answer)
-            elif step.kind is StepKind.WRITE and answer:
-                self._written[flow.session_id] = answer
+            elif step.kind is StepKind.WRITE and answer and flow.written is None:
+                flow.note_written(answer)
                 card = messages.write_check(step, answer, flow.session_id, flow.step_number)
             else:
                 reply = messages.use_the_buttons()
@@ -445,7 +452,6 @@ class BotCore:
             if session is None:
                 return
             flow = self._flows.pop(session_id, None)
-            self._written.pop(session_id, None)
             learned = flow.learned if flow is not None else 0
             if flow is not None and flow.active:
                 flow.finish()

@@ -39,8 +39,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
+from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from ..models.attempt import (
     ROUTE_V2,
@@ -56,7 +58,7 @@ from ..models.attempt import (
 )
 from ..models.content import WordTeaching
 from ..models.srs import Channel, Rating
-from ..repositories import AttemptRepository, ContentRepository
+from ..repositories import AttemptRepository, ContentRepository, WordRepository
 from ..repositories.word_repository import StoredWord
 from .first_learning import choose_depth, deeper, groups, second_question
 from .learning_service import AnswerOutcome, LearningService, StudyItem
@@ -82,7 +84,10 @@ from .task_selector import available_levels, choose_level, lower_levels, prompt_
 
 log = logging.getLogger(__name__)
 
-FLOW_VERSION = 1
+#: Version 2 saves the session whole: every step still to come as it will be
+#: asked, each word's attempts and results so far, and a right answer waiting
+#: for its report. Version 1 (the words not yet rated) is still read.
+FLOW_VERSION = 2
 
 #: Why a new word's question is asked, for the card.
 _PRACTICE = "Right after learning it: practice, not rated. Its first review is tomorrow."
@@ -208,6 +213,8 @@ class _Awaiting:
     near_miss: bool = False
     response_ms: int | None = None
     hinted: bool = False
+    #: For a WRITE step: the sentence written, waiting for its report.
+    written: str | None = None
 
 
 #: What a report on a shown word says about the memory, and the rating for it.
@@ -299,7 +306,12 @@ class ReviewFlow:
     @property
     def awaiting(self) -> bool:
         """True while a correct typed answer waits for the learner's report."""
-        return self._awaiting is not None
+        step = self.current
+        return (
+            self._awaiting is not None
+            and step is not None
+            and step.kind is StepKind.TYPE
+        )
 
     @property
     def last_answer(self) -> tuple[str, Rating] | None:
@@ -434,12 +446,13 @@ class ReviewFlow:
         step = self.current
         if step is None:
             raise RuntimeError("no step on screen")
-        if step.kind is StepKind.TYPE and self._awaiting is not None:
+        if step.kind is StepKind.TYPE and self.awaiting:
             waiting, self._awaiting = self._awaiting, None
             # Forgot after a right answer: the learner's word that it was a guess.
             return self._record(step, report.success, report.effort, waiting.response_ms,
                                 near_miss=waiting.near_miss)
         if step.kind is StepKind.WRITE:
+            self._awaiting = None
             return self._record(step, report.success, report.effort, None)
         if step.kind is StepKind.RECALL:
             return self._recall(step, report)
@@ -737,6 +750,28 @@ class ReviewFlow:
     # -- saving and restoring ----------------------------------------------------
 
     def state(self) -> dict:
+        """Where the session stands, whole, as plain data (version 2).
+
+        Enough to put the same question back on screen after a restart: the
+        steps still to come exactly as they will be asked, each word's
+        attempts and results so far (a word part-way through its probes goes
+        on from there), the prompts it has used, and a right typed answer
+        waiting for its report. The version-1 keys are kept alongside.
+        """
+        data = self._summary_state()
+        data["steps"] = [_step_to_json(step) for step in self._steps]
+        data["runs"] = {str(word_id): _run_to_json(run) for word_id, run in self._runs.items()}
+        data["recent_tasks"] = [task.value for task in self._recent_tasks]
+        data["last_word_id"] = self._last_word_id
+        data["awaiting"] = (
+            {"near_miss": self._awaiting.near_miss, "response_ms": self._awaiting.response_ms,
+             "hinted": self._awaiting.hinted, "written": self._awaiting.written}
+            if self._awaiting is not None
+            else None
+        )
+        return data
+
+    def _summary_state(self) -> dict:
         pending = [
             word_id for word_id in self._order
             if not self._runs[word_id].done and not self._runs[word_id].new
@@ -768,11 +803,12 @@ class ReviewFlow:
 
     @classmethod
     def restore(cls, engine: LearningService, session_id: str) -> ReviewFlow | None:
-        """An open session as saved: the words not yet rated are asked from the start.
+        """An open session as it was saved, so the same question comes back.
 
-        A word part-way through its probes starts again at its first question,
-        and teaching owed to words already rated is not restored: practice is
-        only worth doing while the failure is fresh.
+        A version-2 state is restored whole (see :meth:`state`). A version-1
+        state, from before, restores the words not yet rated from their first
+        question. Anything else — another route, a newer version, damage — is
+        not guessed at.
         """
         session = engine.session(session_id)
         if session is None or not session.is_open or not session.flow_state:
@@ -781,11 +817,16 @@ class ReviewFlow:
             data = json.loads(session.flow_state)
         except ValueError:
             return None
-        if (
-            not isinstance(data, dict)
-            or int(data.get("version", 0)) != FLOW_VERSION
-            or data.get("route") != ROUTE_V2
-        ):
+        if not isinstance(data, dict) or data.get("route") != ROUTE_V2:
+            return None
+        version = int(data.get("version", 0))
+        if version == FLOW_VERSION and "steps" in data:
+            try:
+                return cls._restore_whole(engine, session, data)
+            except (KeyError, TypeError, ValueError):
+                log.warning("Session %s has a flow state that cannot be read", session_id)
+                return None
+        if version != 1:
             return None
         flow = cls(engine, session.channel, session.chat_id)
         flow._session_id = session_id
@@ -819,3 +860,225 @@ class ReviewFlow:
             flow._last_answer = (str(last["word"]), Rating(int(last["rating"])))
         flow._on_step()
         return flow
+
+    @classmethod
+    def _restore_whole(cls, engine: LearningService, session, data: dict) -> ReviewFlow:
+        flow = cls(engine, session.channel, session.chat_id)
+        flow._session_id = session.id
+        flow._last_session_id = session.id
+        flow._answered = int(data.get("answered", 0))
+        flow._learned = int(data.get("learned", 0))
+        flow._step_number = int(data.get("step", 0))
+        flow._order = [int(word_id) for word_id in data.get("order", [])]
+        runs = data.get("runs", {})
+        needed = set(flow._order)
+        for step in data["steps"]:
+            needed.add(int(step["word_id"]))
+            needed.update(int(option) for option in step.get("options", []))
+        words = {word.id: word for word in WordRepository(engine.database).get_many(needed)}
+        for key, raw in runs.items():
+            word_id = int(key)
+            word = words.get(word_id)
+            if word is None:
+                continue
+            item = None if raw.get("new") else engine.study_item(word_id)
+            flow._runs[word_id] = _run_from_json(raw, word, flow._teaching(word_id), item)
+        flow._order = [word_id for word_id in flow._order if word_id in flow._runs]
+        for raw in data["steps"]:
+            run = flow._runs.get(int(raw["word_id"]))
+            if run is None:
+                continue
+            flow._steps.append(_step_from_json(raw, run, words))
+        flow._recent_tasks = [Task(value) for value in data.get("recent_tasks", [])]
+        last_word = data.get("last_word_id")
+        flow._last_word_id = int(last_word) if last_word is not None else None
+        last = data.get("last_answer")
+        if isinstance(last, dict) and last.get("word"):
+            flow._last_answer = (str(last["word"]), Rating(int(last["rating"])))
+        # Past the number saved: a tap on the card shown before is not this one.
+        flow._step_number += 1
+        waiting = data.get("awaiting")
+        if isinstance(waiting, dict) and flow.current is not None:
+            flow._awaiting = _Awaiting(
+                near_miss=bool(waiting.get("near_miss")),
+                response_ms=waiting.get("response_ms"),
+                hinted=bool(waiting.get("hinted")),
+                written=waiting.get("written"),
+            )
+        return flow
+
+    def note_written(self, sentence: str) -> None:
+        """A sentence written for the WRITE step on screen, kept until its report
+        so that a restart shows it again rather than asking for it twice."""
+        step = self.current
+        if step is not None and step.kind is StepKind.WRITE:
+            self._awaiting = _Awaiting(written=sentence)
+            self._save()
+
+    def pending_feedback(self) -> Feedback | None:
+        """For a right typed answer waiting for its report: the feedback to
+        show again, as it was before a restart."""
+        if not self.awaiting:
+            return None
+        step = self.current
+        return Feedback(True, self._awaiting.near_miss, answer=step.prompt.answer, awaiting=True)
+
+    @property
+    def written(self) -> str | None:
+        """The sentence written for the step on screen and waiting for its report."""
+        return self._awaiting.written if self._awaiting is not None else None
+
+
+# -- the state, as plain data ------------------------------------------------------
+
+
+def _prompt_to_json(prompt: Prompt | None) -> dict | None:
+    if prompt is None:
+        return None
+    return {
+        "task": prompt.task.value,
+        "text": prompt.text,
+        "accepted": list(prompt.accepted),
+        "answer": prompt.answer,
+        "source": prompt.source.value,
+        "detail": prompt.detail,
+        "context_id": prompt.context_id,
+        "novel_context": prompt.novel_context,
+    }
+
+
+def _prompt_from_json(raw: dict | None) -> Prompt | None:
+    if not raw:
+        return None
+    return Prompt(
+        task=Task(raw["task"]),
+        text=str(raw["text"]),
+        accepted=tuple(str(value) for value in raw["accepted"]),
+        answer=str(raw["answer"]),
+        source=Source(raw["source"]),
+        detail=raw.get("detail"),
+        context_id=raw.get("context_id"),
+        novel_context=bool(raw.get("novel_context")),
+    )
+
+
+def _step_to_json(step: Step) -> dict:
+    return {
+        "word_id": step.word.id,
+        "kind": step.kind.value,
+        "phase": step.phase.value,
+        "role": step.role.value,
+        "prompt": _prompt_to_json(step.prompt),
+        "options": [option.id for option in step.options],
+        "hide_meaning": step.hide_meaning,
+        "is_struggling": step.is_struggling,
+        "reason": step.reason,
+        "depth": step.depth.value if step.depth else None,
+    }
+
+
+def _step_from_json(raw: dict, run: _Run, words: dict) -> Step:
+    return Step(
+        word=run.word,
+        kind=StepKind(raw["kind"]),
+        phase=Phase(raw["phase"]),
+        role=Role(raw["role"]),
+        prompt=_prompt_from_json(raw.get("prompt")),
+        options=tuple(words[int(i)] for i in raw.get("options", []) if int(i) in words),
+        teaching=run.teaching,
+        hide_meaning=bool(raw.get("hide_meaning", True)),
+        is_struggling=bool(raw.get("is_struggling")),
+        reason=raw.get("reason"),
+        depth=Depth(raw["depth"]) if raw.get("depth") else None,
+    )
+
+
+def _attempt_to_json(attempt: LearningAttempt) -> dict:
+    out: dict[str, Any] = {}
+    for spec in fields(attempt):
+        value = getattr(attempt, spec.name)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        elif isinstance(value, StrEnum):
+            value = value.value
+        out[spec.name] = value
+    return out
+
+
+def _attempt_from_json(raw: dict) -> LearningAttempt:
+    return LearningAttempt(
+        word_id=int(raw["word_id"]),
+        at=datetime.fromisoformat(raw["at"]),
+        on_day=str(raw["on_day"]),
+        phase=Phase(raw["phase"]),
+        role=Role(raw["role"]),
+        task=Task(raw["task"]),
+        success=bool(raw["success"]),
+        session_id=raw.get("session_id"),
+        context_id=raw.get("context_id"),
+        novel_context=bool(raw.get("novel_context")),
+        effort=Effort(raw["effort"]) if raw.get("effort") else None,
+        response_ms=raw.get("response_ms"),
+        review_log_id=raw.get("review_log_id"),
+        route_version=raw.get("route_version") or ROUTE_V2,
+        depth=Depth(raw["depth"]) if raw.get("depth") else None,
+    )
+
+
+def _run_to_json(run: _Run) -> dict:
+    resolution = run.resolution
+    return {
+        "new": run.new,
+        "depth": run.depth.value if run.depth else None,
+        "introduced": run.introduced,
+        "rated": run.rated,
+        "cycles": run.cycles,
+        "log_id": run.log_id,
+        "results": [
+            {"task": r.task.value, "success": r.success,
+             "effort": r.effort.value if r.effort else None, "probe": r.probe}
+            for r in run.results
+        ],
+        "attempts": [_attempt_to_json(attempt) for attempt in run.attempts],
+        "sources": sorted(source.value for source in run.sources),
+        "contexts": sorted(run.contexts),
+        "collocations": sorted(run.collocations),
+        "resolution": (
+            {"memory": resolution.memory.value, "rating": int(resolution.rating),
+             "follow_up": resolution.follow_up.value,
+             "repair_level": int(resolution.repair_level) if resolution.repair_level else None}
+            if resolution is not None
+            else None
+        ),
+    }
+
+
+def _run_from_json(raw: dict, word: StoredWord, teaching: WordTeaching, item) -> _Run:
+    resolution = raw.get("resolution")
+    return _Run(
+        word=word,
+        teaching=teaching,
+        item=item,
+        results=[
+            Result(Task(r["task"]), bool(r["success"]),
+                   Effort(r["effort"]) if r.get("effort") else None, bool(r.get("probe")))
+            for r in raw.get("results", [])
+        ],
+        attempts=[_attempt_from_json(a) for a in raw.get("attempts", [])],
+        sources={Source(value) for value in raw.get("sources", [])},
+        contexts={int(value) for value in raw.get("contexts", [])},
+        collocations=set(raw.get("collocations", [])),
+        resolution=Resolution(
+            memory=MemoryResult(resolution["memory"]),
+            rating=Rating(int(resolution["rating"])),
+            follow_up=FollowUp(resolution["follow_up"]),
+            repair_level=Level(resolution["repair_level"]) if resolution.get("repair_level")
+            else None,
+        ) if resolution else None,
+        log_id=raw.get("log_id"),
+        cycles=int(raw.get("cycles", 0)),
+        rated=bool(raw.get("rated")),
+        new=bool(raw.get("new")),
+        depth=Depth(raw["depth"]) if raw.get("depth") else None,
+        introduced=bool(raw.get("introduced")),
+    )

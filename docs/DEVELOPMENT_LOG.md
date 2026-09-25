@@ -962,3 +962,11 @@ reveal-then-rate path. A right typed answer waits for the report
 word without a meaning take all four. The desktop card and the bot show the
 same buttons, keys 1–4 in the same order. The *Hide the meaning* row left
 Settings; the value stays stored.
+
+## 2026-09-26 — Learning plan gaps, step 3: resume fidelity
+
+Flow state version 2 serialises steps (prompts, options), runs (attempts,
+results, used prompts, cycles, resolution) and the half-answered step;
+`restore` rebuilds them, reading version 1 as before. The bot keeps a
+written sentence in the flow (`note_written`) instead of its own memory; the
+desktop resumes an open session and shows a half-answered step as it stood.

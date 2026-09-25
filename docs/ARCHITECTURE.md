@@ -444,11 +444,18 @@ what an answer means. Each step shown has a number that changes whenever the
 step does, so a client can tell a tap on the current step from an older one.
 
 After every step the flow writes its state to `review_sessions.flow_state` as
-versioned JSON (`version`, `route`, `order`, the words not yet rated, the new
-words not yet learned, `answered`, `learned`, `step`, `last_answer`), and
-clears it when the session ends. `ReviewFlow.restore` rebuilds an open session
-from it: a word part-way through its probes starts again at its first
-question. A state from another version or route is not guessed at.
+versioned JSON, and clears it when the session ends. Version 2 holds the
+session whole: every step still to come exactly as it will be asked (kind,
+phase, role, the prompt with its context, the four options, depth), each
+word's run (attempts and results so far, prompts used, cycles, rated or
+learned), the last question kinds for variety, and a step half answered — a
+right typed answer waiting for its report, a sentence written and not yet
+graded. `ReviewFlow.restore` rebuilds it, so the same question comes back and
+a word part-way through its probes goes on from there with its missed first
+question still counted. A version-1 state (the words not yet rated) is still
+read; another route or a newer version is not guessed at. The desktop's
+*Start session* resumes a session left open when the app closed, and the bot
+does the same on `/review` or the first tap after a restart.
 
 What a step says — the feedback after an answer, an interval in words, a
 teaching page — is in `services/review_wording.py`, as plain text each client

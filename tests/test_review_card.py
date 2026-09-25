@@ -157,3 +157,22 @@ def test_undo_puts_the_word_back_as_a_question(qtbot, page) -> None:
     assert card.step.word.id == first.id and card.step.kind is StepKind.TYPE
     assert not card.waiting
     assert page.flow.answered == 0
+
+
+def test_a_session_left_open_is_resumed_as_it_stood(qtbot, page) -> None:
+    """The app closed with a right answer waiting for its report."""
+    card = page.card
+    first = card.step
+    _type(qtbot, page, first.word.word)
+    assert card.assessing
+    session = page.flow.session_id
+    # A new page, as after starting LexiTrack again.
+    other = StudyPage(page._engine)
+    qtbot.addWidget(other)
+    other.show()
+    other.start_session()
+    assert other.flow.session_id == session
+    assert other.card.step.word.id == first.word.id and other.card.assessing
+    assert other.card.answer_input.text() == first.prompt.answer
+    qtbot.keyClick(other, Qt.Key.Key_3)
+    assert other.flow.answered == 1
