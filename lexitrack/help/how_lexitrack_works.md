@@ -24,7 +24,7 @@ its icons; hover over one for its name.
 | **Lists** | Your lists and how far each one is sorted. |
 | **Sort words** | Sorting a list into Known and Unknown, as flashcards or as a table. |
 | **Unknown** | Every word you marked Unknown, across all lists. |
-| **Export and backup** | Words as PDF, CSV or JSON; every answer as a CSV file; a backup copy now. |
+| **Export and backup** | Words as PDF, CSV or JSON; your answers and attempts as CSV; backups, one file with everything, and restoring them. |
 
 ## Your day
 

@@ -1083,3 +1083,27 @@ than reacting to it.
 **Not silently changed.** A stored limit above 250 or "no limit" is read as
 250 and shown as 250 in Settings; it is only rewritten if the user saves.
 
+## 73. A portable backup of plain JSON, restored whole or not at all
+
+**Decision.** Besides the daily database copies, *Export and backup* writes
+everything that is the learner's to one `.lexitrack` file: a ZIP holding a
+manifest and one JSON file per table, ids kept. Restoring one — or a daily
+copy — replaces the whole database in a single transaction, after a copy of
+the current database is saved as `before-restore-<time>.db`, which rotation
+never removes. A `.lexitrack` file is read only by the schema version that
+wrote it; a daily copy from an older version is upgraded as it is restored.
+
+**Reason.** A backup has to be readable without LexiTrack to be trusted for
+years, so the file is JSON, not SQLite. Keeping ids keeps every reference —
+reviews to cards, translations to contexts — exact, which a re-import by
+word text could not. A restore that half-applied would be worse than none,
+so foreign keys are checked before commit and any failure rolls everything
+back; the safety copy covers the one case the transaction cannot, the user
+restoring the wrong file. Converting a JSON file between schema versions
+would mean keeping every old migration in a second form; refusing it is
+honest, and the daily copies, which are real databases, go through the
+migrations that already exist.
+
+**Left out.** Runtime state and Telegram bookkeeping belong to one machine;
+the bot token was never in the database. PDF and CSV stay reading formats.
+

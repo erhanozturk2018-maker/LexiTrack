@@ -826,3 +826,21 @@ wait, importing closes them, forgetting frees them. The settings rows became
 a shared component (`components/settings_rows.py`) so this window looks like
 Settings.
 
+## 2026-09-25 — Learning Engine V2, phase 9: export and backup
+
+*Export and backup* in the sidebar is a window of its own instead of a menu:
+words chosen by list, status, CEFR level and learning state
+(`services/word_filter.py`) exported through the existing preview; word
+content; every answer and every attempt as CSV (the answer CSV gains the
+memory result and the route); the daily copy; a portable `.lexitrack` file
+(`services/portable.py`); and restoring either, with a safety copy first.
+
+**Problems and solutions**
+
+- Qt returned the filter combos' enum values as plain strings, so "Any"
+  compared unequal to `LearningState.ANY` and filtered everything out. The
+  window turns them back into enums before building the filter.
+- Restoring rows in table order could trip foreign keys midway; checks are
+  deferred to the end of the transaction and a `foreign_key_check` runs
+  before commit, so a file with broken references changes nothing.
+

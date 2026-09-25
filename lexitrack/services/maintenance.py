@@ -16,6 +16,13 @@ backup from yesterday still exists.
 
 **The review log** is exported as CSV from ``review_logs``, which remains the
 source of truth; the file is a copy for a spreadsheet, not a second record.
+So is the skill record, ``learning_attempts``.
+
+**Restoring** a daily backup copies it over the open database with the same
+backup API, after checking it and after saving a copy of what is there now
+(``before-restore-…``, kept out of the daily rotation). A backup from an
+older version is upgraded as it is restored. The portable ``.lexitrack``
+file is in ``portable.py``.
 """
 
 from __future__ import annotations
@@ -24,11 +31,14 @@ import csv
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..core import paths
 from ..core.clock import DayClock
+from ..core.errors import StorageError
 from ..database.connection import Database
+from ..database.migrations import SCHEMA_VERSION, migrate, read_version
 from ..repositories import RuntimeRepository, SessionRepository
 
 log = logging.getLogger(__name__)
@@ -41,6 +51,8 @@ KEEP_TELEGRAM_KEYS_DAYS = 14
 _LAST_BACKUP_ON = "last_backup_on"
 _LAST_PRUNE_ON = "last_prune_on"
 _BACKUP_PREFIX = "vocabulary-"
+#: Copies saved before a restore: never rotated away with the daily ones.
+_SAFETY_PREFIX = "before-restore-"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +138,74 @@ class Maintenance:
         self.prune_backups()
         return target
 
+    def safety_copy(self) -> Path:
+        """Save what is there now before it is replaced. Raises if it cannot.
+
+        Unlike the daily backup, failing here stops the restore: replacing
+        the only copy of someone's data is not something to do on hope.
+        """
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        directory = self.directory
+        target = directory / f"{_SAFETY_PREFIX}{stamp}.db"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            with self._db.lock:
+                destination = sqlite3.connect(target)
+                try:
+                    self._db.connection.backup(destination)
+                finally:
+                    destination.close()
+        except (OSError, sqlite3.Error) as exc:
+            target.unlink(missing_ok=True)
+            raise StorageError(f"A copy of your data could not be saved first: {exc}") from exc
+        log.info("Saved the database to %s before restoring", target)
+        return target
+
+    def safety_copies(self) -> list[Path]:
+        if not self.directory.exists():
+            return []
+        return sorted(self.directory.glob(f"{_SAFETY_PREFIX}*.db"), reverse=True)
+
+    def restore_backup(self, backup: Path | str) -> Path:
+        """Replace the database with a daily backup. Returns the safety copy.
+
+        The backup is checked before anything is touched; a copy of the
+        current database is saved; then the backup is copied in, and upgraded
+        if an older version wrote it.
+        """
+        source = Path(backup)
+        try:
+            check = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+            try:
+                result = check.execute("PRAGMA quick_check").fetchone()[0]
+                version = read_version(check)
+            finally:
+                check.close()
+        except sqlite3.Error as exc:
+            raise StorageError(f"{source.name} could not be read: {exc}") from exc
+        if result != "ok":
+            raise StorageError(f"{source.name} is damaged ({result}); nothing was changed.")
+        if version is not None and version > SCHEMA_VERSION:
+            raise StorageError(f"{source.name} was made by a newer LexiTrack.")
+        safety = self.safety_copy()
+        try:
+            with self._db.lock:
+                origin = sqlite3.connect(source)
+                try:
+                    origin.backup(self._db.connection)
+                finally:
+                    origin.close()
+                restored = read_version(self._db.connection)
+                if restored is not None and restored != SCHEMA_VERSION:
+                    migrate(self._db.connection, self._db.path, restored)
+        except (OSError, sqlite3.Error) as exc:
+            raise StorageError(
+                f"{source.name} could not be restored ({exc}). Your data before the "
+                f"attempt is in {safety.name}."
+            ) from exc
+        log.info("Restored the database from %s", source)
+        return safety
+
     def backups(self) -> list[Path]:
         """Existing daily backups, newest first."""
         if not self.directory.exists():
@@ -168,7 +248,8 @@ class Maintenance:
             SELECT r.reviewed_on, r.reviewed_at, w.display_word AS word, r.rating,
                    r.channel, r.state_before, r.state_after, r.elapsed_days,
                    r.scheduled_days, r.stability_after, r.difficulty_after,
-                   r.due_after, r.session_id, r.undone_at, r.params_hash
+                   r.due_after, r.session_id, r.undone_at, r.params_hash,
+                   r.memory_result, r.route_version
             FROM review_logs r
             JOIN words w ON w.id = r.word_id
             ORDER BY r.reviewed_at, r.id
@@ -184,7 +265,7 @@ class Maintenance:
                     "date", "time_utc", "word", "rating", "answer", "channel",
                     "state_before", "state_after", "elapsed_days", "interval_days",
                     "stability", "difficulty", "next_due_utc", "session",
-                    "undone_utc", "parameters",
+                    "undone_utc", "parameters", "memory_result", "route",
                 ]
             )
             for row in rows:
@@ -197,8 +278,41 @@ class Maintenance:
                         _num(row["stability_after"]), _num(row["difficulty_after"]),
                         row["due_after"] or "", row["session_id"] or "",
                         row["undone_at"] or "", row["params_hash"] or "",
+                        row["memory_result"] or "", row["route_version"] or "",
                     ]
                 )
+        return len(rows)
+
+    def export_attempts(self, path: Path | str) -> int:
+        """Write every learning attempt — the skill record — as a CSV row."""
+        rows = self._db.connection.execute(
+            """
+            SELECT a.on_day, a.at, w.display_word AS word, a.phase, a.role, a.task,
+                   a.level, a.success, a.effort, a.response_ms, a.novel_context,
+                   a.depth, a.route_version, a.review_log_id, a.session_id, a.undone_at
+            FROM learning_attempts a
+            JOIN words w ON w.id = a.word_id
+            ORDER BY a.at, a.id
+            """
+        ).fetchall()
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", newline="", encoding="utf-8-sig") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([
+                "date", "time_utc", "word", "phase", "role", "task", "level", "success",
+                "effort", "response_ms", "new_context", "depth", "route", "answer_id",
+                "session", "undone_utc",
+            ])
+            for row in rows:
+                writer.writerow([
+                    row["on_day"], row["at"], row["word"], row["phase"], row["role"],
+                    row["task"], row["level"], "yes" if row["success"] else "no",
+                    row["effort"] or "", row["response_ms"] or "",
+                    "yes" if row["novel_context"] else "no", row["depth"] or "",
+                    row["route_version"], row["review_log_id"] or "",
+                    row["session_id"] or "", row["undone_at"] or "",
+                ])
         return len(rows)
 
 

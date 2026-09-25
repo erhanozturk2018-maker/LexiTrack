@@ -731,7 +731,19 @@ a day:
   temporary name and renamed, skipped if the check failed; the newest ten are
   kept, and nothing else in the folder is touched;
 - pruning of Telegram idempotency keys older than 14 days;
-- on request, the review history as CSV from `review_logs`.
+- on request, the review history as CSV from `review_logs`, and the
+  learning attempts as CSV;
+- on request, restoring a daily copy: checked first, the current database
+  saved as `before-restore-<time>.db` (never rotated), then copied in and
+  migrated if older.
+
+`services/portable.py` writes and restores the `.lexitrack` file: a ZIP of
+`manifest.json` (format, schema version, row counts) and
+`tables/<table>.json` (columns and rows, ids kept), tables in dependency
+order. A restore needs the same schema version, runs in one transaction with
+foreign keys deferred and checked before commit, and is preceded by the same
+safety copy. `ui/export_center.py` is the window over both, and
+`services/word_filter.py` chooses the words to export.
 
 Logging (`core/logging_config.py`) writes to the console of a development run
 only. A file is written only while *Debug logging* is on: one
@@ -747,7 +759,7 @@ through a formatter that masks anything shaped like a bot token.
 MainWindow
 ├── Sidebar     LexiTrack · Search (Ctrl+K) · Today (count) · Progress
 │               · LIBRARY: Lists · Sort words · Unknown (count)
-│               · foot: Export and backup (menu) · Settings · theme icon · ⋯ menu
+│               · foot: Export and backup (window) · Settings · theme icon · ⋯ menu
 │               Folds to icons below 1000 px; counts become dots, names tooltips
 ├── StudyPage   (on screen: Today)
 │   ├── no plan             the first-run setup: what to learn (all Unknown

@@ -71,6 +71,7 @@ from .components.toast import Toast
 from .components.word_history import WordHistoryDialog
 from .content_dialog import ContentDialog
 from .dialogs import confirm
+from .export_center import ExportCenter
 from .export_dialog import ExportDialog, ExportScope
 from .help_dialog import HelpDialog
 from .home_page import HomePage
@@ -194,6 +195,10 @@ class MainWindow(QMainWindow):
                     self.export, "Ctrl+E", "save pdf csv json print"),
             Command("Export Answer History\u2026", "Every answer you have given, as a CSV file",
                     self.export_history, None, "review log csv spreadsheet"),
+            Command("Export and Backup\u2026",
+                    "Words as files, learning data, backups, and restoring them",
+                    self.open_export_center, None,
+                    "backup restore portable lexitrack csv pdf json save"),
             Command("Word Content\u2026",
                     "Send words out for meanings and examples; import the filled file",
                     self.open_content, None, "enrich llm meanings examples batch translate"),
@@ -250,8 +255,8 @@ class MainWindow(QMainWindow):
         menu.clear()
         groups = (
             ("Import\u2026", "New List\u2026", "Export\u2026"),
-            ("Word Content\u2026", "Export Answer History\u2026", "Back Up Now",
-             "Open Backups Folder"),
+            ("Export and Backup\u2026", "Word Content\u2026", "Export Answer History\u2026",
+             "Back Up Now", "Open Backups Folder"),
             ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
              "How LexiTrack Works", "Keyboard Shortcuts"),
@@ -357,24 +362,7 @@ class MainWindow(QMainWindow):
 
         sidebar.start_foot()
         self.export_button = sidebar.add_action("Export and backup", "export")
-        self.export_menu = QMenu(self.export_button)
-        for title, slot in (
-            ("Export Words\u2026", self.export),
-            ("Word Content\u2026", self.open_content),
-            ("Export Answer History\u2026", self.export_history),
-            (None, None),
-            ("Back Up Now", self.backup_now),
-            ("Open Backups Folder", self._open_backups_folder),
-        ):
-            if title is None:
-                self.export_menu.addSeparator()
-            else:
-                self.export_menu.addAction(title, slot)
-        self.export_button.clicked.connect(
-            lambda: self.export_menu.popup(
-                self.export_button.mapToGlobal(self.export_button.rect().topRight())
-            )
-        )
+        self.export_button.clicked.connect(self.open_export_center)
         settings = sidebar.add_action("Settings", "settings", "Ctrl+,")
         settings.clicked.connect(self.open_settings)
         sidebar.add_spacing(m.space_2)
@@ -660,6 +648,16 @@ class MainWindow(QMainWindow):
             self._toast("There is nothing to export from Today.")
             return
         ExportDialog(self._service, scopes, parent=self).exec()
+
+    def open_export_center(self) -> None:
+        """Every way out of LexiTrack, and back in (ui/export_center.py)."""
+        center = ExportCenter(self._service, self._engine, self.open_content, parent=self)
+        center.exec()
+        if center.changed:
+            # Restored: everything on screen is from before; read it again.
+            self.review.session = None
+            self._ensure_current_list()
+            self._on_data_changed()
 
     def open_content(self, word_ids: list | None = None) -> None:
         """Word content: export a batch that needs it, import a filled one."""

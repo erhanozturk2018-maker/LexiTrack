@@ -123,6 +123,8 @@ local SQLite file. The only network use is the optional Telegram bot.
   data, with the scheduler controls and a one-year workload simulator behind
   Developer mode.
 - **Daily backups** of the database; the newest ten are kept.
+- **A backup you can keep**: everything in one `.lexitrack` file of plain JSON,
+  and a restore that saves a copy of what it replaces first.
 - **Safe upgrades.** Older databases are upgraded automatically, with a backup.
 - **A first-run setup** that asks the three questions a plan needs, and
   **How LexiTrack Works** (`Shift+F1`) for everything else.
@@ -212,6 +214,8 @@ Windows for an application's own data. Setting `LEXITRACK_DATA_DIR` overrides
 the data folder for either kind of install.
 
 Daily backups go to `backups` inside the data folder; the newest ten are kept.
+A restore saves what it replaces there first, as `before-restore-<time>.db`;
+those copies are never rotated away.
 Logs are written only when *Settings → Advanced → Debug logging* is on, one
 file a day, kept for a week.
 
@@ -249,9 +253,9 @@ The sidebar on the left reaches every page:
 - Under **Library**: **Lists** (your lists), **Sort words** (going through a
   list to mark what you already know) and **Unknown** (every word you did not
   know, with their count).
-- At the foot: **Export and backup** (words, your answer history, a backup
-  copy now, the backups folder), **Settings**, the light/dark switch and the
-  **⋯** menu with everything else.
+- At the foot: **Export and backup** (words, word content, your learning
+  data, backups and restoring them), **Settings**, the light/dark switch and
+  the **⋯** menu with everything else.
 
 On a narrow window the sidebar folds to its icons; hover over one for its
 name. On a wide one the pages keep to a readable width instead of stretching.
@@ -495,8 +499,7 @@ Words, or export them.
 
 ### Exporting
 
-**Export** (`Ctrl+E`, or **Export and backup** in the sidebar) offers what fits
-where you are: today's new words or the words you find hard on Today, and the
+**Export** (`Ctrl+E`) offers what fits where you are: today's new words or the words you find hard on Today, and the
 current list, its unknown words, your selection or all unknown words
 elsewhere. The window shows the file before you save it — the real first page
 of the PDF, or the first lines of the CSV or JSON — and follows any change
@@ -509,6 +512,31 @@ defaults and choose where to save.
 <p align="center">
   <img src="docs/screenshots/export-pdf.png" alt="A page of an exported PDF" width="560">
 </p>
+
+### Export and backup
+
+**Export and backup** in the sidebar gathers every way out of LexiTrack, and
+back in:
+
+- **Words**, chosen by list, status, CEFR level and where they are in your
+  plan (not started, in progress, hard for you, in long-term memory), as PDF,
+  CSV or JSON through the preview above.
+- **Word content** — the batches described below.
+- **Learning data** as CSV: every answer, with its rating, what it showed
+  about the memory and the schedule it produced; and every attempt — task,
+  level, success, effort and time — the record your skills are read from.
+- **Backups**: the daily copy (and *Back up now*); **everything in one file**,
+  a `.lexitrack` file with words, lists, statuses, plans, cards, every review
+  and attempt, content in every language and settings, as readable JSON in a
+  ZIP; and restoring either kind.
+
+A PDF or CSV is for reading, not a backup. A restore replaces everything,
+asks first, and saves a copy of what is there now before it starts; it either
+all happens or none of it does. A `.lexitrack` file must come from the same
+version of the data (a newer or older one is refused, and says so); a daily
+copy from an older version is upgraded as it is restored. The bot token is in
+neither; a `.lexitrack` file also leaves out what belongs to one machine, such
+as the Telegram chat link and the content batches still out.
 
 ### Word content
 
