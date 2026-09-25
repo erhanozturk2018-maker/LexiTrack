@@ -258,14 +258,12 @@ name. On a wide one the pages keep to a readable width instead of stretching.
 
 ### Studying
 
-**Today** is the first page. Its **Today** panel lists the day's two steps and
-has one button for the next thing to do:
+**Today** is the first page. One card says what the day holds — "40 words ·
+about 15 min", with how many are reviews, how many new, and how many you
+find hard — and has one button, **Start session**. The session does the
+reviews first, then the new words:
 
-1. **Learn the new words.** They are listed below as chips, grouped by CEFR
-   level; hover over one for its meaning. Study them however suits you — the
-   list can be copied with meanings or exported as a PDF — then press
-   **I studied these 25**. They are asked for the first time tomorrow.
-2. **Review.** Words due today come one at a time, and you **type** them: from
+1. **Review.** Words due today come one at a time, and you **type** them: from
    their meaning (in your own language if you chose one in *Settings →
    Learning* and the word has content in it, otherwise its definition, with
    the word itself hidden), and once you can do that, from a
@@ -287,13 +285,24 @@ has one button for the next thing to do:
    *Undo* under the card, takes back the last word — its answer and every
    question about it — and asks it again. The full rules are in
    [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md#review-route-v2).
+2. **Learn the new words.** Four at a time: each is shown — its meaning, and,
+   when content has been added, how it is used and an example — then the
+   four are asked, typed, from their meaning. Words with more to them are
+   asked a second time a little later, differently. Missed one? It is shown
+   again, in more detail, and asked again. None of this is scored: a word's
+   first real question is its first review, tomorrow. Leave early and the
+   words you finished are learned; the rest wait for next time.
+
+   The new words are also listed below the card, grouped by CEFR level, to
+   look over, copy with their meanings or export as a PDF. Studied them
+   another way? **Mark as studied** skips the practice.
 
 ![A review card](docs/screenshots/study-session.png)
 
-Below the panel: **This week** shows how many reviews fall on each of the next
-seven days, **Words you find hard** lists the words you keep missing (they
-come first in every session), and **The last 30 days** gives four numbers for
-the month. Click a learned or hard word for its history.
+Below the card: **This week** shows how many reviews fall on each of the next
+seven days, and **Words you find hard** lists the words you keep missing
+(they come first in every session). Click a learned or hard word for its
+history.
 
 ### How a word is learned
 

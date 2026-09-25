@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...models.attempt import MemoryResult, Phase, Role
+from ...models.attempt import Depth, MemoryResult, Phase, Role
 from ...models.srs import Rating
 from ...services.review_flow import Feedback, Step, StepKind
 from ...services.review_route import examples, hint_for
@@ -692,7 +692,14 @@ def _when(days: int) -> str:
 
 
 def _teaching_html(step: Step) -> str:
-    """Everything known about the word, as a short page."""
+    """What is known about the word, as a short page, as much as its depth asks.
+
+    SHORT: the meaning. LIGHT: also how it is used and one example. DEEP, and
+    teaching again after a miss: everything stored, two examples.
+    """
+    depth = step.depth
+    usage = depth is not Depth.SHORT
+    everything = depth is None or depth is Depth.DEEP
     word = step.word
     teaching = step.teaching
     content = teaching.content if teaching else None
@@ -711,18 +718,18 @@ def _teaching_html(step: Step) -> str:
     localization = teaching.localization if teaching else None
     line("Meaning", teaching.core_meaning if teaching else None)
     line("Definition", word.definition)
-    if content:
+    if content and usage:
         line("Pattern", content.pattern)
         if content.collocations:
             line("Goes with", " · ".join(content.collocations))
-    if localization:
+    if localization and everything:
         line("Nuance", localization.nuance)
         line("How it is used", localization.usage_note)
         line("To remember", localization.encoding_cue)
         line("Note", localization.notes)
-    if teaching and teaching.contexts:
+    if teaching and teaching.contexts and usage:
         examples = []
-        for context in teaching.contexts[:2]:
+        for context in teaching.contexts[: 2 if everything else 1]:
             translated = teaching.translation(context)
             examples.append(
                 f"“{escape(context.plain)}”"

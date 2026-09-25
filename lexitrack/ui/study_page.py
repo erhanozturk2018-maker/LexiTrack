@@ -50,9 +50,10 @@ from PySide6.QtWidgets import (
 
 from ..models.srs import Rating
 from ..models.word_entry import CEFR_ORDER
+from ..repositories import ContentRepository
+from ..services.first_learning import choose_depth, estimate
 from ..services.learning_service import DailyPlan, LearningService
 from ..services.review_flow import Feedback, ReviewFlow, StepKind
-from .components.cards import StatTile, repolish
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
 from .components.review_card import ReviewCard, interval_text
 from .theme.palette import METRICS
@@ -120,35 +121,6 @@ class _Section(QWidget):
         self.title.setText(text)
 
 
-class _Step(QWidget):
-    """One line of the Today panel: a mark, what to do, how far along."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(METRICS.space_2 + 2)
-        self.glyph = _label("", "StepGlyph")
-        self.glyph.setFixedWidth(18)
-        self.text = _label("", "StepText")
-        self.meta = _label("", "StepMeta")
-        layout.addWidget(self.glyph)
-        layout.addWidget(self.text)
-        layout.addWidget(self.meta)
-        layout.addStretch(1)
-
-    def set_step(self, text: str, meta: str, state: str) -> None:
-        """``state`` is ``done``, ``active`` or ``waiting``."""
-        self.glyph.setText({"done": "✓", "active": "●"}.get(state, "○"))
-        for widget in (self.glyph, self.text):
-            widget.setProperty("state", state)
-            repolish(widget)
-        self.text.setText(text)
-        self.meta.setText(meta)
-        self.meta.setVisible(bool(meta))
-        self.setAccessibleName(f"{text}. {meta}")
-
-
 class StudyPage(QWidget):
     """Today's work, and the review session that clears it."""
 
@@ -175,6 +147,7 @@ class StudyPage(QWidget):
         #: The session itself — queue, position, reveal, Undo — lives in the
         #: flow; this page only shows it and passes on what the user does.
         self.flow = ReviewFlow(engine)
+        self._content = ContentRepository(engine.database)
         self._plan: DailyPlan | None = None
         self._primary: str | None = None
         self._setup_pool = 0
@@ -391,44 +364,33 @@ class StudyPage(QWidget):
         layout.addWidget(self.week_section)
         self.hard_section = self._build_hard()
         layout.addWidget(self.hard_section)
-        self.stats_section = self._build_stats()
-        layout.addWidget(self.stats_section)
         layout.addStretch(1)
         scroll.setWidget(page)
         return scroll
 
     def _build_today(self) -> QWidget:
-        """The decision panel: the day's two steps and one button."""
+        """The decision card: the day's work in one line, and one button."""
         m = METRICS
         panel, layout = _panel()
         layout.setSpacing(m.space_2)
-        layout.addWidget(_label("TODAY", "SectionTitle"))
         row = QHBoxLayout()
         row.setSpacing(m.space_5)
-        steps = QVBoxLayout()
-        steps.setSpacing(m.space_2)
-        self.step_new = _Step()
-        self.step_review = _Step()
-        steps.addWidget(self.step_new)
-        steps.addWidget(self.step_review)
-        steps.addSpacing(m.space_1)
+        text = QVBoxLayout()
+        text.setSpacing(m.space_1)
+        self.headline = _label("", "TodayHeadline")
+        text.addWidget(self.headline)
+        self.detail = _label("", "TodayDetail", wrap=True)
+        text.addWidget(self.detail)
+        text.addSpacing(m.space_1)
         self.day_progress = DayProgress()
-        steps.addWidget(self.day_progress)
-        row.addLayout(steps, 1)
-
-        buttons = QVBoxLayout()
-        buttons.setSpacing(m.space_2)
+        text.addWidget(self.day_progress)
+        row.addLayout(text, 1)
         self.primary_button = QPushButton()
         self.primary_button.setProperty("variant", "primary")
-        self.primary_button.setMinimumWidth(210)
+        self.primary_button.setMinimumWidth(190)
         self.primary_button.setMinimumHeight(40)
         self.primary_button.clicked.connect(self._primary_action)
-        buttons.addWidget(self.primary_button)
-        self.secondary_button = QPushButton()
-        self.secondary_button.setProperty("variant", "ghost")
-        self.secondary_button.clicked.connect(self.start_session)
-        buttons.addWidget(self.secondary_button)
-        row.addLayout(buttons)
+        row.addWidget(self.primary_button, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(row)
 
         self.intake_note = _label("", "WarningText", wrap=True)
@@ -441,9 +403,15 @@ class StudyPage(QWidget):
         section = _Section("NEW WORDS")
         self.copy_button = QPushButton("Copy")
         self.export_button = QPushButton("Export")
+        self.studied_button = QPushButton("Mark as studied")
         for button, tip in (
             (self.copy_button, "Copy the words and their meanings, one per line"),
             (self.export_button, "Save the words as PDF, CSV or JSON (Ctrl+E)"),
+            (
+                self.studied_button,
+                "Studied them another way? Skip the practice: they are reviewed from "
+                "tomorrow.",
+            ),
         ):
             button.setProperty("variant", "ghost")
             button.setProperty("size", "small")
@@ -451,6 +419,7 @@ class StudyPage(QWidget):
             section.header.addWidget(button)
         self.copy_button.clicked.connect(self._copy_words)
         self.export_button.clicked.connect(self.export_requested.emit)
+        self.studied_button.clicked.connect(self._introduce)
         self._level_rows = QVBoxLayout()
         self._level_rows.setSpacing(METRICS.space_2)
         section.body.addLayout(self._level_rows)
@@ -479,24 +448,6 @@ class StudyPage(QWidget):
         )
         return section
 
-    def _build_stats(self) -> _Section:
-        section = _Section("THE LAST 30 DAYS")
-        row = QHBoxLayout()
-        row.setSpacing(METRICS.space_3)
-        self.stat_reviews = StatTile("reviews")
-        self.stat_again = StatTile("answered Again")
-        self.stat_introduced = StatTile("new words learned")
-        self.stat_long_term = StatTile("in long-term memory", tone="known")
-        for tile in (
-            self.stat_reviews,
-            self.stat_again,
-            self.stat_introduced,
-            self.stat_long_term,
-        ):
-            row.addWidget(tile, 1)
-        section.body.addLayout(row)
-        return section
-
     def _build_session(self) -> QWidget:
         m = METRICS
         page = QWidget()
@@ -508,7 +459,7 @@ class StudyPage(QWidget):
         bar.setSpacing(m.space_3)
         context = QVBoxLayout()
         context.setSpacing(0)
-        context.addWidget(_label("REVIEWING", "ContextLabel"))
+        context.addWidget(_label("TODAY'S SESSION", "ContextLabel"))
         self.session_title = _label("", "ContextName")
         context.addWidget(self.session_title)
         bar.addLayout(context)
@@ -580,39 +531,40 @@ class StudyPage(QWidget):
         self._show_words(plan)
         self._show_week(plan)
         self._show_hard_words()
-        self._show_stats()
 
     def _show_today(self, plan: DailyPlan) -> None:
         new_count = len(plan.new_words)
         learned = len(plan.introduced_today)
         due = plan.due_count
         done = plan.reviews_done_today
+        language = self._engine.settings.learner_language
+        depths = [
+            choose_depth(self._content.teaching(word.id, language)).depth
+            for word in plan.new_words
+        ]
+        day = estimate(due, depths)
+        hard = sum(1 for item in self._engine.review_queue() if item.is_struggling)
 
-        # Step 1: the new words.
-        if new_count:
-            self.step_new.set_step(
-                f"Learn {new_count} new {'word' if new_count == 1 else 'words'}",
-                f"{learned} already confirmed" if learned else "study them, then confirm",
-                "active",
-            )
-        elif learned:
-            self.step_new.set_step(f"Learned {learned} new words", "done", "done")
+        if day.words:
+            noun = "word" if day.words == 1 else "words"
+            self.headline.setText(f"{day.words} {noun} · about {day.minutes} min")
+            parts = []
+            if due:
+                parts.append(f"{due} {'review' if due == 1 else 'reviews'}")
+            if new_count:
+                parts.append(f"{new_count} new")
+            detail = ", ".join(parts)
+            if hard:
+                detail += f" · {hard} hard for you"
+            if done or learned:
+                detail += f" · done so far: {done} reviewed, {learned} learned"
+            self.detail.setText(detail)
         else:
-            self.step_new.set_step("No new words today", _no_words_reason(plan), "waiting")
-
-        # Step 2: the reviews.
-        if due:
-            meta = f"{done} answered" if done else "from earlier days"
-            self.step_review.set_step(
-                f"Review {due} {'word' if due == 1 else 'words'}",
-                meta,
-                "waiting" if new_count else "active",
-            )
-        elif done:
-            self.step_review.set_step(f"Reviewed {done} words", "done", "done")
-        else:
-            self.step_review.set_step(
-                "Nothing to review today", "new words come back tomorrow", "waiting"
+            self.headline.setText("All done for today")
+            self.detail.setText(
+                f"{done} reviewed and {learned} new learned today."
+                if done or learned
+                else "Nothing is waiting: " + (_no_words_reason(plan) or "see you tomorrow.")
             )
 
         # The day's progress: learning and reviewing as shares of all of it.
@@ -622,49 +574,31 @@ class StudyPage(QWidget):
         )
         self.day_progress.setVisible(bool(total))
 
-        # One primary button, labelled with the next thing to do.
-        self.secondary_button.setVisible(False)
-        if new_count:
-            self._primary = "introduce"
-            self.primary_button.setText(
-                f"I studied these {new_count}" if new_count > 1 else "I studied this word"
-            )
+        if day.words:
+            self._primary = "session"
+            started = done or learned
+            self.primary_button.setText("Continue session →" if started else "Start session →")
             self.primary_button.setToolTip(
-                "Confirm you have learned the words below. They are reviewed from tomorrow."
+                "Reviews first, then the new words: each taught, then asked."
             )
-            self.primary_button.setEnabled(True)
-            if due:
-                self.secondary_button.setText(f"Review {due} first")
-                self.secondary_button.setVisible(True)
-        elif due:
-            self._primary = "review"
-            self.primary_button.setText(
-                "Continue session →" if done else "Start session →"
-            )
-            self.primary_button.setToolTip(f"{due} words are waiting (1–4 to answer)")
             self.primary_button.setEnabled(True)
         else:
             self._primary = None
-            self.primary_button.setText("All done for today ✓")
+            self.primary_button.setText("All done ✓")
             self.primary_button.setToolTip("Nothing is waiting. See you tomorrow.")
             self.primary_button.setEnabled(False)
 
-        # A finished day is already stated by the steps; only the workload
-        # valve gets its own line, because it is a reason, not a result.
+        # Only the workload valve gets its own line: it is a reason, not a result.
         show_note = bool(plan.intake_note) and (plan.intake_paused or not learned)
         self.intake_note.setText(plan.intake_note or "")
         self.intake_note.setVisible(show_note)
-        # Only the remaining pool is news; an empty pool is already the reason
-        # on the first step, and saying it twice reads as a warning.
         self.pool_label.setText(
             f"{plan.pool_remaining:,} words in the plan are still to come."
         )
         self.pool_label.setVisible(bool(plan.pool_remaining))
 
     def _primary_action(self) -> None:
-        if self._primary == "introduce":
-            self._introduce()
-        elif self._primary == "review":
+        if self._primary == "session":
             self.start_session()
 
     def _show_words(self, plan: DailyPlan) -> None:
@@ -683,6 +617,7 @@ class StudyPage(QWidget):
         self.words_section.set_title(f"{title} · {len(words)}")
         self.copy_button.setVisible(True)
         self.export_button.setVisible(bool(pending))
+        self.studied_button.setVisible(bool(pending))
 
         while self._level_rows.count():
             item = self._level_rows.takeAt(0)
@@ -769,23 +704,6 @@ class StudyPage(QWidget):
             for item in items
         )
 
-    def _show_stats(self) -> None:
-        """Four numbers for the month. Hidden until there is a month to show."""
-        since = self._engine.clock.shift_days(-29)
-        ratings = self._engine.rating_counts(since)
-        answered = sum(ratings.values())
-        introduced = sum(
-            count for day, count in self._engine.introduced_per_day(30).items() if day >= since
-        )
-        self.stats_section.setVisible(bool(answered or introduced))
-        again = ratings.get(int(Rating.AGAIN), 0)
-        self.stat_reviews.set_value(answered)
-        self.stat_again.value_label.setText(
-            f"{round(100 * again / answered)}%" if answered else "–"
-        )
-        self.stat_introduced.set_value(introduced)
-        self.stat_long_term.set_value(self._engine.state_counts().get("review", 0))
-
     def today_words(self) -> list:
         """The words on screen, for the window's export."""
         plan = self._plan or self._engine.daily_plan()
@@ -829,9 +747,18 @@ class StudyPage(QWidget):
 
     def end_session(self) -> None:
         summary = self.flow.finish()
-        if summary is not None and summary.answered:
-            word = "word" if summary.answered == 1 else "words"
-            text = f"{summary.answered} {word} reviewed."
+        if summary is not None and (summary.answered or summary.learned):
+            parts = []
+            if summary.answered:
+                parts.append(
+                    f"{summary.answered} {'word' if summary.answered == 1 else 'words'} reviewed"
+                )
+            if summary.learned:
+                parts.append(
+                    f"{summary.learned} new {'word' if summary.learned == 1 else 'words'} "
+                    "learned, first review tomorrow"
+                )
+            text = "; ".join(parts) + "."
             if summary.can_undo:
                 # The last card of a session is where a slip is most
                 # likely and least visible: the page has moved on.

@@ -18,6 +18,7 @@ from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
+from lexitrack.models.settings import Setting  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.models.user_word_state import ReviewStatus  # noqa: E402
 from lexitrack.services.learning_service import LearningService  # noqa: E402
@@ -124,31 +125,37 @@ class TestDayView:
         window.show_page(STUDY)
         assert window.study._stack.currentWidget() is window.study._pages[EMPTY]
 
-    def test_the_day_lists_the_words_it_asks_you_to_confirm(self, window, engine, loaded) -> None:
+    def test_the_day_is_one_line_one_estimate_and_one_button(
+        self, window, engine, loaded
+    ) -> None:
         with_plan(engine, loaded)
         window.show_page(STUDY)
         study = window.study
         assert study._stack.currentWidget() is study._pages[DAY]
-        assert study.step_new.text.text() == "Learn 25 new words"
+        # 25 new words with nothing stored beyond their spelling: the short
+        # route, 45 seconds each.
+        assert study.headline.text() == "25 words · about 19 min"
+        assert study.detail.text() == "25 new"
         assert study.primary_button.isEnabled()
-        assert study.primary_button.text() == "I studied these 25"
+        assert study.primary_button.text() == "Start session →"
         chips = study.word_chips()
         assert len(chips) == 25
         assert engine.daily_plan().new_words[0].word in chips
         assert study.words_section.title.text() == "NEW WORDS \u00b7 25"
 
-    def test_confirming_turns_the_button_off_and_says_when_they_come_back(
+    def test_marking_them_studied_skips_the_practice_and_says_when_they_come_back(
         self, window, engine, loaded
     ) -> None:
         with_plan(engine, loaded)
         window.show_page(STUDY)
         messages: list[str] = []
         window.study.notify.connect(messages.append)
-        window.study.primary_button.click()
+        window.study.studied_button.click()
         # Nothing is due on day one, so the day is finished and says so.
         assert not window.study.primary_button.isEnabled()
         assert "All done" in window.study.primary_button.text()
-        assert window.study.step_new.text.text() == "Learned 25 new words"
+        assert window.study.headline.text() == "All done for today"
+        assert window.study.detail.text() == "0 reviewed and 25 new learned today."
         # The words stay on screen, greyed, as what was learned today.
         assert window.study.words_section.title.text() == "LEARNED TODAY \u00b7 25"
         assert messages and "2026-09-18" in messages[0]
@@ -185,19 +192,18 @@ class TestDayView:
 class TestSession:
     @pytest.fixture
     def due(self, window, engine, loaded, clock):
+        """Day two with 25 reviews and, to test reviewing alone, no new words."""
         with_plan(engine, loaded)
         engine.introduce()
+        engine.save_settings({Setting.NEW_WORDS_PER_DAY: 0})
         clock.advance_to_day_start(1)
         window.show_page(STUDY)
         return window.study
 
     def test_start_opens_the_first_card_with_the_meaning_hidden(self, due) -> None:
-        # New words and reviews on the same day: the primary button follows
-        # the day's order, and reviewing first is the secondary choice.
-        assert due.primary_button.text() == "I studied these 25"
-        assert not due.secondary_button.isHidden()
-        assert due.secondary_button.text() == "Review 25 first"
-        due.secondary_button.click()
+        # These words have no meaning stored: they are reviewed the V1 way.
+        assert due.primary_button.text() == "Start session →"
+        due.primary_button.click()
         assert due._stack.currentWidget() is due._pages[SESSION]
         assert due.session_progress.text() == "1 / 25"
         assert due.definition_label.isHidden()
@@ -224,9 +230,8 @@ class TestSession:
         due.keyPressEvent(_key(Qt.Key.Key_Escape))
         assert not due.in_session
         assert due._stack.currentWidget() is due._pages[DAY]
-        assert due.step_review.text.text() == "Review 24 words"
-        assert due.step_review.meta.text() == "1 answered"
-        assert due.secondary_button.text() == "Review 24 first"
+        assert due.detail.text() == "24 reviews · done so far: 1 reviewed, 0 learned"
+        assert due.primary_button.text() == "Continue session →"
 
     def test_number_keys_do_nothing_outside_a_session(self, due, engine) -> None:
         due.keyPressEvent(_key(Qt.Key.Key_1))
@@ -237,9 +242,34 @@ class TestSession:
         for _ in range(25):
             due.keyPressEvent(_key(Qt.Key.Key_3))
         assert not due.in_session
-        assert due.step_review.text.text() == "Reviewed 25 words"
-        assert due.secondary_button.isHidden(), "nothing left to review"
-        assert due.primary_button.text() == "I studied these 25"
+        assert due.headline.text() == "All done for today"
+        assert due.primary_button.text() == "All done ✓"
+
+    def test_one_session_reviews_first_then_teaches_the_new_words(
+        self, window, engine, loaded, clock
+    ) -> None:
+        with_plan(engine, loaded)
+        engine.save_settings({Setting.NEW_WORDS_PER_DAY: 3})
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        window.show_page(STUDY)
+        study = window.study
+        assert study.detail.text() == "3 reviews, 3 new"
+        messages: list[str] = []
+        study.notify_undo.connect(lambda text, _undo: messages.append(text))
+        study.start_session()
+        for _ in range(3):
+            assert study.card.step.phase.value == "review"
+            study.keyPressEvent(_key(Qt.Key.Key_3))
+        for _ in range(3):
+            # Nothing stored beyond the spelling: shown, then learned.
+            assert study.card.step.label == "New word"
+            study.keyPressEvent(_key(Qt.Key.Key_Return))
+        assert not study.in_session
+        assert messages == [
+            "3 words reviewed; 3 new words learned, first review tomorrow."
+        ]
+        assert len(engine.daily_plan().introduced_today) == 3
 
     def test_identical_intervals_are_said_once(self, due) -> None:
         due.start_session()
@@ -273,6 +303,7 @@ class TestUndo:
     def due(self, window, engine, loaded, clock):
         with_plan(engine, loaded)
         engine.introduce()
+        engine.save_settings({Setting.NEW_WORDS_PER_DAY: 0})
         clock.advance_to_day_start(1)
         window.show_page(STUDY)
         return window.study
@@ -799,23 +830,6 @@ class TestStudyExtras:
         assert not window.study.hard_section.isHidden()
         chips = window.study.hard_chips.texts()
         assert chips == [f"{word.word}  \u00d72"]
-
-    def test_the_month_panel_counts_reviews_and_the_again_rate(
-        self, window, engine, loaded, clock
-    ) -> None:
-        with_plan(engine, loaded)
-        window.show_page(STUDY)
-        assert window.study.stats_section.isHidden()
-        engine.introduce()
-        clock.advance_to_day_start(1)
-        queue = engine.review_queue()
-        for index, item in enumerate(queue):
-            engine.answer(item.word.id, Rating.AGAIN if index < 5 else Rating.GOOD)
-        window.study.refresh()
-        assert not window.study.stats_section.isHidden()
-        assert window.study.stat_reviews.value_label.text() == "25"
-        assert window.study.stat_again.value_label.text() == "20%"
-        assert window.study.stat_introduced.value_label.text() == "25"
 
     def test_export_from_study_offers_todays_words(
         self, window, engine, loaded, monkeypatch

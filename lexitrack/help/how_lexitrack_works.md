@@ -28,10 +28,9 @@ its icons; hover over one for its name.
 
 ## Your day
 
-1. **Learn the new words.** Study them however suits you, then press
-   **I studied these**. That is not an answer: the first real question comes
-   tomorrow.
-2. **Review.** Words come one at a time, and you **type** them from their
+**Start session** on Today does the day's reviews first, then its new words.
+
+1. **Review.** Words come one at a time, and you **type** them from their
    meaning, or later from a sentence with a gap. **Enter** checks; **Ctrl+H**
    shows the first letter; **Enter** with nothing typed means you don't know.
    Missed it? The answer stays hidden and an easier question follows, down to
@@ -39,6 +38,10 @@ its icons; hover over one for its name.
    and asked once more later, which never changes its schedule. A word with no
    meaning stored is reviewed as before: **Space**, then **1**–**4**.
    **Ctrl+Z** takes back the last word, with every question about it.
+2. **Learn the new words.** Four at a time: shown, then asked from their
+   meaning; some are asked again later. None of it is scored — a word's first
+   real question is tomorrow. **Mark as studied** skips the practice if you
+   studied them another way.
 
 On your phone the Telegram bot does the same, if you set it up in
 *Settings → Telegram*.

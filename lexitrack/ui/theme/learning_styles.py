@@ -22,13 +22,6 @@ def learning_rules(p: Palette) -> str:
     color: {p.text};
     background: transparent;
 }}
-#StepGlyph {{ font-size: 15px; background: transparent; color: {p.text_faint}; }}
-#StepGlyph[state="done"] {{ color: {p.known}; }}
-#StepGlyph[state="active"] {{ color: {p.accent}; }}
-#StepText {{ font-size: 15px; color: {p.text}; background: transparent; }}
-#StepText[state="done"] {{ color: {p.text_muted}; }}
-#StepText[state="active"] {{ font-weight: 600; }}
-#StepMeta {{ font-size: 12px; color: {p.text_faint}; background: transparent; }}
 
 #Chip {{
     background-color: {p.surface};
@@ -307,4 +300,15 @@ QPushButton#AnswerButton[result="wrong"] #AnswerTitle {{ color: {p.unknown_text}
     border-radius: {m.radius_md}px;
     padding: 12px 14px;
 }}
+
+/* ------------------------------------------------------- the day, one card */
+
+#TodayHeadline {{
+    font-family: {DISPLAY_FONT_STACK};
+    font-size: 22px;
+    font-weight: 600;
+    color: {p.text};
+    background: transparent;
+}}
+#TodayDetail {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
 """

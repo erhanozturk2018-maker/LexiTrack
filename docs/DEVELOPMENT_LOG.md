@@ -780,3 +780,20 @@ user, not a wording fix.
 of the real database (no row lost, no setting changed, one setting added,
 integrity and foreign keys clean, copy deleted).
 
+## 2026-09-25 — Learning Engine V2, phase 6: first learning, and the Today card
+
+"I studied these 25" is replaced by learning the words in the session:
+reviews first, then new words four at a time — taught at a depth their
+content decides (SHORT, LIGHT, DEEP), asked, maybe asked again later, taught
+again deeper after a miss, twice at most. Nothing of it is rated; each word
+gets its card when its steps are done. "Mark as studied" keeps the old way
+for words studied elsewhere.
+
+The Today page is the approved proposal: one card — "40 words · about
+15 min", the split, one button — the new words to look over, the week, and
+the hard words. The 30-day numbers left it; Progress has them.
+
+**Problem and solution:** a review run needed a card, and a new word has
+none until it is learned; runs now carry their word, and a card only when
+there is one.
+

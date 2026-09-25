@@ -129,6 +129,33 @@ the learner could **do** (`services/review_route.py` for the rules,
 5. **One rating per word per day**, from any client: a second answer the same
    day is recognised as a duplicate and changes nothing.
 
+### First learning
+
+New words are learned in the same session as the day's reviews, after them
+(`services/first_learning.py`): reviewing first measures each memory before
+new material can interfere with it. Each new word gets a **depth**, decided
+from its content:
+
+| Depth | When | Taught | Asked |
+| --- | --- | --- | --- |
+| SHORT | nothing stored beyond the definition (or a bare meaning) | the meaning | the word from its meaning |
+| LIGHT | content, and nothing that says the word is hard | + pattern, collocations, one example | + later, from a context if there is one |
+| DEEP | a `deep` hint, or an abstract mnemonic (contrast, relation) | everything, two examples | + later, a second question in another form |
+
+Words go in groups of four: four taught, then four asked, and the second
+questions of a group after the next group is taught, so every question comes
+after a gap. A miss means the word is taught again, one depth deeper when
+there is more to show, and asked again three cards later — twice at most.
+
+None of it is rated. The answers are recorded as attempts of the
+introduction phase, with the depth; the word gets its card — first review
+tomorrow — the moment its last step is done, so leaving early keeps the
+words finished and offers the rest again. **Mark as studied** introduces the
+day's words without the practice, for a learner who studied them another way.
+
+The Today card estimates the session: 20 seconds a review, and 45, 75 or
+120 seconds for a SHORT, LIGHT or DEEP new word.
+
 **Typed answers.** Compared without case, spacing or punctuation; a
 multi-word entry is accepted without its frame ("expelled" for *be
 expelled*). One slip is accepted in four to ten letters, two from eleven,
