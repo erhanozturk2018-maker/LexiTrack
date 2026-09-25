@@ -51,12 +51,7 @@ QToolTip {{
     padding: 6px 8px;
 }}
 
-/* ------------------------------------------------------------ app bar */
-
-#AppBar {{
-    background-color: {p.surface};
-    border-bottom: 1px solid {p.border};
-}}
+/* ---------------------------------------------------------- app title */
 
 #AppTitle {{
     font-family: {DISPLAY_FONT_STACK};
@@ -64,11 +59,6 @@ QToolTip {{
     font-weight: 600;
     color: {p.text};
     letter-spacing: 0.2px;
-}}
-
-#AppBarStatus {{
-    font-size: 13px;
-    color: {p.text_muted};
 }}
 
 /* ------------------------------------------------------------ surfaces */

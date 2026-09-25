@@ -3,24 +3,28 @@
 LexiTrack does two different things, and most confusion comes from mixing
 them up:
 
-1. **Sorting.** On the **Review** tab you go through a list and say what you
+1. **Sorting.** On **Sort words** you go through a list and say what you
    already know: *I Know* or *I Don't Know*. Nothing is scheduled there. It
    only decides which words are **Unknown**.
 2. **Learning.** Your **study plan** takes the Unknown words from the lists
-   you choose and teaches them on the **Study** tab: a few new words a day,
+   you choose and teaches them on **Today**: a few new words a day,
    then each one again on the day you are most likely to forget it.
 
 Words you already know are never offered and never scheduled.
 
-## The tabs
+## The pages
 
-| Tab | What it is for |
+The sidebar on the left reaches every page. On a narrow window it folds to
+its icons; hover over one for its name.
+
+| Page | What it is for |
 | --- | --- |
-| **Study** | Today: the new words to learn, then the words due for review. |
+| **Today** | The new words to learn, then the words due for review. The number beside it is what is waiting. |
 | **Progress** | Everything learned here, every answer you have given, and whether the schedule fits you. |
-| **Home** | Your lists and how far each one is sorted. |
-| **Review** | Sorting a list into Known and Unknown, as flashcards or as a table. |
-| **Unknown Words** | Every word you marked Unknown, across all lists. |
+| **Lists** | Your lists and how far each one is sorted. |
+| **Sort words** | Sorting a list into Known and Unknown, as flashcards or as a table. |
+| **Unknown** | Every word you marked Unknown, across all lists. |
+| **Export and backup** | Words as PDF, CSV or JSON; every answer as a CSV file; a backup copy now. |
 
 ## Your day
 
@@ -89,16 +93,16 @@ costs the most.
 
 Nothing is hidden from you.
 
-- **Every answer** from Study and Telegram, with its time, the answer, how
+- **Every answer** from Today and Telegram, with its time, the answer, how
   long you were expected to remember the word afterwards and where you
   answered. See it in *Progress → All answers*, or save it as a spreadsheet
   from *Settings → Data → Export history*.
 - **Every change of status** - Known, Unknown, reset - with its cause: the
-  schedule, a button, the Review tab or Undo.
+  schedule, a button, Sort words or Undo.
 - **Answers taken back** stay in the record, marked, and are left out of
   every count.
 
-Select a word in any table, or click it on the Study page, to see its whole
+Select a word in any table, or click it on the Today page, to see its whole
 history: when it was introduced, every answer, and why it is due when it is.
 
 Everything is stored in one file on this computer. LexiTrack sends nothing

@@ -80,7 +80,13 @@ class _Stat(QWidget):
         layout.addWidget(caption)
 
     def set_value(self, value: int) -> None:
-        self._value.setText(f"{value:,}")
+        text = f"{value:,}"
+        self._value.setText(text)
+        # The bar is laid out around the first value, "0". A wider number can
+        # be painted before the layout catches up, and its last digit is cut
+        # off; reserving its width now makes the layout grow at once.
+        self._value.ensurePolished()
+        self._value.setMinimumWidth(self._value.fontMetrics().horizontalAdvance(text) + 2)
 
 
 def _divider() -> QFrame:

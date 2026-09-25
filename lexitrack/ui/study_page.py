@@ -53,6 +53,7 @@ from .components.cards import StatTile, repolish
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
 from .theme import current_palette
 from .theme.palette import METRICS
+from .widgets import PageColumn
 
 #: Which button style each answer gets. Amber for "not yet", green for
 #: "solid", and Easy the solid green: the flashcards' own colour language.
@@ -298,6 +299,7 @@ class StudyPage(QWidget):
         page.setObjectName("PanelBody")
         outer = QVBoxLayout(page)
         outer.setContentsMargins(m.space_7, m.space_6, m.space_7, m.space_6)
+        PageColumn(page, outer)
         outer.addStretch(1)
         column = QVBoxLayout()
         column.setSpacing(m.space_4)
@@ -341,7 +343,7 @@ class StudyPage(QWidget):
             radio.setMinimumHeight(32)
         self.setup_none = _label("", "SetupWarning", wrap=True)
         body.addWidget(self.setup_none)
-        self.setup_review = QPushButton("Go to Review to sort a list \u2192")
+        self.setup_review = QPushButton("Go to Sort words \u2192")
         self.setup_review.setObjectName("LinkButton")
         self.setup_review.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_review.clicked.connect(self.show_review.emit)
@@ -402,7 +404,7 @@ class StudyPage(QWidget):
         )
         nothing = outlook.to_introduce == 0
         self.setup_none.setText(
-            "You have no Unknown words yet. Sort a list on the Review tab first: the "
+            "You have no Unknown words yet. Sort a list on Sort words first: the "
             "words you mark I Don't Know are the ones LexiTrack teaches."
             if nothing
             else ""
@@ -449,13 +451,14 @@ class StudyPage(QWidget):
         page.setObjectName("PanelBody")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(m.space_7, m.space_5, m.space_7, m.space_6)
+        PageColumn(page, layout)
         layout.setSpacing(m.space_5)
 
         header = QHBoxLayout()
         header.setSpacing(m.space_3)
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        titles.addWidget(_label("Study", "PageTitle"))
+        titles.addWidget(_label("Today", "PageTitle"))
         self.plan_label = _label("", "PageSubtitle")
         titles.addWidget(self.plan_label)
         header.addLayout(titles, 1)
@@ -783,7 +786,7 @@ class StudyPage(QWidget):
         elif due:
             self._primary = "review"
             self.primary_button.setText(
-                "Continue reviewing →" if done else "Start reviewing →"
+                "Continue session →" if done else "Start session →"
             )
             self.primary_button.setToolTip(f"{due} words are waiting (1–4 to answer)")
             self.primary_button.setEnabled(True)
@@ -831,6 +834,7 @@ class StudyPage(QWidget):
         while self._level_rows.count():
             item = self._level_rows.takeAt(0)
             if item.widget() is not None:
+                item.widget().hide()
                 item.widget().deleteLater()
         groups: OrderedDict[str, list] = OrderedDict()
         for word in words:
@@ -972,7 +976,7 @@ class StudyPage(QWidget):
         self._index = 0
         self._answered = 0
         plan = self._engine.active_plan()
-        self.session_title.setText(plan.name if plan else "Study")
+        self.session_title.setText(plan.name if plan else "Today")
         self._stack.setCurrentWidget(self._pages[SESSION])
         self._show_card()
         self.setFocus()

@@ -177,10 +177,12 @@ class StudyPlanDialog(QDialog):
             item = self._list_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
         self._checks = {}
         if self._all_row is not None:
             self._all_holder.removeWidget(self._all_row)
+            self._all_row.hide()
             self._all_row.deleteLater()
         self._all_row = None
         lists = self._service.lists()
@@ -409,7 +411,7 @@ def _list_meta(outlook: PlanOutlook, include_not_reviewed: bool) -> str:
         # The trap a fresh import falls into: nothing is Unknown yet, so the
         # list would teach nothing and nobody would say why.
         text += (
-            f"\n{outlook.not_reviewed:,} never answered: sort them on the Review tab first"
+            f"\n{outlook.not_reviewed:,} never answered: sort them on Sort words first"
         )
     return text
 
@@ -427,7 +429,7 @@ def _summary_text(outlook: PlanOutlook, per_day: int) -> str:
         if outlook.in_progress:
             first += f" {outlook.in_progress:,} words are still being reviewed."
         return (
-            f"{first} To learn more, mark words Unknown on the Review tab or add a list."
+            f"{first} To learn more, mark words Unknown on Sort words or add a list."
         )
     parts = [f"{outlook.to_introduce:,} words to learn"]
     if outlook.in_progress:

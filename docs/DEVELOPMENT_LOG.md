@@ -626,3 +626,61 @@ and reviewed before the next.
 copy of the real database; every new and changed screen rendered in both
 themes. Not verified: an actual fit, because PyTorch is not installed here —
 readiness, scoring, apply and revert are tested, the optimizer call is not.
+
+## 2026-09-25 — Learning Engine V2, phase 1: the data for content and skill
+
+Schema 5, data only; nothing on screen changes.
+
+- `word_content` (a Turkish core meaning, nuance, pattern, collocations,
+  register, an encoding type and cue, related words, a depth hint) and
+  `word_contexts` (sentences and situations marking the word as `{{word}}`).
+  Both optional: a word with neither is taught by the short route.
+- `learning_attempts`, the skill record: every retrieval with its task, level
+  1–5, phase, role (primary, probe, retrieval), context, effort, and the
+  review log row it belongs to. Append-only, marked on undo.
+- `review_logs.memory_result` and `route_version`; existing logs are `v1`
+  with no memory result, so no skill evidence is invented for them.
+- `review_sessions.flow_state` for a resumable, serialisable study flow.
+- Each migration step now counts the rows of every vocabulary, list, card,
+  log and status table before and after, and runs `quick_check`, before it
+  commits.
+- `ContentService`: export a batch of words that need content, validate and
+  preview a filled file, import it (docs/formats/content-enrichment.md).
+  Entries are matched by id *and* spelling; conflicts are replaced only when
+  chosen; the word-list parser refuses content files.
+
+**Verification:** the 4 → 5 upgrade on a copy of the real database: 6,825
+words, 225 cards and 315 logs before and after, no settings changed,
+integrity and foreign keys clean; the copy deleted.
+
+## 2026-09-25 — A sidebar instead of tabs
+
+Asked for: the tabs side by side looked crowded and dated, Progress was not
+clear, there was no way to choose what to export, and the window layouts
+needed work. A proposal with the current screens was approved in full; the
+navigation, window layout and naming come first (decision 69), the Today
+page, Progress and an export centre with the V2 phases that change them.
+
+**Problems and solutions**
+
+- With the sidebar, List mode at the default size needed 620 px of columns
+  in 564: it scrolled sideways and cut the status column off. A stretching
+  word column alone left the word 34 px wide once *Also in* was showing.
+  Columns now fit by rule, shrinking to floors, with the word taking the rest.
+- The `#` column is measured to its widest number; the fitting reset it to
+  56 px until the measured width became its natural width.
+- The selection bar, wider than the table, covered the details panel's
+  buttons. Reserving room squeezed the panel into a scroll with half-cut
+  buttons; hiding the buttons while the bar (with the same actions) covers
+  them reads cleanly.
+- The Lists page, rendered twice, showed two sets of cards: cards removed with
+  `deleteLater` are painted until the event loop deletes them. Every rebuilt
+  row, card and chip is now hidden as it is removed.
+- The Review stats bar cut "2,978" to "2,97": laid out around "0", the label
+  kept its old width for a frame. The value reserves its width when set.
+- A plain `QWidget` in the sidebar's foot painted the window colour as a band;
+  it is transparent by name.
+
+**Verification:** full suite and lint clean; every page rendered in both
+themes, at the default size, folded (880 px) and wide (1720 px); README
+screenshots regenerated.

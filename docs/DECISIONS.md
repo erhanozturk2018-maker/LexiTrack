@@ -990,3 +990,26 @@ off gets no late summary, and a week with nothing in it stays quiet.
 
 **Reason.** The same rule as the daily messages (ARCHITECTURE §11, notifications
 are decisions): a message is a decision made now, never a backlog replayed.
+
+---
+
+## 69. A sidebar, with names that say what each page does
+
+**Decision.** The five tabs across the top became a sidebar: Today and
+Progress, then a *Library* group (Lists, Sort words, Unknown), and at the
+foot Export and backup, Settings, the theme and the ⋯ menu. Study is named
+*Today*, Home *Lists*, Review *Sort words*; the session button reads *Start
+session*. Today and Unknown carry counts. The sidebar folds to icons below
+1000 px, and pages keep to a 1100 px column on wide windows.
+
+**Reason.** The tabs were in no meaningful order (Home in the middle), the top
+bar was crowded, and "Review" named both the sorting page and the reviews on
+Study. A sidebar groups learning apart from the library it draws on, can say
+whether anything is waiting, and has room for what V2 adds (backups, content)
+without squeezing a tab strip. The internal page keys stay, so settings and
+tests that name them are untouched.
+
+**Trade-off.** 216 px less width for pages at the default size. Tables were
+made to fit it (the word column absorbs the difference) rather than scroll
+sideways; the details panel hides its buttons while the selection bar, which
+carries the same actions, floats over them.

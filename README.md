@@ -21,7 +21,7 @@ to you once there are enough answers.
 It runs on your machine. No account and no server; your vocabulary lives in a
 local SQLite file. The only network use is the optional Telegram bot.
 
-![Study: today's work, the week ahead and the words you find hard](docs/screenshots/study.png)
+![Today: the day's work, the week ahead and the words you find hard](docs/screenshots/study.png)
 
 <details>
 <summary><b>More screens</b></summary>
@@ -34,9 +34,9 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 ![A review card](docs/screenshots/study-session.png)
 
-![Home: continue learning, overview and your lists](docs/screenshots/home.png)
+![Lists: continue sorting, overview and your lists](docs/screenshots/home.png)
 
-![Study in dark mode](docs/screenshots/study-dark.png)
+![Today in dark mode](docs/screenshots/study-dark.png)
 
 ![Flashcards in dark mode](docs/screenshots/flashcard-dark.png)
 
@@ -56,7 +56,7 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **Spaced repetition with FSRS.** Each review is answered Again, Hard, Good or
   Easy, and the word comes back when you are about to forget it. Every button
   shows when that would be. A word is never asked twice on the same day.
-- **A day with a shape.** The Study page shows today's two steps, the week
+- **A day with a shape.** The Today page shows today's two steps, the week
   ahead as day tiles, the words you keep missing, and the last 30 days.
 - **A workload brake.** When a day's reviews go over your limit (250 by
   default), new words pause until you catch up, and the page says why.
@@ -230,18 +230,35 @@ old file is kept in the data folder first (`vocabulary.v1-backup-<date>.db`,
 
 ### Your first start
 
-With no study plan yet, the Study page asks three questions: what to learn —
+With no study plan yet, the Today page asks three questions: what to learn —
 **all your Unknown words** by default, with how many that is, or only some
 lists — how many new words a day, with how long that will take, and whether
 you want the day's words on your phone. **Start learning** creates the plan.
-If nothing is Unknown yet, it says so: sort a list on the **Review** tab first.
+If nothing is Unknown yet, it says so: sort a list on **Sort words** first.
 
 **How LexiTrack Works** (`Shift+F1`, the **⋯** menu, or `Ctrl+K`) explains
-the tabs, your day, the four answers and what is recorded.
+the pages, your day, the four answers and what is recorded.
+
+### Finding your way
+
+The sidebar on the left reaches every page:
+
+- **Today** — the day's new words and reviews. The number beside it is what
+  is waiting.
+- **Progress** — what has been learned here, and every answer.
+- Under **Library**: **Lists** (your lists), **Sort words** (going through a
+  list to mark what you already know) and **Unknown** (every word you did not
+  know, with their count).
+- At the foot: **Export and backup** (words, your answer history, a backup
+  copy now, the backups folder), **Settings**, the light/dark switch and the
+  **⋯** menu with everything else.
+
+On a narrow window the sidebar folds to its icons; hover over one for its
+name. On a wide one the pages keep to a readable width instead of stretching.
 
 ### Studying
 
-**Study** is the first tab. The **Today** panel lists the day's two steps and
+**Today** is the first page. Its **Today** panel lists the day's two steps and
 has one button for the next thing to do:
 
 1. **Learn the new words.** They are listed below as chips, grouped by CEFR
@@ -321,11 +338,11 @@ in the details panel, for that word's whole history.
 
 ### Study plans
 
-**Study plan** on the Study page (`Ctrl+P`). A plan teaches the words you
+**Study plan** on the Today page (`Ctrl+P`). A plan teaches the words you
 marked **Unknown** in the lists it draws from — never the ones you know. Each
 list shows how many words it would teach, how many are in progress and how
 many you know; the summary says how many are left to introduce and how long
-that takes at your daily pace, by the same rule the Study page uses. **All my
+that takes at your daily pace, by the same rule the Today page uses. **All my
 lists** makes a plan over every list, including lists you import later. You
 can keep several plans and switch between them; switching or deleting a plan
 never touches what you have already learned.
@@ -333,7 +350,7 @@ never touches what you have already learned.
 ![The Study Plan window](docs/screenshots/study-plan.png)
 
 A freshly imported list is all "never answered", so it has nothing Unknown to
-teach, and its row says so: sort it on the Review tab first, or turn on
+teach, and its row says so: sort it on Sort words first, or turn on
 *Settings → Learning → Offer words you have never answered*.
 
 ### Telegram
@@ -383,7 +400,7 @@ press **Use these**, and **Use the defaults** goes back.
 
 ### Importing
 
-**Import** in the app bar (`Ctrl+O`). Choose one or more
+**Import** on the Lists page, or in the **⋯** menu (`Ctrl+O`). Choose one or more
 PDF or JSON files. Each file gets a preview: the detected format, how many
 words it has, how many are new, any problems, and where the words should go —
 a new list named from the file, any existing lists, or both.
@@ -396,7 +413,7 @@ press Import.
 
 ### Sorting with flashcards
 
-**Continue** on Home, or the **Review** tab, goes through a list freely, with
+**Continue** on Lists, or **Sort words**, goes through a list freely, with
 no schedule: this is sorting, and the words you mark I Don't Know are the ones
 your study plan teaches. The list you are reviewing is the name at the top — click it to
 switch lists. Where the word came from is the small "Source" line on the card.
@@ -438,8 +455,8 @@ Words, or export them.
 
 ### Exporting
 
-**Export** (`Ctrl+E`, or the **⋯** menu) offers what fits where you are:
-today's new words or the words you find hard on the Study page, and the
+**Export** (`Ctrl+E`, or **Export and backup** in the sidebar) offers what fits
+where you are: today's new words or the words you find hard on Today, and the
 current list, its unknown words, your selection or all unknown words
 elsewhere. The window shows the file before you save it — the real first page
 of the PDF, or the first lines of the CSV or JSON — and follows any change
@@ -455,7 +472,7 @@ defaults and choose where to save.
 
 ### Search and commands
 
-**Ctrl+K**, or the search box in the app bar, finds a command (with what it
+**Ctrl+K**, or **Search** at the top of the sidebar, finds a command (with what it
 does and its shortcut), a list, or a word — choosing a word opens it in List
 mode with its details. Everything else the app can do is in the **⋯** menu.
 
@@ -468,7 +485,7 @@ key in one place, with a filter.
 
 | Where | Key | Action |
 | --- | --- | --- |
-| Study reviews | `Space` | Show the meaning; once it shows, answer Good |
+| Today's session | `Space` | Show the meaning; once it shows, answer Good |
 | | `1` / `2` / `3` / `4` | Again / Hard / Good / Easy |
 | | `Esc` | Stop and keep what you answered |
 | | `Ctrl+Z` | Take back your last answer |
@@ -486,12 +503,12 @@ key in one place, with a filter.
 | | `Delete` | Remove the selection from this list (asks first) |
 | | `Ctrl+Z` | Undo a copy or move while its message shows |
 | | `Ctrl+F` | Search |
-| Home | Arrow keys, `Enter` | Move between lists, open one |
+| Lists | Arrow keys, `Enter` | Move between lists, open one |
 | Everywhere | `Ctrl+K` | Search commands, lists and words |
 | | `F1` | Keyboard Shortcuts |
 | | `Shift+F1` | How LexiTrack Works |
 | | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
-| | `Alt+S` / `Alt+P` / `Alt+H` / `Alt+R` / `Alt+U` | Study / Progress / Home / Review / Unknown Words |
+| | `Alt+T` / `Alt+P` / `Alt+L` / `Alt+S` / `Alt+U` | Today / Progress / Lists / Sort words / Unknown |
 | | `Ctrl+P` | Study plan |
 | | `Ctrl+,` | Settings |
 | | `Ctrl+L` | Switch list |

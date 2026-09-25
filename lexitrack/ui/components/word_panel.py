@@ -50,6 +50,14 @@ class WordPanel(QFrame):
         self._history_source: Callable[[int], object] | None = None
         self._build()
 
+    def set_buttons_covered(self, covered: bool) -> None:
+        """Hide the status buttons while the selection bar floats over them.
+
+        The bar carries the same actions, for the whole selection, so nothing
+        becomes unreachable; half-hidden buttons under it would only mislead.
+        """
+        self.button_row.setVisible(not covered)
+
     def _build(self) -> None:
         m = METRICS
         outer = QVBoxLayout(self)
@@ -112,7 +120,10 @@ class WordPanel(QFrame):
         self.history_button.hide()
         layout.addStretch(1)
 
-        buttons = QHBoxLayout()
+        self.button_row = QWidget()
+        self.button_row.setObjectName("PanelBody")
+        buttons = QHBoxLayout(self.button_row)
+        buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(m.space_2)
         self.buttons: dict[ReviewStatus, QPushButton] = {}
         for status, text, key in (
@@ -127,7 +138,7 @@ class WordPanel(QFrame):
             button.clicked.connect(lambda _c=False, s=status: self._request(s))
             buttons.addWidget(button, 1)
             self.buttons[status] = button
-        layout.addLayout(buttons)
+        layout.addWidget(self.button_row)
 
         scroll = QScrollArea()
         scroll.setObjectName("PanelScroll")

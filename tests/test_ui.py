@@ -32,6 +32,7 @@ from lexitrack.ui.components.vocabulary_table import (  # noqa: E402
     WORD_ID_ROLE,
     Column,
     VocabularyTable,
+    fit_columns,
 )
 from lexitrack.ui.dialogs import AddWordDialog, ListDialog  # noqa: E402
 from lexitrack.ui.import_dialog import ImportDialog  # noqa: E402
@@ -201,6 +202,38 @@ def test_stats_bar_shows_every_counter(qapp) -> None:
     assert stats._unknown._value.text() == "12"
     assert stats._remaining._value.text() == "2,868"
     assert stats._total._value.text() == "3,000"
+
+
+def test_columns_fill_a_wide_table_by_widening_the_word() -> None:
+    visible = [Column.ORDER, Column.WORD, Column.PART_OF_SPEECH, Column.CEFR, Column.STATUS]
+    widths = fit_columns(visible, 900)
+    assert sum(widths.values()) == 900
+    assert widths[Column.WORD] == 900 - (56 + 160 + 64 + 130)
+
+
+def test_columns_shrink_to_fit_a_narrow_table_down_to_their_floors() -> None:
+    visible = [Column.ORDER, Column.WORD, Column.PART_OF_SPEECH, Column.CEFR,
+               Column.STATUS, Column.LISTS]
+    widths = fit_columns(visible, 564)
+    assert sum(widths.values()) == 564
+    assert widths[Column.STATUS] >= 116 and widths[Column.CEFR] == 64
+    assert widths[Column.WORD] >= 110 and widths[Column.PART_OF_SPEECH] >= 125
+    # Too narrow even for the floors: the floors hold and the table scrolls.
+    tight = fit_columns(visible, 300)
+    assert tight[Column.WORD] == 110 and tight[Column.PART_OF_SPEECH] == 125
+
+
+def test_stats_bar_never_cuts_off_a_number(qapp) -> None:
+    """The bar is laid out around "0"; the first real total used to lose a digit."""
+    stats = StatsBar()
+    stats.show()
+    qapp.processEvents()
+    stats.update_progress(Progress(total=2978, known=834, unknown=142))
+    qapp.processEvents()
+    for stat in (stats._known, stats._unknown, stats._remaining, stats._total):
+        label = stat._value
+        assert label.width() >= label.fontMetrics().horizontalAdvance(label.text())
+    stats.close()
 
 
 def test_list_card_describes_its_list(qapp) -> None:

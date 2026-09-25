@@ -22,7 +22,14 @@ from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.models.user_word_state import ReviewStatus  # noqa: E402
 from lexitrack.services.learning_service import LearningService  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
-from lexitrack.ui.main_window import HOME, PROGRESS, STUDY, MainWindow  # noqa: E402
+from lexitrack.ui.main_window import (  # noqa: E402
+    HOME,
+    PROGRESS,
+    REVIEW,
+    STUDY,
+    UNKNOWN,
+    MainWindow,
+)
 from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
 from lexitrack.ui.study_page import DAY, EMPTY, SESSION, _interval  # noqa: E402
 from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
@@ -78,10 +85,29 @@ def with_plan(engine: LearningService, service: VocabularyService) -> None:
 
 
 class TestNavigation:
-    def test_study_is_the_first_tab(self, window) -> None:
+    def test_today_is_the_first_page_in_the_sidebar(self, window) -> None:
         tabs = list(window.tab_buttons)
-        assert tabs[0] == STUDY
-        assert window.tab_buttons[STUDY].text() == "Study"
+        assert tabs == [STUDY, PROGRESS, HOME, REVIEW, UNKNOWN]
+        assert window.tab_buttons[STUDY].text() == "Today"
+        assert window.tab_buttons[REVIEW].text() == "Sort words"
+
+    def test_the_sidebar_counts_what_is_waiting(self, qapp, loaded, engine) -> None:
+        with_plan(engine, loaded)
+        win = MainWindow(loaded, ThemeManager(), engine)
+        plan = engine.daily_plan()
+        assert win.tab_buttons[STUDY].badge == f"{plan.new_remaining + plan.due_count:,}"
+        assert win.tab_buttons[UNKNOWN].badge == f"{loaded.unknown_count():,}"
+        win.close()
+
+    def test_a_narrow_window_folds_the_sidebar_to_icons(self, qapp, window) -> None:
+        window.show()
+        window.resize(1180, 800)
+        qapp.processEvents()
+        assert not window.sidebar.compact
+        window.resize(820, 700)
+        qapp.processEvents()
+        assert window.sidebar.compact
+        assert "Today" in window.tab_buttons[STUDY].toolTip()
 
     def test_the_window_opens_on_study_when_there_is_work(self, qapp, loaded, engine) -> None:
         with_plan(engine, loaded)
@@ -335,7 +361,7 @@ class TestProgressPage:
         engine.undo_last_answer()
         return window
 
-    def test_it_is_the_second_tab_with_its_own_key(self, window) -> None:
+    def test_it_is_the_second_page_with_its_own_key(self, window) -> None:
         tabs = list(window.tab_buttons)
         assert tabs[:2] == [STUDY, PROGRESS]
         assert window.tab_buttons[PROGRESS].toolTip() == "Progress (Alt+P)"
@@ -421,7 +447,7 @@ class TestFirstRun:
         window.show_page(STUDY)
         study = window.study
         assert not study.setup_none.isHidden()
-        assert "Review tab" in study.setup_none.text()
+        assert "Sort words" in study.setup_none.text()
         assert not study.setup_review.isHidden()
 
 
@@ -494,7 +520,7 @@ class TestStudyPlanDialog:
                           ReviewStatus.NOT_REVIEWED)
         dialog = StudyPlanDialog(engine, loaded)
         row = next(iter(dialog._checks.values())).parentWidget()
-        assert "4 never answered: sort them on the Review tab first" in row.meta.text()
+        assert "4 never answered: sort them on Sort words first" in row.meta.text()
 
     def test_all_my_lists_ticks_every_list_and_gives_the_choices_back(
         self, qapp, engine, loaded
@@ -592,12 +618,13 @@ def test_ctrl_p_and_ctrl_comma_are_listed_as_commands(window) -> None:
     titles = {command.title: command.shortcut for command in window.commands()}
     assert titles["Study Plan…"] == "Ctrl+P"
     assert titles["Settings…"] == "Ctrl+,"
-    assert titles["Go to Study"] == "Alt+S"
+    assert titles["Go to Today"] == "Alt+T"
+    assert titles["Go to Sort Words"] == "Alt+S"
 
 
 def test_shortcuts_window_documents_the_study_keys(window) -> None:
     sections = [name for name, _keys in window.shortcut_sections()]
-    assert sections[0] == "Study reviews"
+    assert sections[0] == "Today's session"
     window.show_page(HOME)
 
 

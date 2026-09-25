@@ -33,6 +33,7 @@ from .components.cards import ListCard, ModeSwitch, SegmentedProgress, StatTile
 from .empty_state import WelcomeState
 from .list_actions import ListActions
 from .theme.palette import METRICS
+from .widgets import PageColumn
 
 _GRID_COLUMNS = 3
 
@@ -73,6 +74,7 @@ class HomePage(QWidget):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(m.space_7, m.space_5, m.space_7, m.space_6)
+        PageColumn(content, layout)
         layout.setSpacing(m.space_4)
 
         # 1. continue
@@ -172,6 +174,9 @@ class HomePage(QWidget):
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget() is not None:
+                # Hidden now, deleted later: until the event loop runs, a card
+                # waiting for deletion would still be painted under the new ones.
+                item.widget().hide()
                 item.widget().deleteLater()
         self._cards = {}
         for index, lst in enumerate(lists):

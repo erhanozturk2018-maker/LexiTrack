@@ -137,7 +137,7 @@ class ReviewPage(QWidget):
         # this page being mistaken for a spaced-repetition review.
         self.purpose = _label(
             "Sort words into Known and Unknown. The words you mark Unknown are "
-            "the ones the Study tab teaches; nothing on this page is scheduled.",
+            "the ones Today teaches; nothing on this page is scheduled.",
             "Faint",
         )
         self.purpose.setWordWrap(True)

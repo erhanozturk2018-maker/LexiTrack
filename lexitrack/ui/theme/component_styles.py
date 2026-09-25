@@ -88,26 +88,23 @@ QCheckBox#FileCheck {{ font-size: 15px; font-weight: 600; }}
 
 /* ------------------------------------------------------------- navigation */
 
-/* Top-bar tabs: text with an underline under the current page. */
-QPushButton#NavTab {{
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    color: {p.text_muted};
+/* The sidebar: items are painted (components/sidebar.py); these rules give
+   the column its surface and style the group headings between them. */
+#Sidebar {{
+    background-color: {p.surface};
+    border-right: 1px solid {p.border};
+}}
+QLabel#SidebarSection {{
+    color: {p.text_faint};
+    font-size: 11px;
     font-weight: 600;
-    padding: 8px 2px 7px 2px;
-    margin: 0 8px;
-    min-height: 20px;
+    letter-spacing: 0.7px;
 }}
-QPushButton#NavTab:hover {{ color: {p.text}; }}
-/* Checked tabs change colour and underline, never weight: a bolder label is
-   wider than the space measured for it, and gets clipped. */
-QPushButton#NavTab:checked {{
-    color: {p.text};
-    border-bottom: 2px solid {p.accent};
+#SidebarFoot {{ background: transparent; }}
+#SidebarRule {{
+    background-color: {p.border};
+    margin: 8px 6px;
 }}
-QPushButton#NavTab:focus {{ outline: none; color: {p.text}; }}
 
 /* Segmented control: Flashcard | List. */
 #ModeSwitch {{
@@ -203,20 +200,8 @@ QPlainTextEdit#PreviewText {{
     letter-spacing: 0.5px;
 }}
 
-/* -------------------------------------------------------------- app bar */
+/* ---------------------------------------------------------- icon buttons */
 
-/* Ctrl+K: looks like a search field, opens the command palette. */
-QPushButton#CommandButton {{
-    background-color: {p.surface_sunken};
-    border: 1px solid {p.border};
-    border-radius: {m.radius_sm}px;
-    color: {p.text_faint};
-    padding: 6px 14px 6px 10px;
-    min-width: 220px;
-    text-align: left;
-    font-size: 13px;
-}}
-QPushButton#CommandButton:hover {{ border-color: {p.border_strong}; color: {p.text_muted}; }}
 QPushButton#IconButton {{
     background: transparent;
     border: 1px solid transparent;

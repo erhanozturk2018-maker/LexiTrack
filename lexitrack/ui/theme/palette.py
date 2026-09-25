@@ -177,6 +177,10 @@ class Metrics:
     #: from the buttons on a wide monitor.
     content_max_width: int = 720
 
+    #: Width a page's content is kept within, centred, on a wide window, so
+    #: cards and tables do not stretch into lines too long to scan.
+    page_max_width: int = 1100
+
 
 METRICS = Metrics()
 

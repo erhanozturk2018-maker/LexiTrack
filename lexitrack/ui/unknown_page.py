@@ -33,6 +33,7 @@ from .components.vocabulary_table import Column, VocabularyTable
 from .empty_state import EmptyState
 from .export_dialog import ExportDialog, ExportScope
 from .theme.palette import METRICS
+from .widgets import PageColumn
 from .word_transfer import WordTransfer
 
 
@@ -48,6 +49,7 @@ class UnknownPage(QWidget):
         m = METRICS
         layout = QVBoxLayout(self)
         layout.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_4)
+        PageColumn(self, layout)
         layout.setSpacing(m.space_4)
 
         header = QHBoxLayout()

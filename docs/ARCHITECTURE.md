@@ -690,9 +690,11 @@ through a formatter that masks anything shaped like a bot token.
 
 ```text
 MainWindow
-├── app bar     LexiTrack · Study | Progress | Home | Review | Unknown Words
-│               · Search or run a command (Ctrl+K) · Import · theme icon · ⋯ menu
-├── StudyPage
+├── Sidebar     LexiTrack · Search (Ctrl+K) · Today (count) · Progress
+│               · LIBRARY: Lists · Sort words · Unknown (count)
+│               · foot: Export and backup (menu) · Settings · theme icon · ⋯ menu
+│               Folds to icons below 1000 px; counts become dots, names tooltips
+├── StudyPage   (on screen: Today)
 │   ├── no plan             the first-run setup: what to learn (all Unknown
 │   │                       words, or some lists), how many a day, the phone;
 │   │                       Start learning creates the plan
@@ -706,22 +708,39 @@ MainWindow
 ├── ProgressPage            four tiles · where the words are · over time · does
 │                           the schedule fit you (and which parameters are in
 │                           use) · Words table with filters · All answers table
-├── HomePage
+├── HomePage    (on screen: Lists)
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
 │   ├── Overview            four totals; the Unknown tile opens Unknown Words
 │   └── Your lists          ListCard grid (click: current; double-click: open;
 │                           right-click: review, open, add words, import into,
 │                           export, edit, delete)
-├── ReviewPage
+├── ReviewPage  (on screen: Sort words)
 │   ├── context strip       SORTING · <list ▾ switcher> · language · List Actions
 │   │                       · Flashcard|List, and one line saying that this page
-│   │                       sorts and the Study tab teaches
+│   │                       sorts and Today teaches
 │   ├── Flashcard mode      ReviewWidget / list complete / empty list
 │   ├── List mode           VocabularyTable (details panel, floating bar) + Add Words
 │   └── StatsBar            known · unknown · remaining · total for the list
 └── UnknownPage             VocabularyTable (all unknown words, no status
                             column) + list filter
 ```
+
+The page keys in code (`STUDY`, `HOME`, `REVIEW`…) predate the names on
+screen and are kept: `QSettings`, tests and signals name them. The names, icons
+and Alt shortcuts live in one table, `main_window.PAGES`.
+
+The sidebar (`ui/components/sidebar.py`) paints its rows: icon, label and
+count change colour together from the palette, the icons are 24-unit outline
+SVGs coloured at paint time, so there is one icon per item rather than one per
+theme and state. The window folds it by width in `resizeEvent`.
+
+Pages keep their content in a centred column no wider than
+`METRICS.page_max_width` (1100 px) through `widgets.PageColumn`, which grows
+the page's side margins on a wide window. Scroll bars stay at the window edge.
+Tables fit their width with `vocabulary_table.fit_columns`: natural widths when
+there is room, the word taking the rest; when there is not, the word, part of
+speech, status and lists shrink in proportion to floors, and only then does the
+table scroll sideways.
 
 A word's history (`ui/components/word_history.py`, `WordHistoryDialog`) opens
 from the details panel — which now summarises the word's learning — from
@@ -734,13 +753,14 @@ learned*, word for word; a test fails if they drift.
 (persisted in `QSettings`), the theme and the commands. There is no menu bar:
 `MainWindow.commands()` declares everything the app can do, with a description
 and a shortcut, and three things are built from that one list — the Ctrl+K
-`CommandPalette`, the "⋯" menu and the `ShortcutsDialog`. Window-wide
+`CommandPalette`, the sidebar's "⋯" menu and the `ShortcutsDialog`. Window-wide
 shortcuts are `QAction`s added to the window itself. Pages re-read the service
 whenever shown. Pages do not know how they are navigated to, so changing the
-navigation style means changing `main_window.py` only.
+navigation style means changing `main_window.py` only — the move from tabs
+to the sidebar did exactly that.
 
-The app opens on Study when the plan has work waiting, otherwise in Review when
-the current list is part-way through, and on Home otherwise. With a tray, the
+The app opens on Today when the plan has work waiting, otherwise on Sort words
+when the current list is part-way through, and on Lists otherwise. With a tray, the
 window can start hidden (`--minimized`).
 
 ### Shared components (`ui/components`)
@@ -790,7 +810,9 @@ Review and Unknown Words:
 
 Arrows move; letters act. In flashcards ← and → navigate the session history
 and never answer. On Home the arrows move focus across the card grid (Up from
-the top row returns to Continue). Ctrl+Tab cycles pages; Ctrl+L switches list.
+the top row returns to Continue). Ctrl+Tab cycles pages in sidebar order; Alt+T,
+P, L, S and U go to Today, Progress, Lists, Sort words and Unknown; Ctrl+L
+switches list.
 
 Shortcuts are listed in one place, Keyboard Shortcuts (F1), and shown next to
 each command in the Ctrl+K palette. They are not printed under the flashcard

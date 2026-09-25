@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QLabel, QLayout, QSizePolicy, QWidget
+
+from .theme.palette import METRICS
 
 
 class WrappedLabel(QLabel):
@@ -57,3 +59,34 @@ class WrappedLabel(QLabel):
 
     def _refresh_height(self) -> None:
         self.setMinimumHeight(self.heightForWidth(self.width()))
+
+
+class PageColumn(QObject):
+    """Keeps a page's content in a centred column no wider than the page width.
+
+    The page keeps its own margins on a normal window; on a wide one the side
+    margins grow instead of the content. Scroll bars stay at the window edge,
+    which wrapping the page in a narrower widget would not allow.
+    """
+
+    def __init__(
+        self,
+        widget: QWidget,
+        layout: QLayout,
+        max_width: int = METRICS.page_max_width,
+    ) -> None:
+        super().__init__(widget)
+        self._layout = layout
+        self._max_width = max_width
+        margins = layout.contentsMargins()
+        self._side = margins.left()
+        self._top = margins.top()
+        self._bottom = margins.bottom()
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Resize and isinstance(watched, QWidget):
+            spare = watched.width() - 2 * self._side - self._max_width
+            side = self._side + max(0, spare // 2)
+            self._layout.setContentsMargins(side, self._top, side, self._bottom)
+        return False

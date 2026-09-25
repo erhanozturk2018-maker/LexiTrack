@@ -49,6 +49,7 @@ from .components.progress_charts import CalibrationChart, PipelineBar, TimelineC
 from .components.word_history import pretty_day, remembered_for
 from .theme import current_palette
 from .theme.palette import METRICS
+from .widgets import PageColumn
 
 ALL, HARD = "all", "hard"
 
@@ -195,6 +196,7 @@ class ProgressPage(QWidget):
         body.setObjectName("PanelBody")
         layout = QVBoxLayout(body)
         layout.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_6)
+        PageColumn(body, layout)
         layout.setSpacing(m.space_5)
         scroll.setWidget(body)
         outer.addWidget(scroll)
@@ -321,7 +323,7 @@ class ProgressPage(QWidget):
         answers, answers_layout, _, self.answers_title = _section("ALL ANSWERS")
         answers_layout.addWidget(
             _label(
-                "Every answer from Study and Telegram, newest first, including answers "
+                "Every answer from Today and Telegram, newest first, including answers "
                 "taken back with Undo; those are kept for the record and left out of "
                 "every count. The same list is in Settings → Data → Export history.",
                 "Faint",
@@ -547,9 +549,9 @@ def _empty_text(group: str, searching: bool) -> str:
         Group.LEARNED.value: "No word has been learned here yet. A word counts once the "
         "schedule expects you to remember it for the threshold set in Settings.",
         Group.IN_PROGRESS.value: "Nothing in progress. Confirm the day's new words on the "
-        "Study page to start.",
+        "Today page to start.",
         Group.MARKED_KNOWN.value: "No word has been marked Known by hand after being "
         "introduced.",
         HARD: "No word is giving you trouble right now.",
-        ALL: "No word has been studied here yet. Choose a study plan on the Study page.",
+        ALL: "No word has been studied here yet. Choose a study plan on the Today page.",
     }[group]

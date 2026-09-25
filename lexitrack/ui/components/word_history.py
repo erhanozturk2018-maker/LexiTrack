@@ -85,7 +85,7 @@ def status_sentence(step: JourneyStep) -> str:
     elif cause is StatusCause.UNDO:
         text = f"Back to {_status_word(to)}: an answer was taken back"
     elif cause is StatusCause.SORTING:
-        text = f"Marked {_status_word(to)} on the Review tab"
+        text = f"Marked {_status_word(to)} on Sort words"
     elif to is ReviewStatus.NOT_REVIEWED:
         text = "Reset to not reviewed"
     else:
@@ -347,6 +347,7 @@ class WordHistoryView(QWidget):
         while self.steps.count():
             item = self.steps.takeAt(0)
             if item.widget() is not None:
+                item.widget().hide()
                 item.widget().deleteLater()
         rows = list(reversed(journey.steps))
         if not rows:

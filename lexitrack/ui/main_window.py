@@ -1,25 +1,31 @@
 """The application window: navigation, menus and the current-list context.
 
-Four destinations, reached from tabs in the app bar:
+Five destinations, reached from the sidebar (:mod:`.components.sidebar`):
 
-* **Study** — today's new words and today's reviews, from the study plan. It
+* **Today** — today's new words and today's reviews, from the study plan. It
   comes first because it is the only page that says what to do *now*; the
   others are places to look things up or to work freely.
-* **Home** — continue learning, overview, your lists.
-* **Review** — the current list, as flashcards or as a table. Free study: no
-  schedule, no consequences, any list, any time.
-* **Unknown Words** — every unknown word, across lists.
+* **Progress** — what has been learned here, and every answer.
+* Under **Library**:
+
+  * **Lists** — continue sorting, overview, your lists.
+  * **Sort words** — the current list, as flashcards or as a table, sorted
+    into Known and Unknown. Free: no schedule, any list, any time.
+  * **Unknown** — every unknown word, across lists.
+
+The internal page keys (``STUDY``, ``HOME``, ``REVIEW``…) predate the names
+on screen and are kept, so settings and tests that name them stay valid.
 
 The window owns only what is shared between them: which list is current and
 which review mode was last used (both remembered between runs), the theme, and
 the menus. Each page reads what it needs from the service when shown, so no
 page can show stale numbers after another page changed something.
 
-The pages do not know how they are navigated to. Changing the navigation
-(say, to a sidebar) means changing this file, not the pages.
+The pages do not know how they are navigated to: the move from tabs to a
+sidebar changed this file and not one of them.
 
 Everything the app can do is declared once, in :meth:`MainWindow.commands`:
-the Ctrl+K palette lists those commands, the "⋯" menu in the app bar offers
+the Ctrl+K palette lists those commands, the "⋯" menu in the sidebar offers
 them, and the Keyboard Shortcuts window is built from them. There is no
 separate menu bar to keep in step.
 """
@@ -30,29 +36,37 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, Qt, QUrl
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDesktopServices,
+    QIcon,
+    QKeySequence,
+    QResizeEvent,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
-    QButtonGroup,
-    QFrame,
+    QBoxLayout,
+    QFileDialog,
     QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
     QStackedWidget,
-    QVBoxLayout,
     QWidget,
 )
 
 from ..core import paths
 from ..repositories.word_repository import StoredWord
 from ..services.learning_service import LearningService
+from ..services.maintenance import Maintenance
 from ..services.progress import ProgressService
 from ..services.vocabulary_service import VocabularyService
 from .command_palette import Command, CommandPalette
 from .components.cards import ModeSwitch
+from .components.sidebar import Sidebar
 from .components.toast import Toast
 from .components.word_history import WordHistoryDialog
 from .dialogs import confirm
@@ -75,13 +89,25 @@ from .unknown_page import UnknownPage
 log = logging.getLogger(__name__)
 
 STUDY, PROGRESS, HOME, REVIEW, UNKNOWN = "study", "progress", "home", "review", "unknown"
-#: Tab order, and the order Ctrl+Tab cycles through.
+#: Sidebar order, and the order Ctrl+Tab cycles through.
 PAGE_ORDER = (STUDY, PROGRESS, HOME, REVIEW, UNKNOWN)
 
 _SETTINGS_LIST = "review/list_id"
 _SETTINGS_MODE = "review/mode"
 
 _ICONS = Path(__file__).with_name("theme") / "icons"
+
+#: Below this window width the sidebar folds to its icons.
+FOLD_WIDTH = 1000
+
+#: Name on screen, sidebar icon and shortcut for each page.
+PAGES = {
+    STUDY: ("Today", "today", "Alt+T"),
+    PROGRESS: ("Progress", "progress", "Alt+P"),
+    HOME: ("Lists", "lists", "Alt+L"),
+    REVIEW: ("Sort words", "sort", "Alt+S"),
+    UNKNOWN: ("Unknown", "unknown", "Alt+U"),
+}
 
 
 class MainWindow(QMainWindow):
@@ -119,7 +145,7 @@ class MainWindow(QMainWindow):
             self._mode = ModeSwitch.FLASHCARD
 
         self.setWindowTitle("LexiTrack")
-        self.resize(1080, 760)
+        self.resize(1180, 800)
         self.setMinimumSize(760, 600)
 
         self.actions = ListActions(service, self)
@@ -142,20 +168,20 @@ class MainWindow(QMainWindow):
         """Everything the user can do from anywhere, in the order it is offered."""
         going_dark = self._theme.current is ThemeName.LIGHT
         return [
-            Command("Go to Study", "Today's new words and today's reviews",
-                    lambda: self.show_page(STUDY), "Alt+S", "today plan srs due"),
+            Command("Go to Today", "Today's new words and today's reviews",
+                    lambda: self.show_page(STUDY), "Alt+T", "study session plan srs due"),
             Command("Go to Progress", "What you have learned here, and every answer",
                     lambda: self.show_page(PROGRESS), "Alt+P",
                     "statistics history learned answers log calibration"),
-            Command("Go to Home", "Continue learning, see your progress and your lists",
-                    lambda: self.show_page(HOME), "Alt+H", "start overview"),
-            Command("Go to Review", "Review the current list as flashcards or a table",
-                    lambda: self.show_page(REVIEW), "Alt+R", "study flashcards"),
+            Command("Go to Lists", "Your lists, and the one you were sorting",
+                    lambda: self.show_page(HOME), "Alt+L", "home start overview"),
+            Command("Go to Sort Words", "Sort the current list into Known and Unknown",
+                    lambda: self.show_page(REVIEW), "Alt+S", "review flashcards table"),
             Command("Go to Unknown Words", "Every word you marked unknown, across all lists",
                     lambda: self.show_page(UNKNOWN), "Alt+U", "difficult"),
-            Command("Switch List\u2026", "Choose which list to review", self.switch_list,
+            Command("Switch List\u2026", "Choose which list to sort", self.switch_list,
                     "Ctrl+L", "change list open"),
-            Command("Flashcard Mode", "Review the current list one word at a time",
+            Command("Flashcard Mode", "Sort the current list one word at a time",
                     lambda: self.open_review(mode=ModeSwitch.FLASHCARD), "Ctrl+1", "cards"),
             Command("List Mode", "See the current list as a table you can search and filter",
                     lambda: self.open_review(mode=ModeSwitch.LIST), "Ctrl+2", "table"),
@@ -165,6 +191,12 @@ class MainWindow(QMainWindow):
                     self.actions.create_list, "Ctrl+N", "create"),
             Command("Export\u2026", "Save words as PDF, CSV or JSON, with a preview first",
                     self.export, "Ctrl+E", "save pdf csv json print"),
+            Command("Export Answer History\u2026", "Every answer you have given, as a CSV file",
+                    self.export_history, None, "review log csv spreadsheet"),
+            Command("Back Up Now", "Copy your vocabulary and progress to the backups folder",
+                    self.backup_now, None, "backup copy save"),
+            Command("Open Backups Folder", "Where the daily copies are kept",
+                    self._open_backups_folder, None, "backup restore files"),
             Command("Study Plan\u2026", "Choose which lists you are working through",
                     self.manage_plan, "Ctrl+P", "plan lists schedule"),
             Command("Settings\u2026", "Daily counts, the day boundary, theme and data",
@@ -172,7 +204,7 @@ class MainWindow(QMainWindow):
             Command("Switch to Dark Mode" if going_dark else "Switch to Light Mode",
                     "Change between the light and dark themes", self.toggle_theme, "Ctrl+T",
                     "theme appearance"),
-            Command("How LexiTrack Works", "The tabs, your day, the four answers, what is recorded",
+            Command("How LexiTrack Works", "Pages, your day, the four answers, the record",
                     self.show_help, "Shift+F1", "help guide tutorial explain learn"),
             Command("Keyboard Shortcuts", "Every key LexiTrack understands, in one place",
                     self.show_shortcuts, "F1", "keys help"),
@@ -184,7 +216,7 @@ class MainWindow(QMainWindow):
         ]
 
     def _build_actions(self) -> None:
-        """Window-wide shortcuts. The tabs carry their own Alt+S / P / H / R / U."""
+        """Window-wide shortcuts. The sidebar carries its own Alt+T / P / L / S / U."""
         self._shortcut_actions: list[QAction] = []
         for keys, slot in (
             ("Ctrl+K", self.open_palette),
@@ -214,6 +246,7 @@ class MainWindow(QMainWindow):
         menu.clear()
         groups = (
             ("Import\u2026", "New List\u2026", "Export\u2026"),
+            ("Export Answer History\u2026", "Back Up Now", "Open Backups Folder"),
             ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
              "How LexiTrack Works", "Keyboard Shortcuts"),
@@ -241,10 +274,10 @@ class MainWindow(QMainWindow):
 
     def _build_body(self) -> None:
         central = QWidget()
-        layout = QVBoxLayout(central)
+        layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._build_app_bar())
+        layout.addWidget(self._build_sidebar())
 
         self.pages = QStackedWidget()
         self.home = HomePage(self._service, self.actions)
@@ -294,64 +327,60 @@ class MainWindow(QMainWindow):
         # the same place as one from a list action.
         self._toast_widget = Toast(central)
 
-    def _build_app_bar(self) -> QWidget:
+    def _build_sidebar(self) -> Sidebar:
         m = METRICS
-        bar = QFrame()
-        bar.setObjectName("AppBar")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(m.space_5, m.space_2, m.space_5, 0)
-        layout.setSpacing(m.space_2)
+        self.sidebar = sidebar = Sidebar()
+        sidebar.page_requested.connect(self.show_page)
 
-        title = QLabel("LexiTrack")
-        title.setObjectName("AppTitle")
-        layout.addWidget(title, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addSpacing(m.space_5)
-
-        self._tabs = QButtonGroup(self)
-        self._tabs.setExclusive(True)
-        self.tab_buttons: dict[str, QPushButton] = {}
-        # Explicit Alt shortcuts rather than "&" mnemonics, which the Fusion
-        # style underlines permanently.
-        for key, text, shortcut in (
-            (STUDY, "Study", "Alt+S"),
-            (PROGRESS, "Progress", "Alt+P"),
-            (HOME, "Home", "Alt+H"),
-            (REVIEW, "Review", "Alt+R"),
-            (UNKNOWN, "Unknown Words", "Alt+U"),
-        ):
-            tab = QPushButton(text)
-            tab.setShortcut(QKeySequence(shortcut))
-            tab.setToolTip(f"{text} ({shortcut})")
-            tab.setObjectName("NavTab")
-            tab.setCheckable(True)
-            tab.setCursor(Qt.CursorShape.PointingHandCursor)
-            tab.clicked.connect(lambda _c=False, k=key: self.show_page(k))
-            self._tabs.addButton(tab)
-            self.tab_buttons[key] = tab
-            layout.addWidget(tab, 0, Qt.AlignmentFlag.AlignBottom)
-
-        layout.addStretch(1)
-        self.palette_button = QPushButton("Search or run a command")
-        self.palette_button.setObjectName("CommandButton")
+        self.palette_button = sidebar.add_action("Search", "search")
+        self.palette_button.set_hint("Ctrl+K")
         self.palette_button.setToolTip("Search commands, lists and words (Ctrl+K)")
-        self.palette_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.palette_button.setIconSize(QSize(15, 15))
         self.palette_button.clicked.connect(self.open_palette)
-        layout.addWidget(self.palette_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addSpacing(m.space_2)
+        sidebar.add_spacing(m.space_2)
 
-        import_button = QPushButton("Import")
-        import_button.setProperty("size", "small")
-        import_button.setToolTip("Import PDF or JSON files (Ctrl+O)")
-        import_button.clicked.connect(lambda: self.actions.import_into(None))
-        layout.addWidget(import_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        for key in (STUDY, PROGRESS):
+            sidebar.add_page(key, *PAGES[key])
+        sidebar.add_section("Library")
+        for key in (HOME, REVIEW, UNKNOWN):
+            sidebar.add_page(key, *PAGES[key])
+        #: The page buttons, by page key.
+        self.tab_buttons = sidebar.items
+
+        sidebar.start_foot()
+        self.export_button = sidebar.add_action("Export and backup", "export")
+        self.export_menu = QMenu(self.export_button)
+        for title, slot in (
+            ("Export Words\u2026", self.export),
+            ("Export Answer History\u2026", self.export_history),
+            (None, None),
+            ("Back Up Now", self.backup_now),
+            ("Open Backups Folder", self._open_backups_folder),
+        ):
+            if title is None:
+                self.export_menu.addSeparator()
+            else:
+                self.export_menu.addAction(title, slot)
+        self.export_button.clicked.connect(
+            lambda: self.export_menu.popup(
+                self.export_button.mapToGlobal(self.export_button.rect().topRight())
+            )
+        )
+        settings = sidebar.add_action("Settings", "settings", "Ctrl+,")
+        settings.clicked.connect(self.open_settings)
+        sidebar.add_spacing(m.space_2)
+
+        foot = QWidget()
+        foot.setObjectName("SidebarFoot")
+        self._foot_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, foot)
+        self._foot_layout.setContentsMargins(4, 0, 0, 0)
+        self._foot_layout.setSpacing(m.space_1)
 
         self.theme_button = QPushButton()
         self.theme_button.setObjectName("IconButton")
         self.theme_button.setIconSize(QSize(18, 18))
         self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_button.clicked.connect(self.toggle_theme)
-        layout.addWidget(self.theme_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._foot_layout.addWidget(self.theme_button)
 
         self.menu_button = QPushButton()
         self.menu_button.setObjectName("IconButton")
@@ -362,10 +391,31 @@ class MainWindow(QMainWindow):
         self.app_menu = QMenu(self.menu_button)
         self.app_menu.aboutToShow.connect(self._fill_app_menu)
         self.menu_button.setMenu(self.app_menu)
-        layout.addWidget(self.menu_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._foot_layout.addWidget(self.menu_button)
+        self._foot_layout.addStretch(1)
+        sidebar.add_widget(foot)
         self._update_theme_labels()
-        bar.setMinimumHeight(54)
-        return bar
+        return sidebar
+
+    def _fold_sidebar(self) -> None:
+        """Fold the sidebar to icons on a narrow window, open it on a wide one."""
+        compact = self.width() < FOLD_WIDTH
+        self.sidebar.set_compact(compact)
+        self._foot_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
+        )
+        self._foot_layout.setContentsMargins(4 if compact else 4, 0, 0, 0)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt naming
+        super().resizeEvent(event)
+        self._fold_sidebar()
+
+    def _update_badges(self) -> None:
+        """The counts beside Today and Unknown, read fresh from the database."""
+        plan = self._engine.daily_plan()
+        waiting = (plan.new_remaining + plan.due_count) if plan.has_plan else 0
+        self.tab_buttons[STUDY].set_badge(waiting)
+        self.tab_buttons[UNKNOWN].set_badge(self._service.unknown_count())
 
     # -- navigation --------------------------------------------------------
 
@@ -379,8 +429,9 @@ class MainWindow(QMainWindow):
             self._ensure_current_list()
             if self._current_list_id is None:
                 page = HOME
-        self.tab_buttons[page].setChecked(True)
+        self.sidebar.select(page)
         self.pages.setCurrentWidget(self._page_widgets[page])
+        self._update_badges()
         if page == STUDY:
             self.study.refresh()
             self.study.setFocus()
@@ -473,6 +524,7 @@ class MainWindow(QMainWindow):
     def _on_data_changed(self) -> None:
         """Something was written; redraw the page on screen from the database."""
         self._ensure_current_list()
+        self._update_badges()
         page = self.current_page
         if page == STUDY:
             self.study.refresh()
@@ -558,6 +610,7 @@ class MainWindow(QMainWindow):
 
     def _on_bot_activity(self) -> None:
         """An answer or a confirmation arrived from the phone."""
+        self._update_badges()
         if self.current_page == STUDY and not self.study.in_session:
             self.study.refresh()
 
@@ -594,9 +647,35 @@ class MainWindow(QMainWindow):
                 )
             )
         if not scopes:
-            self._toast("There is nothing to export from Study today.")
+            self._toast("There is nothing to export from Today.")
             return
         ExportDialog(self._service, scopes, parent=self).exec()
+
+    def _maintenance(self) -> Maintenance:
+        return Maintenance(self._service.database, self._engine.clock)
+
+    def export_history(self) -> None:
+        """Every answer, undone ones included and marked, as a CSV file."""
+        default = paths.exports_dir() / f"review-history-{self._engine.clock.today()}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Answer History", str(default), "CSV files (*.csv)"
+        )
+        if not path:
+            return
+        rows = self._maintenance().export_review_log(path)
+        self._toast(f"Exported {rows:,} answers.")
+
+    def backup_now(self) -> None:
+        target = self._maintenance().backup()
+        if target is None:
+            self._toast("The backup failed. The log file has the details.")
+        else:
+            self._toast(f"Backed up to {target.name}.")
+
+    def _open_backups_folder(self) -> None:
+        folder = self._maintenance().directory
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def reset_progress(self) -> None:
         progress = self._service.get_progress()
@@ -633,7 +712,6 @@ class MainWindow(QMainWindow):
         self.theme_button.setAccessibleName(label)
         self.theme_button.setToolTip(f"{label} (Ctrl+T)")
         self.menu_button.setIcon(QIcon(str(_ICONS / f"more-{tone}.svg")))
-        self.palette_button.setIcon(QIcon(str(_ICONS / f"search-{tone}.svg")))
 
     def show_migration_notice(self, backup_name: str) -> None:
         QMessageBox.information(

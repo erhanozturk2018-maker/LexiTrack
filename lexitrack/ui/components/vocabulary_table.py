@@ -81,6 +81,53 @@ class Column(IntEnum):
     LANGUAGE = 6
 
 
+#: Natural width of each column.
+COLUMN_WIDTHS = {
+    Column.ORDER: 56, Column.WORD: 210, Column.PART_OF_SPEECH: 160, Column.CEFR: 64,
+    Column.STATUS: 130, Column.LISTS: 120, Column.LANGUAGE: 100,
+}
+#: Columns that give up width when the table is narrow, and how far: the
+#: status down to its widest pill, the others to what still reads. The level
+#: and the row number never shrink: they are short, and cut off say nothing.
+COLUMN_FLOORS = {
+    Column.WORD: 110, Column.PART_OF_SPEECH: 125, Column.STATUS: 116, Column.LISTS: 70,
+}
+
+
+def fit_columns(
+    visible: list[Column], available: int, natural: dict[Column, int] | None = None
+) -> dict[Column, int]:
+    """Widths for ``visible`` columns that fill ``available`` pixels.
+
+    With room to spare every column has its natural width (``natural``
+    overriding :data:`COLUMN_WIDTHS`, e.g. a # column measured to its widest
+    number) and the word takes the rest. Without, the flexible columns shrink
+    in proportion, never below their floor; only then does the table scroll
+    sideways.
+    """
+    base = {**COLUMN_WIDTHS, **(natural or {})}
+    widths = {column: base[column] for column in visible}
+    spare = available - sum(widths.values())
+    if spare >= 0:
+        if Column.WORD in widths:
+            widths[Column.WORD] += spare
+        return widths
+    flexible = [column for column in visible if column in COLUMN_FLOORS]
+    give = {column: widths[column] - COLUMN_FLOORS[column] for column in flexible}
+    total_give = sum(give.values())
+    if total_give <= 0:
+        return widths
+    shortfall = min(-spare, total_give)
+    for column in flexible:
+        widths[column] -= shortfall * give[column] // total_give
+    # Whole pixels: what rounding left over comes off the word, so the columns
+    # add up exactly and no sliver of sideways scrolling appears.
+    if Column.WORD in widths:
+        excess = sum(widths.values()) - available
+        widths[Column.WORD] = max(widths[Column.WORD] - max(excess, 0), COLUMN_FLOORS[Column.WORD])
+    return widths
+
+
 COLUMN_TITLES = {
     Column.ORDER: "#",
     Column.WORD: "WORD",
@@ -305,6 +352,7 @@ class VocabularyTable(QWidget):
     ) -> None:
         super().__init__(parent)
         self._columns = list(columns)
+        self._order_width = COLUMN_WIDTHS[Column.ORDER]
         self._allow_remove = allow_remove
         self._allow_move = allow_move
         self._noun = noun
@@ -393,15 +441,15 @@ class VocabularyTable(QWidget):
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
+        # Widths follow the table's width (fit_columns), so the table fits
+        # beside the sidebar and the details panel instead of scrolling
+        # sideways and cutting off the status column.
+        header.setStretchLastSection(False)
 
-        widths = {
-            Column.ORDER: 56, Column.WORD: 210, Column.PART_OF_SPEECH: 160, Column.CEFR: 64,
-            Column.STATUS: 130, Column.LISTS: 120, Column.LANGUAGE: 100,
-        }
         for column in Column:
             self.view.setColumnHidden(column, column not in self._columns)
-            self.view.setColumnWidth(column, widths[column])
+            self.view.setColumnWidth(column, COLUMN_WIDTHS[column])
+        self.view.viewport().installEventFilter(self)
         # Keep the chosen order of columns.
         for position, column in enumerate(self._columns):
             header.moveSection(header.visualIndex(column), position)
@@ -518,7 +566,8 @@ class VocabularyTable(QWidget):
         count = max(self.model.rowCount(), 1)
         widest = f"{int('8' * len(str(count))):,}"
         needed = self.view.fontMetrics().horizontalAdvance(widest) + order_cell_margin(self.view)
-        self.view.setColumnWidth(Column.ORDER, max(needed, 56))
+        self._order_width = max(needed, COLUMN_WIDTHS[Column.ORDER])
+        self._fit_columns()
 
     def _rebuild_level_chips(self) -> None:
         present = {w.cefr_level for w in self.model.words if w.cefr_level in CEFR_ORDER}
@@ -531,6 +580,7 @@ class VocabularyTable(QWidget):
         checked = {level for level, chip in self.level_chips.items() if chip.isChecked()}
         for chip in self.level_chips.values():
             self._levels_row.removeWidget(chip)
+            chip.hide()
             chip.deleteLater()
         self.level_chips = {}
         # A single level filters nothing, so chips appear only when there is a choice.
@@ -644,6 +694,8 @@ class VocabularyTable(QWidget):
         self.selection_bar.setVisible(showing)
         if showing:
             self._place_selection_bar()
+        else:
+            self.panel.set_buttons_covered(False)
         # Keep the last rows reachable above the bar instead of under it.
         self._bar_space.setFixedHeight(
             self.selection_bar.sizeHint().height() + 2 * _BAR_MARGIN if showing else 0
@@ -659,8 +711,21 @@ class VocabularyTable(QWidget):
         y = area.bottom() - bar.height() - _BAR_MARGIN + 1
         bar.move(x, max(y, 0))
         bar.raise_()
+        # A bar wider than the table reaches over the details panel's buttons.
+        self.panel.set_buttons_covered(
+            self.panel.isVisible() and bar.geometry().intersects(self.panel.geometry())
+        )
+
+    def _fit_columns(self) -> None:
+        widths = fit_columns(
+            self._columns, self.view.viewport().width(), {Column.ORDER: self._order_width}
+        )
+        for column, width in widths.items():
+            self.view.setColumnWidth(column, width)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self.view.viewport() and event.type() == QEvent.Type.Resize:
+            self._fit_columns()
         if watched is self.table_frame and event.type() in (
             QEvent.Type.Resize, QEvent.Type.Move
         ):

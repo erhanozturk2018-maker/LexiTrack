@@ -81,6 +81,8 @@ class FlowLayout(QLayout):
             item = self._items.pop()
             widget = item.widget()
             if widget is not None:
+                # Hidden at once: until it is deleted it would still be painted.
+                widget.hide()
                 widget.deleteLater()
 
     def _arrange(self, rect: QRect, apply: bool) -> int:

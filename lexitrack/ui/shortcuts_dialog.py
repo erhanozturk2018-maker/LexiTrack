@@ -63,7 +63,7 @@ TABLE_KEYS: Section = (
 )
 
 STUDY_KEYS: Section = (
-    "Study reviews",
+    "Today's session",
     (
         ("Space", "Show the meaning; once it is showing, answer Good"),
         ("1 / 2 / 3 / 4", "Again / Hard / Good / Easy"),
@@ -73,7 +73,7 @@ STUDY_KEYS: Section = (
 )
 
 HOME_KEYS: Section = (
-    "Home",
+    "Lists",
     (
         ("← ↑ → ↓", "Move between lists"),
         ("Enter", "Open the list"),
