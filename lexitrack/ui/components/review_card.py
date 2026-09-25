@@ -41,6 +41,7 @@ from ..theme import current_palette
 from ..theme.palette import METRICS
 from .cards import repolish
 from .chips import chip
+from .word_label import WordLabel
 
 #: Which button style each answer gets. Amber for "not yet", green for
 #: "solid", and Easy the solid green: the flashcards' own colour language.
@@ -215,7 +216,8 @@ class ReviewCard(QFrame):
         body.addSpacing(m.space_2)
 
         # The word, for recall, teaching and writing.
-        self.word_label = _centered("", "WordLabel")
+        # As large as fits, never cut off: a phrase shrinks rather than clips.
+        self.word_label = WordLabel()
         body.addWidget(self.word_label)
         self.meta_label = _centered("", "MetaLabel", wrap=False)
         body.addWidget(self.meta_label)

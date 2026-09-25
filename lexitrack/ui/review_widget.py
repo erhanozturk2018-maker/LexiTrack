@@ -48,6 +48,7 @@ from ..models.user_word_state import ReviewStatus
 from ..repositories.word_repository import StoredWord
 from ..services.review_session import ReviewItem
 from .components.status import StatusBadge
+from .components.word_label import WordLabel
 from .theme.palette import METRICS
 
 #: Keeps the answer buttons on the same line no matter how long the word is.
@@ -116,10 +117,7 @@ class ReviewWidget(QWidget):
         card_layout.addStretch(1)
 
         # -- the word
-        self._word_label = QLabel()
-        self._word_label.setObjectName("WordLabel")
-        self._word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._word_label.setWordWrap(True)
+        self._word_label = WordLabel()
         self._word_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(self._word_label)
         card_layout.addSpacing(m.space_3)

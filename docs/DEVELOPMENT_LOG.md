@@ -864,3 +864,11 @@ limits learning data to a period.
   the word table.
 - The columns block drew on the window colour inside the white settings
   column; it now takes the transparent panel style.
+
+## 2026-09-25 — fix: long headwords were cut off on the card
+
+A phrase such as "departures and arrivals board" wrapped onto two lines at
+the card's 58 px, but the label was laid out one line tall, so both lines
+were clipped. The headword is now a `WordLabel` (`components/word_label.py`):
+it steps its size down until the text fits on at most two lines, and asks for
+the height those lines need. The session card and Sort words both use it.
