@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 from ..core import autostart, paths
 from ..core.errors import LexiTrackError
 from ..core.logging_config import set_file_logging
+from ..models.language import LANGUAGE_NAMES, UNDETERMINED
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
@@ -195,6 +196,22 @@ class SettingsDialog(QDialog):
         )
         layout.addWidget(known)
 
+        language = _Group("LANGUAGE")
+        self.learner_language = QComboBox()
+        self.learner_language.addItem("None", "")
+        for code, name in sorted(LANGUAGE_NAMES.items(), key=lambda item: item[1]):
+            if code != UNDETERMINED:
+                self.learner_language.addItem(name, code)
+        self.learner_language.setFixedWidth(_CONTROL_WIDTH)
+        language.add(
+            "Explain words in",
+            "Your own language, for meanings, nuances and translations, where content "
+            "in it has been added. None: words are explained by their definitions. The "
+            "words and their examples stay in the language you are learning.",
+            self.learner_language,
+        )
+        layout.addWidget(language)
+
         day = _Group("THE DAY")
         self.day_start = _HourSpin()
         day.add(
@@ -211,7 +228,8 @@ class SettingsDialog(QDialog):
             self.reminder_hour,
         )
         layout.addWidget(day)
-        layout.addWidget(_note("Times are in Europe/Istanbul."))
+        self.timezone_note = _note("")
+        layout.addWidget(self.timezone_note)
         layout.addStretch(1)
         return page
 
@@ -476,7 +494,7 @@ class SettingsDialog(QDialog):
         self.retention.setDecimals(2)
         self.retention.setFixedWidth(_CONTROL_WIDTH)
         # The interface is English, so the number is too: "0.90", not the
-        # "0,90" a Turkish system locale would otherwise produce.
+        # "0,90" a system locale with a decimal comma would otherwise produce.
         self.retention.setLocale(QLocale(QLocale.Language.English))
         scheduler.add(
             "Target retention",
@@ -555,6 +573,9 @@ class SettingsDialog(QDialog):
         self.mastery_days.setValue(int(s.mastery_stability_days))
         self.review_known.setChecked(s.review_known_words)
         self.hide_meaning.setChecked(s.hide_meaning_in_study)
+        index = self.learner_language.findData(s.learner_language or "")
+        self.learner_language.setCurrentIndex(max(index, 0))
+        self.timezone_note.setText(f"Times are in {s.timezone}.")
         self.day_start.setValue(s.day_start_hour)
         self.notify_hour.setValue(s.notify_hour)
         self.reminder_hour.setValue(s.evening_reminder_hour)
@@ -726,6 +747,7 @@ class SettingsDialog(QDialog):
             Setting.MASTERY_STABILITY_DAYS: self.mastery_days.value(),
             Setting.REVIEW_KNOWN_WORDS: self.review_known.isChecked(),
             Setting.HIDE_MEANING_IN_STUDY: self.hide_meaning.isChecked(),
+            Setting.LEARNER_LANGUAGE: self.learner_language.currentData() or "",
             Setting.DAY_START_HOUR: self.day_start.value(),
             Setting.NOTIFY_HOUR: self.notify_hour.value(),
             Setting.EVENING_REMINDER_HOUR: self.reminder_hour.value(),

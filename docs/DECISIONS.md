@@ -1035,3 +1035,29 @@ could not trace back to a decision of theirs.
 confirms keep being reviewed. That is intended: an unconfirmed word is one the
 user has not called known.
 
+---
+
+## 71. Content is split by language; no language is built in
+
+**Decision.** A word's target language stays part of its identity. Teaching
+content is split in two: what is true of the word in its own language
+(pattern, collocations, register, related words, example contexts) is stored
+once, shared by every learner; what explains it to a learner (core meaning,
+nuance, usage note, mnemonic, notes, context translations) is stored per
+learner language, as rows keyed by a language code. The learner chooses
+their language in Settings. The enrichment format (schema 2) carries the
+shared part once and a block per learner language.
+
+**Reason.** Schema 5 had `core_meaning_tr` and `translation_tr`: one learner
+language wired into the columns, so a German speaker could not be served
+without a new schema, and a second language would have duplicated the word.
+The product is meant for any pair — English → Turkish, English → German,
+German → English — on the same data model, on desktop and later on mobile.
+Turkish content remains fully supported, as the first localization rather
+than a special case.
+
+**How it was done.** Schema 5 was already on the user's machine, so the change
+is a 5 → 6 migration rather than an edit of history: it moves any schema 5
+content into `tr` localizations and drops the language-specific columns.
+Schema 1 enrichment files are still read, their fields mapped to `tr`.
+

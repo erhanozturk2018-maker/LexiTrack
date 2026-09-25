@@ -18,7 +18,8 @@ answered by having just seen it. Relearning and repair questions use a
 different prompt from the one that failed, are recorded as practice linked to
 the answer, and never change the rating.
 
-A word with no meaning to ask from (no definition, no Turkish meaning) is
+A word with no meaning to ask from (no definition, and no meaning in the
+learner's language) is
 reviewed the V1 way: shown, revealed, rated by the learner. The page shows
 steps and reports what the learner did; it holds no state of its own.
 """
@@ -240,7 +241,7 @@ class ReviewFlow:
         for item in queue:
             run = _Run(
                 item=item,
-                teaching=self._content.teaching(item.word.id),
+                teaching=self._teaching(item.word.id),
             )
             self._runs[item.word.id] = run
             self._steps.append(self._primary(run))
@@ -343,6 +344,10 @@ class ReviewFlow:
         return word
 
     # -- the rules applied ------------------------------------------------------
+
+    def _teaching(self, word_id: int) -> WordTeaching:
+        """What is known about the word, in the learner's chosen language."""
+        return self._content.teaching(word_id, self._engine.settings.learner_language)
 
     def _take(self, kind: StepKind) -> Step:
         step = self.current
@@ -483,7 +488,7 @@ class ReviewFlow:
             prompt = context_prompt(word, run.teaching, exclude=run.contexts)
             if prompt is not None:
                 return prompt
-        avoid = Source.TURKISH if Source.TURKISH in run.sources else (
+        avoid = Source.LEARNER if Source.LEARNER in run.sources else (
             Source.DEFINITION if Source.DEFINITION in run.sources else None
         )
         return meaning_prompt(word, run.teaching, avoid=avoid)
@@ -568,7 +573,7 @@ class ReviewFlow:
             item = engine.study_item(word_id)
             if item is None:
                 continue
-            run = _Run(item=item, teaching=flow._content.teaching(word_id),
+            run = _Run(item=item, teaching=flow._teaching(word_id),
                        rated=word_id not in pending)
             flow._runs[word_id] = run
             flow._order.append(word_id)

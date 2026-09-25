@@ -9,7 +9,13 @@ from __future__ import annotations
 import pytest
 
 from lexitrack.models.attempt import Effort, Level, MemoryResult, Task
-from lexitrack.models.content import ContextKind, WordContent, WordContext, WordTeaching
+from lexitrack.models.content import (
+    ContextKind,
+    WordContent,
+    WordContext,
+    WordLocalization,
+    WordTeaching,
+)
 from lexitrack.models.srs import Rating
 from lexitrack.repositories.word_repository import StoredWord
 from lexitrack.services.review_route import (
@@ -39,13 +45,25 @@ def word(**kwargs) -> StoredWord:
     return StoredWord(**{**defaults, **kwargs})
 
 
-def teaching(**content) -> WordTeaching:
+def teaching(core_meaning: str | None = None, **content) -> WordTeaching:
+    """A word's teaching; a core meaning is given in German, as a learner's language."""
     contexts = (
         WordContext(word_id=1, id=11, text="She was {{reluctant}} to leave."),
         WordContext(word_id=1, id=12, text="A {{reluctant}} yes, after a long sigh.",
                     kind=ContextKind.SITUATION),
     )
-    return WordTeaching(WordContent(word_id=1, **content) if content else None, contexts)
+    localization = (
+        WordLocalization(word_id=1, learner_language="de", core_meaning=core_meaning)
+        if core_meaning
+        else None
+    )
+    return WordTeaching(
+        WordContent(word_id=1, **content) if content else None,
+        contexts,
+        learner_language="de" if core_meaning else None,
+        localization=localization,
+        translations={11: "Sie wollte nur ungern gehen."} if core_meaning else {},
+    )
 
 
 # -- typed answers ---------------------------------------------------------------------
@@ -96,10 +114,10 @@ def test_a_definition_never_gives_the_word_away() -> None:
     assert "expel" not in mask_word("the act of expelling someone", "be expelled")
 
 
-def test_the_meaning_prompt_prefers_turkish_and_switches_when_asked() -> None:
-    first = meaning_prompt(word(), teaching(core_meaning_tr="unwilling"))
-    assert first.source is Source.TURKISH and first.text == "unwilling"
-    other = meaning_prompt(word(), teaching(core_meaning_tr="unwilling"), avoid=Source.TURKISH)
+def test_the_meaning_prompt_prefers_the_learners_language_and_switches_when_asked() -> None:
+    first = meaning_prompt(word(), teaching(core_meaning="widerwillig"))
+    assert first.source is Source.LEARNER and first.text == "widerwillig"
+    other = meaning_prompt(word(), teaching(core_meaning="widerwillig"), avoid=Source.LEARNER)
     assert other.source is Source.DEFINITION and "reluctance" not in other.text
     plain = meaning_prompt(word(), teaching())
     assert plain.source is Source.DEFINITION and plain.task is Task.MEANING_TO_WORD

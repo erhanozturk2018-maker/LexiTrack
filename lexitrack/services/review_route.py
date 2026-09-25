@@ -180,7 +180,9 @@ def mask_word(text: str, word: str) -> str:
 class Source(StrEnum):
     """Where a prompt's meaning or text came from."""
 
-    TURKISH = "turkish"
+    #: The core meaning in the learner's own language.
+    LEARNER = "learner"
+    #: The definition in the target language, the word's forms hidden.
     DEFINITION = "definition"
     CONTEXT = "context"
     COLLOCATION = "collocation"
@@ -209,20 +211,18 @@ class Prompt:
 
 
 def has_meaning(word: StoredWord, teaching: WordTeaching) -> bool:
-    content = teaching.content
-    return bool(word.definition) or bool(content and content.core_meaning_tr)
+    return bool(word.definition) or bool(teaching.core_meaning)
 
 
 def meaning_prompt(
     word: StoredWord, teaching: WordTeaching, avoid: Source | None = None
 ) -> Prompt | None:
-    """The word from its meaning: Turkish if there is one, the definition if not,
-    and the other one when ``avoid`` names the one just used."""
-    content = teaching.content
-    turkish = content.core_meaning_tr if content else None
+    """The word from its meaning: in the learner's language if there is one,
+    the definition if not, and the other one when ``avoid`` names the one just
+    used."""
     options = []
-    if turkish:
-        options.append((Source.TURKISH, turkish))
+    if teaching.core_meaning:
+        options.append((Source.LEARNER, teaching.core_meaning))
     if word.definition:
         options.append((Source.DEFINITION, mask_word(word.definition, word.word)))
     if avoid is not None and len(options) > 1:
@@ -271,7 +271,7 @@ def context_prompt(
         accepted=(context.target, word.word) if context.target else (word.word,),
         answer=context.target or word.word,
         source=Source.CONTEXT,
-        detail=context.translation_tr,
+        detail=teaching.translation(context),
         context_id=context.id,
         novel_context=context.id not in used,
     )
@@ -309,15 +309,14 @@ def collocation_prompt(
             accepted=(partner,),
             answer=collocation,
             source=Source.COLLOCATION,
-            detail=content.core_meaning_tr or word.definition,
+            detail=teaching.core_meaning or word.definition,
         )
     return None
 
 
 def production_prompt(word: StoredWord, teaching: WordTeaching) -> Prompt:
     """Write a sentence with the word; graded by the learner against examples."""
-    content = teaching.content
-    meaning = (content.core_meaning_tr if content else None) or word.definition
+    meaning = teaching.core_meaning or word.definition
     return Prompt(
         task=Task.PRODUCTION,
         text=word.word,

@@ -15,7 +15,8 @@ import pytest
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
 from lexitrack.models.attempt import LearningAttempt, MemoryResult, Phase, Role, Task
-from lexitrack.models.content import WordContent, WordContext
+from lexitrack.models.content import WordContext, WordLocalization
+from lexitrack.models.settings import Setting
 from lexitrack.models.source import Source
 from lexitrack.models.srs import Rating
 from lexitrack.models.user_word_state import ReviewStatus
@@ -208,7 +209,10 @@ def test_a_failed_context_is_probed_by_meaning_and_repaired_in_another_context(
         WordContext(word_id=word_id, text="She was {{reluctant}} to leave."),
         WordContext(word_id=word_id, text="A {{reluctant}} yes, after a long sigh."),
     ])
-    content.save_content(WordContent(word_id=word_id, core_meaning_tr="unwilling"))
+    content.save_localization(
+        WordLocalization(word_id=word_id, learner_language="de", core_meaning="widerwillig")
+    )
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
     # Recalled once before, so today's first question is a context.
     AttemptRepository(database).add(LearningAttempt(
         word_id=word_id, at=datetime(2026, 9, 17, 5, tzinfo=UTC), on_day="2026-09-17",
@@ -326,3 +330,34 @@ def test_an_easy_recall_is_followed_next_time_by_a_sentence(
     step = again.current
     assert step.prompt.task is Task.CONTEXT_CLOZE
     assert "one step harder" in step.reason
+
+
+def test_the_meaning_is_asked_in_the_learners_chosen_language(
+    engine: LearningService, database: Database
+) -> None:
+    """One word, two learner languages: the setting decides which one asks."""
+    word_id = _ids(database)["barn"]
+    content = ContentRepository(database)
+    for language, meaning in (("de", "Scheune"), ("es", "granero")):
+        content.save_localization(
+            WordLocalization(word_id=word_id, learner_language=language, core_meaning=meaning)
+        )
+
+    def first_prompt() -> str:
+        flow = ReviewFlow(engine)
+        flow.start()
+        _to(flow, "barn")
+        text = flow.current.prompt.text
+        flow.finish()
+        return text
+
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "es"})
+    assert first_prompt() == "granero"
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    assert first_prompt() == "Scheune"
+    engine.save_settings({Setting.LEARNER_LANGUAGE: ""})
+    assert first_prompt() == WORDS["barn"], "no language chosen: the definition"
+    assert database.connection.execute(
+        "SELECT COUNT(*) FROM words WHERE normalized_word = 'barn'"
+    ).fetchone()[0] == 1
+

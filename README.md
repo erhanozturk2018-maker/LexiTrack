@@ -266,8 +266,9 @@ has one button for the next thing to do:
    list can be copied with meanings or exported as a PDF — then press
    **I studied these 25**. They are asked for the first time tomorrow.
 2. **Review.** Words due today come one at a time, and you **type** them: from
-   their meaning (the Turkish one if the word has one, otherwise its English
-   definition, with the word itself hidden), and once you can do that, from a
+   their meaning (in your own language if you chose one in *Settings →
+   Learning* and the word has content in it, otherwise its definition, with
+   the word itself hidden), and once you can do that, from a
    sentence or a phrase with a gap. **Enter** checks it; small slips are
    accepted. **Ctrl+H** shows the first letter; **Enter** with nothing typed
    means you don't know.

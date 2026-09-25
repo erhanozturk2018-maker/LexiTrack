@@ -29,7 +29,7 @@ from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class MigrationError(StorageError):
@@ -452,6 +452,19 @@ def _migrate_4_to_5(connection: sqlite3.Connection) -> None:
     seed_settings(connection)
 
 
+_LOCALIZATION_SCHEMA = Path(__file__).with_name("localization.sql")
+
+
+def _migrate_5_to_6(connection: sqlite3.Connection) -> None:
+    """Teaching content split into target-language and learner-language parts.
+
+    What schema 5 held for one learner language (Turkish) moves into that
+    language's localization; see localization.sql.
+    """
+    _run_sql(connection, _LOCALIZATION_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+
+
 # -- verification ------------------------------------------------------------
 
 #: Tables holding the user's data. An upgrade may add to them, never lose a
@@ -465,6 +478,9 @@ _PRESERVED = (
     "srs_cards",
     "review_logs",
     "word_status_events",
+    "word_content",
+    "word_contexts",
+    "learning_attempts",
 )
 
 
@@ -493,6 +509,7 @@ _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
     4: _migrate_4_to_5,
+    5: _migrate_5_to_6,
 }
 
 

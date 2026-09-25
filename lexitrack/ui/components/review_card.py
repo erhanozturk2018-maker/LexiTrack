@@ -18,6 +18,8 @@ spelling is always seen before the next question.
 
 from __future__ import annotations
 
+from html import escape
+
 from PySide6.QtCore import QElapsedTimer, QEvent, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
@@ -696,22 +698,35 @@ def _teaching_html(step: Step) -> str:
     content = teaching.content if teaching else None
     parts: list[str] = []
 
-    def line(title: str, text: str | None) -> None:
+    def line(title: str, text: str | None, raw: bool = False) -> None:
+        # Content comes from imported files: shown as text, never as markup.
+        if text and not raw:
+            text = escape(text)
         if text:
             parts.append(
                 f"<p style='margin:0 0 8px 0'><span style='font-size:11px;"
                 f"font-weight:600;letter-spacing:0.6px'>{title.upper()}</span><br>{text}</p>"
             )
 
-    if content and content.core_meaning_tr:
-        line("Meaning", content.core_meaning_tr)
+    localization = teaching.localization if teaching else None
+    line("Meaning", teaching.core_meaning if teaching else None)
     line("Definition", word.definition)
     if content:
         line("Pattern", content.pattern)
         if content.collocations:
             line("Goes with", " · ".join(content.collocations))
-        line("Nuance", content.nuance)
-        line("To remember", content.encoding_cue)
+    if localization:
+        line("Nuance", localization.nuance)
+        line("How it is used", localization.usage_note)
+        line("To remember", localization.encoding_cue)
+        line("Note", localization.notes)
     if teaching and teaching.contexts:
-        line("In use", "<br>".join(f"“{c.plain}”" for c in teaching.contexts[:2]))
+        examples = []
+        for context in teaching.contexts[:2]:
+            translated = teaching.translation(context)
+            examples.append(
+                f"“{escape(context.plain)}”"
+                + (f"<br><i>{escape(translated)}</i>" if translated else "")
+            )
+        line("In use", "<br>".join(examples), raw=True)
     return "".join(parts) or "<p>No more is stored about this word yet.</p>"

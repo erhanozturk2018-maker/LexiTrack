@@ -754,3 +754,29 @@ sentence" after one easy answer. A sentence of one's own now needs an example
 sentence to compare it with, so a word without content stays on the short
 route, as the design says.
 
+## 2026-09-25 — English samples, and a language-neutral content model
+
+Asked for: everything as English as possible, because the app is meant for
+anyone; and a data model with no learner language built in.
+
+- **Samples.** The V2 commits had Turkish sample text (the format doc's
+  example, test data, and the README screenshot's sample meanings). At the
+  user's choice the seven commits were rewritten with English samples — each
+  commit differing from its original only in those files — and the README
+  screenshot now shows a sample word asked from its English definition.
+- **Schema 6.** Teaching content is split into target-language rows shared by
+  every learner and learner-language rows keyed by a language code
+  (decision 71). The enrichment format is schema 2, with a block per learner
+  language; schema 1 files are read as `tr`. Settings has *Explain words
+  in*. Tests prove two learner languages on one word without a second word
+  record, and that the upgrade moves schema 5 content into `tr`.
+
+**Found on the way:** the Learning settings page said "Times are in
+Europe/Istanbul" whatever the setting was; it now shows the setting. The
+time zone itself still defaults to Europe/Istanbul — a question for the
+user, not a wording fix.
+
+**Verification:** full suite and lint clean; the 5 → 6 upgrade run on a copy
+of the real database (no row lost, no setting changed, one setting added,
+integrity and foreign keys clean, copy deleted).
+

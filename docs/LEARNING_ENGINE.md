@@ -140,7 +140,8 @@ instant, beyond 12 s plus 0.2 s a letter is effortful. An empty answer is
 **Level 5** (a sentence) cannot be checked by the app: you write one, see
 example sentences, and grade it yourself.
 
-**No meaning to ask from** — no definition and no Turkish meaning — means the
+**No meaning to ask from** — no definition and no meaning in the learner's
+language — means the
 word is reviewed the V1 way: shown, revealed, rated by you (route `v1`).
 
 **Undo** takes back the last rated word whole: its rating, its probes and any

@@ -174,6 +174,33 @@ format everywhere, because `due_at` is compared as text in SQL. Days are
 stored as local dates (`introduced_on`, `reviewed_on`). `state` is one of
 `introduced`, `learning`, `review`, `relearning`, `archived`.
 
+### Teaching content and languages (schemas 5 and 6)
+
+A word belongs to one **target language**, the language being learned:
+`words.language`, part of its identity (English "gift" and German "Gift" are
+two words). Teaching content is split by who it is true for:
+
+```text
+words (target language)          one record, one card, one review history
+├── word_content                 shared by every learner: pattern, collocations,
+│                                register, related words, depth
+├── word_contexts                shared: examples in the target language
+│   └── context_translations     per (context, learner language)
+└── word_localizations           per (word, learner language): core meaning,
+                                 nuance, usage note, mnemonic, notes, version
+```
+
+A **learner language** is data — a code in a row — never a column or a
+table: `tr`, `de`, `es` coexist on the same word without duplicating it
+(tests/test_content.py, tests/test_localization_migration.py). The learner
+chooses theirs in Settings (`learner_language`); the review asks in it when
+the word has content in it and falls back to the target-language definition
+otherwise. Any pair works on this schema: English → Turkish, English →
+German, German → English, Spanish → English.
+
+Schema 5 kept one learner language (Turkish) in the shared rows; the 5 → 6
+upgrade moved it into `tr` localizations and dropped those columns.
+
 ### Invariants the repositories maintain
 
 1. **Vocabulary is the union of the lists.** A word removed from its last list,
@@ -424,8 +451,9 @@ it was; route V2 is built on this object.
 ### Content
 
 `ContentService` (`services/content_service.py`) reads a word's teaching
-content and moves it in and out in batches: `build_batch` / `export_batch`
-write the words that need content with an instructions prompt,
+content for a learner language and moves it in and out in batches:
+`build_batch` / `export_batch` write the words that need content, asking for
+a block in each learner language given, with an instructions prompt,
 `preview_import` validates a filled file and reports fills, conflicts, new and
 duplicate contexts and rejected entries, and `apply_import` writes it in one
 transaction, replacing a conflicting field only when told to. The format is

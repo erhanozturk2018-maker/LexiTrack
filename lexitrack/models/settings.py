@@ -19,6 +19,8 @@ import math
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .language import is_determined, normalize_language
+
 #: Every setting the engine understands, with its default as text.
 DEFAULT_SETTINGS: dict[str, str] = {
     # -- daily workload
@@ -45,6 +47,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "leech_weak_stability_days": "7",
     # -- study behaviour
     "hide_meaning_in_study": "true",
+    # The language words are explained in (a code such as "tr", "de", "es"),
+    # or empty for none: then the target language's own definitions are used.
+    "learner_language": "",
     # -- clients
     "telegram_enabled": "false",
     # Sunday evening on Telegram: the week's answers, words learned, hard words.
@@ -77,6 +82,7 @@ class Setting(StrEnum):
     LEECH_TOTAL_LAPSES = "leech_total_lapses"
     LEECH_WEAK_STABILITY_DAYS = "leech_weak_stability_days"
     HIDE_MEANING_IN_STUDY = "hide_meaning_in_study"
+    LEARNER_LANGUAGE = "learner_language"
     TELEGRAM_ENABLED = "telegram_enabled"
     WEEKLY_SUMMARY = "weekly_summary"
     DEVELOPER_MODE = "developer_mode"
@@ -108,6 +114,8 @@ class LearningSettings:
     leech_total_lapses: int = 8
     leech_weak_stability_days: float = 7.0
     hide_meaning_in_study: bool = True
+    #: The language words are explained in, or None for none chosen.
+    learner_language: str | None = None
     telegram_enabled: bool = False
     weekly_summary: bool = True
     developer_mode: bool = False
@@ -156,12 +164,20 @@ class LearningSettings:
             leech_total_lapses=max(integer(Setting.LEECH_TOTAL_LAPSES), 1),
             leech_weak_stability_days=max(number(Setting.LEECH_WEAK_STABILITY_DAYS), 0.0),
             hide_meaning_in_study=flag(Setting.HIDE_MEANING_IN_STUDY),
+            learner_language=_language(merged[Setting.LEARNER_LANGUAGE]),
             telegram_enabled=flag(Setting.TELEGRAM_ENABLED),
             weekly_summary=flag(Setting.WEEKLY_SUMMARY),
             developer_mode=flag(Setting.DEVELOPER_MODE),
             debug_logging=flag(Setting.DEBUG_LOGGING),
             active_plan_id=int(plan) if plan.isdigit() else None,
         )
+
+
+def _language(value: object) -> str | None:
+    """A learner-language code, or None when none is chosen or it is not one."""
+    text = str(value or "").strip()
+    code = normalize_language(text) if text else None
+    return code if is_determined(code) else None
 
 
 def _parameters(value: object) -> tuple[float, ...] | None:
