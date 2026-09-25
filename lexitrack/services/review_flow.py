@@ -14,13 +14,18 @@ teaching, for one word:
                                                    (at most two cycles)
 
 The answer is kept hidden until the word is rated, so no probe can be
-answered by having just seen it. Relearning and repair questions use a
+answered by having just seen it. **The learner says how a retrieval went**:
+after a correct typed answer they choose Effortful, Remembered or Instant,
+after a written sentence one of Forgot / Effortful / Remembered / Instant, and
+for a word with no meaning to ask from the same four before anything is
+shown (:meth:`ReviewFlow.assess`). That report is the result; the time taken,
+a hint and a slip are kept as telemetry only. Relearning and repair questions use a
 different prompt from the one that failed, are recorded as practice linked to
 the answer, and never change the rating.
 
 A word with no meaning to ask from (no definition, and no meaning in the
-learner's language) is
-reviewed the V1 way: shown, revealed, rated by the learner. The page shows
+learner's language) is shown and the learner reports, before anything else
+is shown, whether they knew it. The page shows
 steps and reports what the learner did; it holds no state of its own.
 
 Any client drives the same flow — the desktop card, the Telegram bot — and
@@ -43,8 +48,10 @@ from ..models.attempt import (
     Effort,
     LearningAttempt,
     Level,
+    MemoryResult,
     Phase,
     Role,
+    SelfReport,
     Task,
 )
 from ..models.content import WordTeaching
@@ -88,7 +95,7 @@ class StepKind(StrEnum):
     CHOOSE = "choose"
     #: Write a sentence, then compare it with examples and grade it (level 5).
     WRITE = "write"
-    #: V1: the word shown, the meaning revealed, one of four answers.
+    #: A word with no meaning to ask from: shown, and the learner reports.
     RECALL = "recall"
     #: The word taught again, before it is asked again.
     TEACH = "teach"
@@ -148,6 +155,9 @@ class Feedback:
     resolution: Resolution | None = None
     #: True when no step is left: the session is over.
     finished: bool = False
+    #: The typed answer was right; the learner's report comes next
+    #: (Effortful, Remembered or Instant) before anything is recorded.
+    awaiting: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +201,29 @@ class _Run:
         return self.item is not None and self.item.is_struggling
 
 
+@dataclass(frozen=True, slots=True)
+class _Awaiting:
+    """A right typed answer, and what was observed of it, until the report."""
+
+    near_miss: bool = False
+    response_ms: int | None = None
+    hinted: bool = False
+
+
+#: What a report on a shown word says about the memory, and the rating for it.
+_REPORT_MEMORY = {
+    SelfReport.FORGOT: MemoryResult.FORGOTTEN,
+    SelfReport.EFFORTFUL: MemoryResult.RECALLED_EFFORT,
+    SelfReport.REMEMBERED: MemoryResult.RECALLED,
+    SelfReport.INSTANT: MemoryResult.RECALLED,
+}
+_MEMORY_RATING = {
+    MemoryResult.FORGOTTEN: Rating.AGAIN,
+    MemoryResult.RECALLED_EFFORT: Rating.HARD,
+    MemoryResult.RECALLED: Rating.GOOD,
+}
+
+
 class ReviewFlow:
     """A day's reviews by route V2."""
 
@@ -218,8 +251,9 @@ class ReviewFlow:
         self._answered = 0
         self._last_answer: tuple[str, Rating] | None = None
         self._last_word_id: int | None = None
-        self._revealed = False
         self._learned = 0
+        #: A correct typed answer waiting for the learner's report.
+        self._awaiting: _Awaiting | None = None
 
     # -- reading -----------------------------------------------------------
 
@@ -263,9 +297,9 @@ class ReviewFlow:
         return self._answered
 
     @property
-    def revealed(self) -> bool:
-        """For a RECALL step: whether the meaning shows."""
-        return self._revealed
+    def awaiting(self) -> bool:
+        """True while a correct typed answer waits for the learner's report."""
+        return self._awaiting is not None
 
     @property
     def last_answer(self) -> tuple[str, Rating] | None:
@@ -279,7 +313,8 @@ class ReviewFlow:
         )
 
     def intervals(self) -> dict[Rating, int]:
-        """For a RECALL step: when each answer would bring the word back."""
+        """For a RECALL step: when each report would bring the word back, by the
+        rating it maps to."""
         step = self.current
         if step is None or step.kind is not StepKind.RECALL:
             return {}
@@ -371,16 +406,44 @@ class ReviewFlow:
     # -- answering -----------------------------------------------------------
 
     def submit(self, typed: str, response_ms: int | None = None, hinted: bool = False) -> Feedback:
-        """A typed answer to a TYPE step. An empty answer is "I don't know"."""
+        """A typed answer to a TYPE step. An empty answer is Forgot.
+
+        A right answer in a review is not recorded yet: the learner's report
+        (:meth:`assess`) says how it came. Practice straight after teaching is
+        never rated and needs none; its effort is the observed one.
+        """
         step = self._take(StepKind.TYPE)
         prompt = step.prompt
         check = check_typed(prompt.accepted, typed)
+        if check.correct and step.phase is Phase.REVIEW:
+            self._awaiting = _Awaiting(near_miss=check.near_miss, response_ms=response_ms,
+                                       hinted=hinted)
+            self._save()
+            return Feedback(True, check.near_miss, answer=prompt.answer, awaiting=True)
         effort = (
             effort_for(response_ms, typed, hinted=hinted, near_miss=check.near_miss)
             if check.correct
             else None
         )
         return self._record(step, check.correct, effort, response_ms, near_miss=check.near_miss)
+
+    def assess(self, report: SelfReport) -> Feedback:
+        """The learner's report on the step on screen: after a correct typed
+        answer, after a written sentence, or for a word shown without a meaning.
+        """
+        step = self.current
+        if step is None:
+            raise RuntimeError("no step on screen")
+        if step.kind is StepKind.TYPE and self._awaiting is not None:
+            waiting, self._awaiting = self._awaiting, None
+            # Forgot after a right answer: the learner's word that it was a guess.
+            return self._record(step, report.success, report.effort, waiting.response_ms,
+                                near_miss=waiting.near_miss)
+        if step.kind is StepKind.WRITE:
+            return self._record(step, report.success, report.effort, None)
+        if step.kind is StepKind.RECALL:
+            return self._recall(step, report)
+        raise RuntimeError(f"nothing to report on a {step.kind.value} step")
 
     def choose(self, index: int, response_ms: int | None = None) -> Feedback:
         """The option picked in a CHOOSE step."""
@@ -389,32 +452,25 @@ class ReviewFlow:
         correct = picked is not None and picked.id == step.word.id
         return self._record(step, correct, Effort.NORMAL if correct else None, response_ms)
 
-    def grade(self, used_well: bool, effortful: bool = False) -> Feedback:
-        """The learner's grade of their own sentence in a WRITE step."""
-        step = self._take(StepKind.WRITE)
-        effort = (Effort.EFFORTFUL if effortful else Effort.NORMAL) if used_well else None
-        return self._record(step, used_well, effort, None)
-
-    def reveal(self) -> bool:
-        step = self.current
-        if step is None or step.kind is not StepKind.RECALL or self._revealed:
-            return False
-        self._revealed = True
-        return True
-
-    def rate(self, rating: Rating) -> Feedback:
-        """A V1 answer to a RECALL step."""
-        step = self._take(StepKind.RECALL)
+    def _recall(self, step: Step, report: SelfReport) -> Feedback:
+        """A word with no meaning to ask from, reported before anything showed:
+        recorded as a word-to-meaning retrieval and rated from the report."""
         run = self._runs[step.word.id]
-        outcome = self._engine.answer(
-            step.word.id, rating, session_id=self._session_id, channel=self._channel
+        attempt = replace(
+            self._attempt(step, report.success, report.effort, None), task=Task.WORD_TO_MEANING
+        )
+        memory = _REPORT_MEMORY[report]
+        rating = _MEMORY_RATING[memory] if report is not SelfReport.INSTANT else Rating.EASY
+        outcome = self._engine.review(
+            step.word.id, rating, memory_result=memory, attempts=[attempt],
+            session_id=self._session_id, channel=self._channel,
         )
         self._steps.pop(0)
         self._rated(run, outcome, rating)
         self._on_step()
         self._save()
         return Feedback(
-            correct=rating is not Rating.AGAIN,
+            correct=report.success,
             answer=step.word.word,
             outcome=outcome,
             finished=not self._steps,
@@ -641,7 +697,11 @@ class ReviewFlow:
         self, step: Step, success: bool, effort: Effort | None, response_ms: int | None
     ) -> LearningAttempt:
         prompt = step.prompt
-        task = Task.CHOOSE_WORD if step.kind is StepKind.CHOOSE else prompt.task
+        task = (
+            Task.CHOOSE_WORD if step.kind is StepKind.CHOOSE
+            else Task.WORD_TO_MEANING if prompt is None
+            else prompt.task
+        )
         return LearningAttempt(
             word_id=step.word.id,
             at=self._engine.clock.now_utc(),
@@ -672,10 +732,7 @@ class ReviewFlow:
 
     def _on_step(self) -> None:
         self._step_number += 1
-        step = self.current
-        self._revealed = step is not None and step.kind is StepKind.RECALL and not (
-            step.hide_meaning
-        )
+        self._awaiting = None
 
     # -- saving and restoring ----------------------------------------------------
 

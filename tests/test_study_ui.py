@@ -18,6 +18,7 @@ from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
+from lexitrack.models.attempt import SelfReport  # noqa: E402
 from lexitrack.models.settings import Setting  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.models.user_word_state import ReviewStatus  # noqa: E402
@@ -200,24 +201,24 @@ class TestSession:
         window.show_page(STUDY)
         return window.study
 
-    def test_start_opens_the_first_card_with_the_meaning_hidden(self, due) -> None:
-        # These words have no meaning stored: they are reviewed the V1 way.
+    def test_start_opens_the_first_card_asking_for_a_report(self, due) -> None:
+        # These words have no meaning stored: the learner reports on the word.
         assert due.primary_button.text() == "Start session →"
         due.primary_button.click()
         assert due._stack.currentWidget() is due._pages[SESSION]
         assert due.session_progress.text() == "1 / 25"
-        assert due.definition_label.isHidden()
-        assert not due.reveal_button.isHidden()
+        labels = [button.title.text() for button in due.answer_buttons.values()]
+        assert labels == ["Forgot", "Effortful", "Remembered", "Instant"]
 
-    def test_space_reveals_and_then_answers_good(self, due, engine) -> None:
+    def test_space_does_not_answer_for_the_learner(self, due, engine) -> None:
+        """A report is chosen, never taken from a key that means 'next'."""
         due.start_session()
         due.keyPressEvent(_key(Qt.Key.Key_Space))
-        assert not due.definition_label.isHidden()
-        due.keyPressEvent(_key(Qt.Key.Key_Space))
-        assert due.session_progress.text() == "2 / 25"
-        assert engine.rating_counts()[int(Rating.GOOD)] == 1
+        due.keyPressEvent(_key(Qt.Key.Key_Return))
+        assert due.session_progress.text() == "1 / 25"
+        assert sum(engine.rating_counts().values()) == 0
 
-    def test_number_keys_are_the_four_answers(self, due, engine) -> None:
+    def test_number_keys_are_the_four_reports(self, due, engine) -> None:
         due.start_session()
         for key in (Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3, Qt.Key.Key_4):
             due.keyPressEvent(_key(key))
@@ -275,17 +276,19 @@ class TestSession:
         due.start_session()
         due._show_intervals({rating: 1 for rating in Rating})
         assert [b.text() for b in due.answer_buttons.values()] == [
-            "Again",
-            "Hard",
-            "Good",
-            "Easy",
+            "Forgot",
+            "Effortful",
+            "Remembered",
+            "Instant",
         ]
         assert "tomorrow" in due.answer_hint.text()
 
     def test_different_intervals_are_shown_on_each_button(self, due) -> None:
         due.start_session()
         due._show_intervals({Rating.AGAIN: 1, Rating.HARD: 3, Rating.GOOD: 8, Rating.EASY: 21})
-        assert due.answer_buttons[Rating.GOOD].text() == "Good\n8 days"
+        # Each report shows the interval of the rating it maps to.
+        assert due.answer_buttons[SelfReport.REMEMBERED].text() == "Remembered\n8 days"
+        assert due.answer_buttons[SelfReport.INSTANT].text() == "Instant\n21 days"
         assert due.answer_hint.isHidden()
 
 
@@ -316,7 +319,7 @@ class TestUndo:
         assert not due.undo_button.isHidden()
         assert due.undo_button.text() == f"\u21b6 Undo Easy on \u201c{first}\u201d"
 
-    def test_ctrl_z_puts_the_card_back_with_its_meaning_hidden(self, due, engine) -> None:
+    def test_ctrl_z_puts_the_card_back(self, due, engine) -> None:
         due.start_session()
         first = due.word_label.text()
         due.keyPressEvent(_key(Qt.Key.Key_4))
@@ -324,7 +327,6 @@ class TestUndo:
         due.keyPressEvent(_ctrl(Qt.Key.Key_Z))
         assert due.word_label.text() == first
         assert due.session_progress.text() == "1 / 25"
-        assert due.definition_label.isHidden()
         assert sum(engine.rating_counts().values()) == 0
         assert due.undo_button.isHidden(), "one answer, once"
 

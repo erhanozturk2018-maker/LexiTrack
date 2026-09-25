@@ -5,15 +5,17 @@ is next and reports what the learner did; it decides nothing. One card, five
 faces, of which one shows at a time:
 
 * **type** — a prompt (a meaning, a sentence with a gap, a phrase) and a box
-  to type the word in, with a hint (the first letter) and "I don't know";
+  to type the word in, with a hint (the first letter) and Forgot; after a
+  right answer, how it came: Effortful, Remembered or Instant;
 * **choose** — the meaning and four words, keys 1–4;
-* **write** — the word to use; after the sentence, examples to compare it
-  with and three grades;
+* **write** — the word to use; after the sentence, examples, the pattern and
+  collocations to check it against, and the four reports;
 * **teach** — everything known about the word, before it is asked again;
-* **recall** — the V1 card: the word, its meaning behind Space, four answers.
+* **recall** — a word with no meaning to ask from, and the four reports.
 
-After an answer a line says what happened and Enter moves on, so the right
-spelling is always seen before the next question.
+The reports are the same everywhere, keys 1–4: Forgot, Effortful,
+Remembered, Instant. After an answer a line says what happened and Enter
+moves on, so the right spelling is always seen before the next question.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...models.attempt import Phase
+from ...models.attempt import SUCCESS_REPORTS, Phase, SelfReport
 from ...models.srs import Rating
 from ...services.review_flow import Feedback, Step, StepKind
 from ...services.review_route import examples, hint_for
@@ -44,21 +46,22 @@ from .cards import repolish
 from .chips import chip
 from .word_label import WordLabel
 
-#: Which button style each answer gets. Amber for "not yet", green for
-#: "solid", and Easy the solid green: the flashcards' own colour language.
-ANSWER_STYLE: dict[Rating, tuple[str, str | None]] = {
-    Rating.AGAIN: ("1", "unknown"),
-    Rating.HARD: ("2", None),
-    Rating.GOOD: ("3", "known"),
-    Rating.EASY: ("4", "known-solid"),
+#: Which button style each report gets. Amber for "not yet", green for
+#: "solid", and Instant the solid green: the flashcards' own colour language.
+REPORT_STYLE: dict[SelfReport, str | None] = {
+    SelfReport.FORGOT: "unknown",
+    SelfReport.EFFORTFUL: None,
+    SelfReport.REMEMBERED: "known",
+    SelfReport.INSTANT: "known-solid",
 }
 
-#: The three grades of a written sentence: (key, label, used well, effortful).
-GRADES = (
-    ("1", "Couldn't use it", False, False),
-    ("2", "With effort", True, True),
-    ("3", "Used it well", True, False),
-)
+#: The rating each report on a shown word maps to, for the interval under it.
+REPORT_RATING = {
+    SelfReport.FORGOT: Rating.AGAIN,
+    SelfReport.EFFORTFUL: Rating.HARD,
+    SelfReport.REMEMBERED: Rating.GOOD,
+    SelfReport.INSTANT: Rating.EASY,
+}
 
 CARD_WIDTH = 640
 
@@ -160,11 +163,8 @@ class ReviewCard(QFrame):
     submitted = Signal(str, int, bool)
     #: An option chosen: its index and the milliseconds taken.
     chosen = Signal(int, int)
-    #: A written sentence graded: used well, with effort.
-    graded = Signal(bool, bool)
-    #: A V1 answer.
-    rated = Signal(object)
-    reveal_requested = Signal()
+    #: The learner's report (a SelfReport) on the step on screen.
+    assessed = Signal(object)
     #: Enter after feedback, or on a teaching page.
     continue_requested = Signal()
     undo_requested = Signal()
@@ -178,6 +178,8 @@ class ReviewCard(QFrame):
         self.hinted = False
         self.written = False
         self.waiting = False
+        #: A right typed answer shown, waiting for Effortful/Remembered/Instant.
+        self.assessing = False
         self._timer = QElapsedTimer()
         self._build()
 
@@ -237,6 +239,11 @@ class ReviewCard(QFrame):
         self.feedback_row.setLayout(feedback)
         body.addWidget(self.feedback_row)
 
+        # After a right typed answer: how it came. The answer is already
+        # seen, so forgetting it is not offered.
+        self.report_row, self.report_buttons = self._report_row(SUCCESS_REPORTS)
+        body.addWidget(self.report_row)
+
         footer = QHBoxLayout()
         self.session_progress = _label("", "CardFooter")
         self.answer_hint = _label("", "CardFooter")
@@ -266,38 +273,35 @@ class ReviewCard(QFrame):
         layout.setSpacing(METRICS.space_2)
         return face, layout
 
+    def _report_row(
+        self, reports: tuple[SelfReport, ...]
+    ) -> tuple[QWidget, dict[SelfReport, AnswerButton]]:
+        """A row of report buttons, keys 1–4 whatever the row holds."""
+        row = QHBoxLayout()
+        row.setSpacing(METRICS.space_2)
+        buttons: dict[SelfReport, AnswerButton] = {}
+        for report in reports:
+            button = AnswerButton(report.label, report.key, REPORT_STYLE[report])
+            button.clicked.connect(lambda _c=False, r=report: self.assess(r))
+            row.addWidget(button, 1)
+            buttons[report] = button
+        holder = QWidget()
+        holder.setObjectName("PanelBody")
+        holder.setLayout(row)
+        holder.hide()
+        return holder, buttons
+
     def _build_recall(self) -> QWidget:
         m = METRICS
         face, layout = self._face()
-        meaning = QVBoxLayout()
-        meaning.setSpacing(m.space_1)
-        self.reveal_button = QPushButton("Show meaning   Space")
-        self.reveal_button.setProperty("variant", "ghost")
-        self.reveal_button.setToolTip("Space")
-        self.reveal_button.clicked.connect(self.reveal_requested)
-        meaning.addWidget(self.reveal_button, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.definition_label = _centered("", "DefinitionLabel")
-        meaning.addWidget(self.definition_label)
-        self.note_label = _centered("", "SenseLabel")
-        meaning.addWidget(self.note_label)
-        holder = QWidget()
-        holder.setObjectName("PanelBody")
-        holder.setLayout(meaning)
-        # Room for a two-line meaning is reserved, so revealing it does not
-        # push the answer buttons down under the pointer.
-        holder.setMinimumHeight(64)
-        layout.addWidget(holder)
+        self.recall_note = _centered(
+            "No meaning is stored for this word yet. Do you know it?", "SenseLabel"
+        )
+        layout.addWidget(self.recall_note)
         layout.addSpacing(m.space_2)
-        answers = QHBoxLayout()
-        answers.setSpacing(m.space_2)
-        self.answer_buttons: dict[Rating, AnswerButton] = {}
-        for rating in Rating:
-            key, variant = ANSWER_STYLE[rating]
-            button = AnswerButton(rating.label, key, variant)
-            button.clicked.connect(lambda _c=False, r=rating: self.rated.emit(r))
-            answers.addWidget(button, 1)
-            self.answer_buttons[rating] = button
-        layout.addLayout(answers)
+        self.recall_row, self.answer_buttons = self._report_row(tuple(SelfReport))
+        self.recall_row.show()
+        layout.addWidget(self.recall_row)
         return face
 
     def _build_type(self) -> QWidget:
@@ -325,7 +329,7 @@ class ReviewCard(QFrame):
         self.hint_button.setToolTip("Show the first letter; the answer then counts as effortful")
         self.hint_button.clicked.connect(self.show_hint)
         row.addWidget(self.hint_button)
-        self.dont_know_button = QPushButton("I don't know   Enter")
+        self.dont_know_button = QPushButton("Forgot   Enter")
         self.dont_know_button.setObjectName("FooterAction")
         self.dont_know_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dont_know_button.setToolTip("Enter with nothing typed says the same")
@@ -355,7 +359,6 @@ class ReviewCard(QFrame):
         return face
 
     def _build_write(self) -> QWidget:
-        m = METRICS
         face, layout = self._face()
         self.write_input = QLineEdit()
         self.write_input.setObjectName("SentenceInput")
@@ -365,20 +368,8 @@ class ReviewCard(QFrame):
         layout.addWidget(self.write_input)
         self.examples_label = _label("", "ExamplesLabel", wrap=True)
         layout.addWidget(self.examples_label)
-        grades = QHBoxLayout()
-        grades.setSpacing(m.space_2)
-        self.grade_buttons: list[AnswerButton] = []
-        for key, title, used_well, effortful in GRADES:
-            variant = "unknown" if not used_well else ("known" if effortful else "known-solid")
-            button = AnswerButton(title, key, variant)
-            button.clicked.connect(
-                lambda _c=False, u=used_well, e=effortful: self._grade(u, e)
-            )
-            grades.addWidget(button, 1)
-            self.grade_buttons.append(button)
-        self.grade_row = QWidget()
-        self.grade_row.setObjectName("PanelBody")
-        self.grade_row.setLayout(grades)
+        self.grade_row, grade_buttons = self._report_row(tuple(SelfReport))
+        self.grade_buttons = list(grade_buttons.values())
         layout.addWidget(self.grade_row)
         return face
 
@@ -407,13 +398,14 @@ class ReviewCard(QFrame):
         self,
         step: Step,
         *,
-        revealed: bool = False,
         intervals: dict[Rating, int] | None = None,
     ) -> None:
         self.step = step
         self.hinted = False
         self.written = False
         self.waiting = False
+        self.assessing = False
+        self.report_row.hide()
         kind = step.kind
         word = step.word
         self.session_flag.setVisible(step.is_struggling and step.phase is Phase.REVIEW)
@@ -449,10 +441,11 @@ class ReviewCard(QFrame):
         ):
             face.setVisible(kind is face_kind)
         self.feedback_row.hide()
+        self.continue_button.show()
+        self.recall_row.setVisible(kind is StepKind.RECALL)
         self.answer_hint.hide()
 
         if kind is StepKind.RECALL:
-            self.show_meaning(revealed)
             self.show_intervals(intervals or {})
         elif kind is StepKind.TYPE:
             self.answer_input.clear()
@@ -486,19 +479,8 @@ class ReviewCard(QFrame):
         self._relayout()
         self._timer.restart()
 
-    def show_meaning(self, shown: bool) -> None:
-        step = self.step
-        word = step.word if step else None
-        self.reveal_button.setVisible(not shown)
-        self.definition_label.setVisible(shown)
-        note = word.note if word else None
-        self.note_label.setVisible(shown and bool(note))
-        if shown and word is not None:
-            self.definition_label.setText(word.definition or "No definition stored for this word.")
-            self.note_label.setText(note or "")
-
     def show_intervals(self, preview: dict[Rating, int]) -> None:
-        """Label the answers with when the word would come back.
+        """Label the reports with when the word would come back.
 
         Early on, every answer lands tomorrow. Saying "tomorrow" four times
         looks like a bug, so then the buttons carry only their names and the
@@ -506,8 +488,8 @@ class ReviewCard(QFrame):
         """
         labels = {rating: interval_text(preview.get(rating)) for rating in Rating}
         uniform = len(set(labels.values())) <= 1
-        for rating, button in self.answer_buttons.items():
-            button.set_interval("" if uniform else labels[rating])
+        for report, button in self.answer_buttons.items():
+            button.set_interval("" if uniform else labels[REPORT_RATING[report]])
         self.answer_hint.setText(
             f"Every answer brings it back {labels[Rating.GOOD]}" if uniform else ""
         )
@@ -573,29 +555,41 @@ class ReviewCard(QFrame):
         self.grade_row.show()
         self.setFocus()
 
-    def grade(self, index: int) -> None:
-        if self.step is None or self.step.kind is not StepKind.WRITE or not self.written:
+    def assess(self, report: SelfReport) -> None:
+        """A report, when the card is asking for one; otherwise nothing."""
+        step = self.step
+        if step is None:
             return
-        if self.waiting or not 0 <= index < len(GRADES):
-            return
-        _key, _title, used_well, effortful = GRADES[index]
-        self._grade(used_well, effortful)
+        asking = (
+            (step.kind is StepKind.TYPE and self.assessing and report.success)
+            or (step.kind is StepKind.WRITE and self.written and not self.waiting)
+            or (step.kind is StepKind.RECALL and not self.waiting)
+        )
+        if asking:
+            self.assessing = False
+            self.assessed.emit(report)
 
-    def _grade(self, used_well: bool, effortful: bool) -> None:
-        if self.waiting or not self.written:
-            return
-        self.graded.emit(used_well, effortful)
+    def report_by_key(self, index: int) -> None:
+        """Keys 1–4: Forgot, Effortful, Remembered, Instant."""
+        if 0 <= index < len(SelfReport):
+            self.assess(list(SelfReport)[index])
 
     # -- after an answer -------------------------------------------------------------
 
     def show_feedback(self, feedback: Feedback) -> None:
-        """Say what the answer did, and wait for Enter."""
+        """Say what the answer did, and wait for Enter — or, after a right
+        typed answer, for how it came."""
         step = self.step
-        self.waiting = True
+        self.waiting = not feedback.awaiting
+        self.assessing = feedback.awaiting
         text, tone = feedback_text(step, feedback)
+        if feedback.awaiting:
+            text = f"{text} — how did it come?"
         self.feedback_label.setText(text)
         self.feedback_label.setProperty("tone", tone)
         repolish(self.feedback_label)
+        self.continue_button.setVisible(not feedback.awaiting)
+        self.report_row.setVisible(feedback.awaiting)
         if step is not None and step.kind is StepKind.TYPE:
             if not self.answer_input.text():
                 self.answer_input.setPlaceholderText("No answer")
@@ -618,9 +612,14 @@ class ReviewCard(QFrame):
                     self._set_result(button, "wrong")
         if step is not None and step.kind is StepKind.WRITE:
             self.grade_row.hide()
+        if step is not None and step.kind is StepKind.RECALL:
+            self.recall_row.hide()
         self.feedback_row.show()
         self._relayout()
-        self.continue_button.setFocus()
+        if feedback.awaiting:
+            self.setFocus()
+        else:
+            self.continue_button.setFocus()
 
     @staticmethod
     def _set_result(widget: QWidget, result: str | None) -> None:

@@ -189,9 +189,9 @@ class TestConfig:
 class TestCallbackData:
     def test_round_trips(self) -> None:
         assert parse_callback(intro_data("2026-09-17")).local_date == "2026-09-17"
-        parsed = parse_callback(step_data("abc", 12, "r3"))
+        parsed = parse_callback(step_data("abc", 12, "remembered"))
         assert (parsed.action, parsed.session_id, parsed.step, parsed.value) == (
-            "step", "abc", 12, "r3"
+            "step", "abc", 12, "remembered"
         )
         known = parse_callback(known_data("abc", 7))
         assert (known.action, known.word_id) == ("known", 7)
@@ -320,17 +320,21 @@ def respond(bot: BotCore, outbox: FakeOutbox, session: str, right: bool = True) 
 
     if step.kind is StepKind.TYPE:
         run(bot.text(OWNER, step.prompt.accepted[0] if right else "nothing like it"))
+        if right and step.phase.value == "review":
+            # A right answer: the card asks how it came.
+            assert "How did it come?" in outbox.sent[-1][1].text
+            press("remembered")
     elif step.kind is StepKind.CHOOSE:
         ids = [option.id for option in step.options]
         right_index = ids.index(step.word.id)
         press(str(right_index if right else (right_index + 1) % len(ids)))
     elif step.kind is StepKind.RECALL:
-        press("r3" if right else "r1")
+        press("remembered" if right else "forgot")
     elif step.kind is StepKind.TEACH:
         press("go")
     else:  # WRITE: the sentence as a reply, then the grade
         run(bot.text(OWNER, "A sentence of my own."))
-        press("g2" if right else "g0")
+        press("remembered" if right else "forgot")
     assert card  # the card answered was the one on screen
     return step
 
@@ -606,35 +610,51 @@ class TestCards:
                       part_of_speech="adjective", cefr_level="B2",
                       definition="unwilling to do something")
 
-    def test_a_recall_card_hides_the_meaning_when_asked(self) -> None:
-        hidden = step_card(Step(self.word, StepKind.RECALL), "s", 1, 1, 1)
-        shown = step_card(Step(self.word, StepKind.RECALL, hide_meaning=False), "s", 1, 1, 1)
-        assert "<tg-spoiler>" in hidden.text and "<tg-spoiler>" not in shown.text
-        labels = [label for row in hidden.buttons for label, _ in row]
-        assert labels[:4] == ["Again", "Hard", "Good", "Easy"]
+    def test_a_shown_word_is_reported_on_before_anything_is_revealed(self) -> None:
+        card = step_card(Step(self.word, StepKind.RECALL), "s", 1, 1, 1)
+        assert "<tg-spoiler>" not in card.text and self.word.definition not in card.text
+        labels = [label for row in card.buttons for label, _ in row]
+        assert labels[:4] == ["Forgot", "Effortful", "Remembered", "Instant"]
+
+    def test_a_right_reply_is_followed_by_how_it_came(self) -> None:
+        from lexitrack.telegram.messages import assess_card
+
+        card = assess_card(Step(self.word, StepKind.TYPE), "s", 4, "✓ “reluctant”", 1, 9)
+        labels = [label for row in card.buttons for label, _ in row]
+        # No Forgot after a right answer.
+        assert labels[:3] == ["Effortful", "Remembered", "Instant"]
+        assert step_data("s", 4, "instant") in FakeOutbox.callbacks(card)
 
     def test_a_written_sentence_is_graded_beside_the_examples(self) -> None:
         step = Step(self.word, StepKind.WRITE)
         check = write_check(step, "I was <reluctant> to go.", "s", 3)
         assert "&lt;reluctant&gt;" in check.text, "the learner's text is escaped"
         labels = [label for row in check.buttons for label, _ in row]
-        assert labels[:3] == ["Couldn't use it", "With effort", "Used it well"]
-        assert step_data("s", 3, "g2") in FakeOutbox.callbacks(check)
+        assert labels[:4] == ["Forgot", "Effortful", "Remembered", "Instant"]
+        assert step_data("s", 3, "remembered") in FakeOutbox.callbacks(check)
 
-    def test_a_grade_maps_to_the_desktops(self, bot: BotCore) -> None:
-        graded = []
+    def test_a_report_reaches_the_flow_as_it_was_given(self, bot: BotCore) -> None:
+        from lexitrack.models.attempt import SelfReport
+
+        reported = []
 
         class Flow:
             session_id = "s"
+            awaiting = False
             current = Step(TestCards.word, StepKind.WRITE)
 
-            def grade(self, used_well: bool, effortful: bool = False):
-                graded.append((used_well, effortful))
+            def assess(self, report):
+                reported.append(report)
                 return True
 
-        for value in ("g0", "g1", "g2"):
+        bot._written["s"] = "a sentence"
+        for value in ("forgot", "effortful", "remembered", "instant"):
+            bot._written["s"] = "a sentence"
             bot._act(Flow(), value)
-        assert graded == [(False, False), (True, True), (True, False)]
+        assert reported == list(SelfReport)
+        # Without a sentence written first, a report is not taken.
+        bot._written.pop("s", None)
+        assert bot._act(Flow(), "instant") is None
 
 
 # -- notifications -------------------------------------------------------------

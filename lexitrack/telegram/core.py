@@ -38,7 +38,8 @@ from typing import Protocol
 
 from ..core.clock import DayClock
 from ..database.connection import Database
-from ..models.srs import Channel, Rating
+from ..models.attempt import SelfReport
+from ..models.srs import Channel
 from ..repositories import RuntimeRepository
 from ..services.learning_service import AnswerOutcome, LearningService
 from ..services.progress import ProgressService
@@ -299,20 +300,20 @@ class BotCore:
         """Do what a button says to the step on screen. None when it does not fit."""
         step = flow.current
         kind = step.kind
-        try:
-            if kind is StepKind.TEACH and value == "go":
-                return flow.proceed() or None
-            if kind is StepKind.TYPE and value == "dk":
-                return flow.submit("")
-            if kind is StepKind.CHOOSE and value.isdigit():
-                return flow.choose(int(value))
-            if kind is StepKind.RECALL and value.startswith("r"):
-                return flow.rate(Rating(int(value[1:])))
-            if kind is StepKind.WRITE and value in ("g0", "g1", "g2"):
-                self._written.pop(flow.session_id or "", None)
-                return flow.grade(used_well=value != "g0", effortful=value == "g1")
-        except ValueError:
-            return None
+        report = SelfReport(value) if value in SelfReport._value2member_map_ else None
+        if kind is StepKind.TEACH and value == "go":
+            return flow.proceed() or None
+        if kind is StepKind.TYPE and value == "dk" and not flow.awaiting:
+            return flow.submit("")
+        if kind is StepKind.TYPE and flow.awaiting and report is not None and report.success:
+            return flow.assess(report)
+        if kind is StepKind.CHOOSE and value.isdigit():
+            return flow.choose(int(value))
+        if kind is StepKind.RECALL and report is not None:
+            return flow.assess(report)
+        if kind is StepKind.WRITE and report is not None and flow.session_id in self._written:
+            self._written.pop(flow.session_id, None)
+            return flow.assess(report)
         return None
 
     async def text(self, chat_id: str, text: str) -> None:
@@ -333,6 +334,8 @@ class BotCore:
                 reply = messages.no_session()
             elif restored:
                 card = self._card(flow, note="LexiTrack restarted; here is where you were.")
+            elif step.kind is StepKind.TYPE and flow.awaiting:
+                reply = messages.use_the_buttons()
             elif step.kind is StepKind.TYPE:
                 # No time is passed: see the module docstring.
                 result = flow.submit(answer)
@@ -361,6 +364,16 @@ class BotCore:
         feedback = result if isinstance(result, Feedback) else None
         line = None
         known = None
+        if feedback is not None and feedback.awaiting:
+            # A right answer: how it came is asked before anything is recorded.
+            line, _tone = feedback_text(step, feedback)
+            with self._db.lock:
+                card = messages.assess_card(
+                    step, flow.session_id or "", flow.step_number, line,
+                    min(flow.position + 1, flow.total), flow.total,
+                )
+            await self._show(chat_id, flow, card, message_id)
+            return
         if feedback is not None:
             line, _tone = feedback_text(step, feedback)
             outcome = feedback.outcome

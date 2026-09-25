@@ -13,7 +13,7 @@ import pytest
 
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
-from lexitrack.models.attempt import Depth, Phase, Role
+from lexitrack.models.attempt import Depth, Phase, Role, SelfReport
 from lexitrack.models.content import (
     DepthHint,
     EncodingType,
@@ -24,7 +24,6 @@ from lexitrack.models.content import (
 )
 from lexitrack.models.settings import Setting
 from lexitrack.models.source import Source
-from lexitrack.models.srs import Rating
 from lexitrack.models.user_word_state import ReviewStatus
 from lexitrack.repositories import (
     AttemptRepository,
@@ -40,6 +39,7 @@ from lexitrack.services.learning_service import LearningService
 from lexitrack.services.review_flow import ReviewFlow, StepKind
 
 from .conftest import entry
+from .flow_helpers import say
 
 WORDS = {
     "arid": "very dry, with little rain",
@@ -126,9 +126,9 @@ def _answer_right(flow: ReviewFlow) -> None:
     if step.kind is StepKind.TEACH:
         flow.proceed()
     elif step.kind is StepKind.RECALL:
-        flow.rate(Rating.GOOD)
+        flow.assess(SelfReport.REMEMBERED)
     else:
-        flow.submit(step.prompt.accepted[0], response_ms=5000)
+        say(flow, step.prompt.accepted[0], response_ms=5000)
 
 
 def test_new_words_are_taught_in_groups_then_asked(engine: LearningService) -> None:
@@ -152,7 +152,7 @@ def test_practice_is_recorded_not_rated_and_a_done_word_gets_its_card(
     for _ in range(4):
         flow.proceed()
     assert CardRepository(database).get(first.id) is None, "not learned until asked"
-    feedback = flow.submit(first.word, response_ms=4000)
+    feedback = say(flow, first.word, response_ms=4000)
     assert feedback.correct and feedback.outcome is None
     assert CardRepository(database).get(first.id) is not None
     assert first.id not in {item.word.id for item in engine.review_queue()}, "not due today"
@@ -190,7 +190,7 @@ def test_a_miss_is_taught_again_deeper_and_asked_again_twice_at_most(
             teaches.append(step.depth)
             flow.proceed()
         elif step.word.id == word_id:
-            flow.submit("no idea", response_ms=4000)
+            say(flow, "no idea", response_ms=4000)
         else:
             _answer_right(flow)
     assert teaches == [Depth.LIGHT, Depth.DEEP, Depth.DEEP], "taught, then twice again"
@@ -237,7 +237,7 @@ def test_leaving_early_keeps_what_was_learned_and_offers_the_rest_again(
     first = flow.current.word
     for _ in range(4):
         flow.proceed()
-    flow.submit(first.word, response_ms=4000)
+    say(flow, first.word, response_ms=4000)
     summary = flow.finish()
     assert summary.learned == 1
     offered = {word.id for word in engine.daily_plan().new_words}

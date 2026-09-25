@@ -50,11 +50,12 @@ On your phone the Telegram bot does the same, if you set it up in
 
 The four answers do not move a word along a fixed track; they change one
 number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. For a word with a meaning to ask from you do not pick the
-answer: your review decides it — **Good** when you recalled the word, **Easy**
-when at once, **Hard** with a hint, a slip, slowly, or when you could only
-pick it out among four, **Again** when not even that. With the default
-settings:
+follows from it. You say how each retrieval went — **Instant**, **Remembered**,
+**Effortful** or **Forgot** — after typing the word right, after writing a
+sentence, or for a word shown without a meaning, and that becomes the answer:
+**Easy**, **Good**, **Hard** or **Again**. A wrong answer is followed by an
+easier question; picking the word out among four only after missing it is
+**Hard**, and missing that too is **Again**. With the default settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |
@@ -93,16 +94,20 @@ move with it.
 
 ## The four answers
 
-| Answer | Use it when | What happens |
-| --- | --- | --- |
-| **Again** | You did not remember it | Back tomorrow; the interval you had built up is lost. |
-| **Hard** | You remembered, with effort | A short interval; the word stays in its current step. |
-| **Good** | You remembered it | The normal next interval. |
-| **Easy** | You knew it instantly | The longest interval. With the default settings, two Easys make a word Known. |
+You say how the retrieval went; LexiTrack records the answer it means.
 
-Only **Good** and **Easy** move a word forward. Keep **Easy** for words you
-know without thinking: it retires a word fastest, so an Easy you did not mean
-costs the most.
+| You say | Use it when | Answer | What happens |
+| --- | --- | --- | --- |
+| **Forgot** | It did not come | **Again** | Back tomorrow; the interval you had built up is lost. |
+| **Effortful** | It came, with effort | **Hard** | A short interval; the word stays in its current step. |
+| **Remembered** | It came | **Good** | The normal next interval. |
+| **Instant** | It came at once, without thinking | **Easy** | The longest interval. |
+
+Only **Remembered** and **Instant** move a word forward. Keep **Instant** for
+words that come without thinking: it spaces a word out fastest, so an Instant
+you did not mean costs the most. Time, a hint or a slip never change what you
+said; they are kept beside it. A word in long-term memory is offered as Known,
+never made Known for you.
 
 ## What is recorded, and where to see it
 

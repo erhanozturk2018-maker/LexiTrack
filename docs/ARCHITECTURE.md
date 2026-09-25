@@ -814,7 +814,7 @@ MainWindow
 │   │                       Start session) · New words as CEFR-grouped chips ·
 │   │                       This week (day tiles) · Words you find hard
 │   └── session             one card: progress line, word, meaning behind Space,
-│                           Again / Hard / Good / Easy with keys and intervals,
+│                           Forgot / Effortful / Remembered / Instant, keys 1–4,
 │                           "Undo <answer> on <word>" in the footer (Ctrl+Z)
 ├── ProgressPage            four tabs, one shown at a time:
 │   ├── Overview            four tiles · ready to mark Known · memory and skill

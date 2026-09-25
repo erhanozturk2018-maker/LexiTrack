@@ -1234,3 +1234,25 @@ evidence supported. "Three in a row" is read as the questions the learner
 sees consecutively; where the content offers no other kind (a word with only
 a meaning), the same kind is asked, and the reason says so only when it did
 change something.
+
+## 80. The learner says how a retrieval went
+
+**Decision.** The primary result of a retrieval is the learner's report:
+Forgot, Effortful, Remembered or Instant — Instant → Recalled → Easy,
+Remembered → Recalled → Good, Effortful → Recalled with effort → Hard,
+Forgot → Forgotten → Again. It is asked after a correct typed answer
+(Effortful, Remembered or Instant; the answer is already seen, so Forgot is
+not offered), after a written sentence (all four), and for a word with no
+meaning to ask from (all four, before anything is shown). A wrong typed
+answer is a failure and goes to the probes; choosing among four is
+recognition and needs no report. Response time, a hint and a slip are kept
+as telemetry beside the report and never replace it. Practice straight
+after teaching is not rated and asks for no report.
+
+**Reason.** Replaces inferring effort from time, hints and slips (the
+learner's own sense of how a retrieval felt is the evidence the design asked
+for; timing measured the keyboard as much as the memory). The last
+"reveal, then rate" path — a word with no meaning, shown with Space and
+rated — is gone: recognising something after seeing it is not recall.
+The *Hide the meaning until I ask* setting therefore has nothing left to do;
+its row is removed from Settings and the stored value is left as it is.

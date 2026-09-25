@@ -194,10 +194,12 @@ The Today card estimates the session: 20 seconds a review, and 45, 75 or
 **Typed answers.** Compared without case, spacing or punctuation; a
 multi-word entry is accepted without its frame ("expelled" for *be
 expelled*). One slip is accepted in four to ten letters, two from eleven,
-and makes the answer effortful. So does a hint (the first letter and the
-shape). Otherwise time decides: within about 2.5 s plus 0.12 s a letter is
-instant, beyond 12 s plus 0.2 s a letter is effortful. An empty answer is
-"I don't know".
+is shown as a slip. **After a right answer the learner says how it came** —
+Effortful, Remembered or Instant — and that report is the result (Effortful
+→ Hard, Remembered → Good, Instant → Easy for a first question). The time
+taken, a hint (the first letter and the shape) and a slip are kept as
+telemetry beside the report and never override it. An empty answer is
+Forgot.
 
 **Level 5** (a sentence) cannot be checked by the app: you write one, see
 example sentences, and grade it yourself.
@@ -475,7 +477,7 @@ Settings with their defaults:
 | `leech_consecutive` | 4 | Consecutive Again → needs relearning |
 | `leech_total_lapses` | 8 | Total Again over the card's life → needs relearning |
 | `leech_weak_stability_days` | 7 | With ≥ 6 reviews and stability under this → needs relearning |
-| `hide_meaning_in_study` | true | Study-plan reviews hide the meaning until revealed |
+| `hide_meaning_in_study` | true | No longer used: a meaning is never shown before the learner's report (decision 80). Kept, not removed from anyone's settings |
 | `developer_mode` | false | Shows the Developer page and advanced settings |
 | `debug_logging` | false | Only settable while Developer Mode is on |
 | `mastery_stability_days` | 21 | Auto-Known threshold |

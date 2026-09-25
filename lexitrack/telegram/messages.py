@@ -15,8 +15,9 @@ Callback data is kept short (Telegram allows 64 bytes) and self-describing:
 ``intro:<date>``        mark the day's new words as studied — only on that date
 ``start``               begin (or resume) the day's session
 ``st:<s>:<n>:<v>``      step ``n`` of session ``s``: ``v`` is an option (0–3),
-                        a rating (``r1``–``r4``), a grade (``g0``–``g2``),
-                        ``go`` (continue) or ``dk`` (I don't know)
+                        a report (``forgot``, ``effortful``, ``remembered``,
+                        ``instant``), ``go`` (continue) or ``dk`` (Forgot,
+                        before answering)
 ``known:<s>:<w>``       mark word ``w`` Known, as offered after its answer
 ``end:<s>``             stop the session and keep what was answered
 ``undo:<s>``            take back the last answer in session ``s``
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from html import escape
 
+from ..models.attempt import SUCCESS_REPORTS, SelfReport
 from ..models.srs import Rating
 from ..services.learning_service import AnswerOutcome, DailyPlan
 from ..services.review_flow import Step, StepKind
@@ -187,8 +189,8 @@ def introduced(count: int, first_due_on: str | None) -> str:
     return f"✅ {count} new words marked as studied. First review: {escape(when)}."
 
 
-#: The grades of a written sentence, as on the desktop card: (value, label).
-GRADES = (("g0", "Couldn't use it"), ("g1", "With effort"), ("g2", "Used it well"))
+def _reports(session_id: str, number: int, reports) -> ButtonRow:
+    return tuple((report.label, step_data(session_id, number, report.value)) for report in reports)
 
 
 def step_card(
@@ -211,7 +213,6 @@ def step_card(
     reveals it in place. Every card is a new message, because an edited one
     keeps a spoiler revealed.
     """
-    word = step.word
     lines: list[str] = []
     for line in (note, feedback):
         if line:
@@ -246,7 +247,7 @@ def step_card(
         if prompt.detail:
             lines.append(f"<i>{escape(prompt.detail)}</i>")
         lines += ["", "<i>Reply with the word.</i>"]
-        rows.append((("I don't know", act("dk")),))
+        rows.append((("Forgot", act("dk")),))
     elif step.kind is StepKind.CHOOSE and prompt is not None:
         lines += ["", escape(prompt.text)]
         if prompt.detail:
@@ -258,18 +259,11 @@ def step_card(
         if prompt is not None:
             lines += ["", escape(prompt.text)]
         lines += ["", "<i>Reply with a sentence of your own.</i>"]
-    else:  # RECALL: the word shown, the meaning recalled, one of four answers
-        lines += ["", _headword(step)]
-        meaning = word.definition or "No definition stored."
-        if word.note:
-            meaning = f"{meaning} ({word.note})"
-        lines.append("")
-        lines.append(
-            f"<tg-spoiler>{escape(meaning)}</tg-spoiler>" if step.hide_meaning
-            else escape(meaning)
-        )
-        answers = tuple((rating.label, act(f"r{int(rating)}")) for rating in Rating)
-        rows += [answers[:2], answers[2:]]
+    else:  # RECALL: a word with no meaning to ask from, and the four reports
+        lines += ["", _headword(step), "",
+                  "<i>No meaning is stored for this word yet. Do you know it?</i>"]
+        reports = _reports(session_id, number, tuple(SelfReport))
+        rows += [reports[:2], reports[2:]]
     lines += ["", f"{position} / {total}"]
     if known_word is not None:
         rows.append(((f"Mark “{known_word[1]}” Known", known_data(session_id, known_word[0])),))
@@ -282,8 +276,27 @@ def step_card(
     return Message(_fit("\n".join(lines)), tuple(rows))
 
 
+def assess_card(
+    step: Step, session_id: str, number: int, feedback: str, position: int, total: int
+) -> Message:
+    """After a right typed answer: how it came, before anything is recorded."""
+    lines = [
+        f"<b>{escape(step.label.upper())}</b>",
+        "",
+        f"<i>{escape(feedback)}</i>",
+        "",
+        "How did it come?",
+        "",
+        f"{position} / {total}",
+    ]
+    return Message(
+        "\n".join(lines),
+        (_reports(session_id, number, SUCCESS_REPORTS), (("Stop here", end_data(session_id)),)),
+    )
+
+
 def write_check(step: Step, sentence: str, session_id: str, number: int) -> Message:
-    """A written sentence beside the stored examples, and the three grades."""
+    """A written sentence beside the stored examples, and the four reports."""
     lines = [
         f"<b>{escape(step.label.upper())}</b>",
         "",
@@ -296,11 +309,11 @@ def write_check(step: Step, sentence: str, session_id: str, number: int) -> Mess
     examples = [context.plain for context in teaching.contexts[:2]] if teaching else []
     if examples:
         lines += ["", "<b>Examples</b>"] + [f"“{escape(text)}”" for text in examples]
-    lines += ["", "<i>Did you use it the way the examples do?</i>"]
-    grades = tuple((label, step_data(session_id, number, value)) for value, label in GRADES)
+    lines += ["", "<i>Did you use it the way the examples do? How did it come?</i>"]
+    reports = _reports(session_id, number, tuple(SelfReport))
     return Message(
         _fit("\n".join(lines)),
-        (grades, (("Stop here", end_data(session_id)),)),
+        (reports[:2], reports[2:], (("Stop here", end_data(session_id)),)),
     )
 
 

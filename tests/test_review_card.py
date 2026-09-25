@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
+from lexitrack.models.attempt import SelfReport
 from lexitrack.models.source import Source
 from lexitrack.models.srs import Rating
 from lexitrack.models.user_word_state import ReviewStatus
@@ -83,30 +84,39 @@ def _type(qtbot, page: StudyPage, text: str) -> None:
     qtbot.keyClick(page.card.answer_input, Qt.Key.Key_Return)
 
 
-def test_typing_the_word_and_enter_shows_the_result_and_waits(qtbot, page) -> None:
+def test_a_right_answer_asks_how_it_came_then_waits(qtbot, page) -> None:
     card = page.card
     first = card.step
     assert first.kind is StepKind.TYPE
     assert card.task_label.text() == "MEANING → WORD"
     assert first.word.word not in card.prompt_label.text()
     _type(qtbot, page, first.word.word)
-    # The Enter that submitted must not also have moved on.
-    assert card.waiting and card.step is first
+    # The Enter that submitted must not also have moved on, nor answered.
+    assert card.assessing and card.step is first and not card.waiting
     assert card.feedback_label.text().startswith(f"✓ “{first.word.word}”")
+    assert "how did it come" in card.feedback_label.text()
     assert card.answer_input.property("result") == "right"
-    assert page.flow.answered == 1
+    assert not card.report_row.isHidden() and card.continue_button.isHidden()
+    labels = [b.title.text() for b in card.report_buttons.values()]
+    assert labels == ["Effortful", "Remembered", "Instant"]
+    qtbot.keyClick(page, Qt.Key.Key_Return)
+    assert page.flow.answered == 0, "Enter is not a report"
+    qtbot.keyClick(page, Qt.Key.Key_4)
+    assert page.flow.answered == 1 and card.waiting
+    assert page.flow._runs[first.word.id].resolution.rating is Rating.EASY
     qtbot.keyClick(page, Qt.Key.Key_Return)
     assert not card.waiting and card.step is not first
     assert card.answer_input.text() == "" and card.answer_input.isEnabled()
 
 
-def test_the_hint_works_from_inside_the_text_box_and_costs_effort(qtbot, page) -> None:
+def test_the_hint_is_telemetry_and_the_report_decides(qtbot, page) -> None:
     card = page.card
     word = card.step.word.word
     card.answer_input.setFocus()
     qtbot.keyClick(card.answer_input, Qt.Key.Key_H, Qt.KeyboardModifier.ControlModifier)
     assert card.hinted and card.hint_label.text().startswith(word[0])
     _type(qtbot, page, word)
+    card.report_buttons[SelfReport.EFFORTFUL].click()
     assert page.flow._runs[card.step.word.id].resolution.rating is Rating.HARD
 
 
@@ -124,7 +134,7 @@ def test_a_wrong_word_is_followed_by_a_choice_answered_with_a_number(qtbot, page
     assert card.choice_buttons[right].property("result") == "right"
 
 
-def test_i_dont_know_is_an_empty_enter(qtbot, page) -> None:
+def test_forgot_is_an_empty_enter(qtbot, page) -> None:
     card = page.card
     _type(qtbot, page, "")
     assert card.waiting and card.answer_input.placeholderText() == "No answer"
@@ -141,6 +151,7 @@ def test_undo_puts_the_word_back_as_a_question(qtbot, page) -> None:
     card = page.card
     first = card.step.word
     _type(qtbot, page, first.word)
+    qtbot.keyClick(page, Qt.Key.Key_3)
     assert not card.undo_button.isHidden()
     card.undo_button.click()
     assert card.step.word.id == first.id and card.step.kind is StepKind.TYPE

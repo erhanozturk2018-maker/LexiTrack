@@ -952,3 +952,13 @@ review flow keeps the last two question kinds to ask a third another way
 (`repeats`, `lower_levels`, `context_prompt(avoid_task=…)`). Two tests
 changed meaning with the rule: a miss at a level never reached is now a
 stretch, and a level without content is no longer stepped over upwards.
+
+## 2026-09-26 — Learning plan gaps: the learner's report
+
+`SelfReport` (Forgot, Effortful, Remembered, Instant) and
+`ReviewFlow.assess` replace inferred effort, `grade` and the
+reveal-then-rate path. A right typed answer waits for the report
+(`Feedback.awaiting`) before anything is recorded; a written sentence and a
+word without a meaning take all four. The desktop card and the bot show the
+same buttons, keys 1–4 in the same order. The *Hide the meaning* row left
+Settings; the value stays stored.

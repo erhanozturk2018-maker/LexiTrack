@@ -53,9 +53,10 @@ local SQLite file. The only network use is the optional Telegram bot.
   A word in two lists is learned once; words you know are never offered.
 - **New words every day.** 25 by default, lowest CEFR level first. You study
   them however you like and confirm; LexiTrack never invents an answer for you.
-- **Spaced repetition with FSRS.** Each review is answered Again, Hard, Good or
-  Easy, and the word comes back when you are about to forget it. Every button
-  shows when that would be. A word is never asked twice on the same day.
+- **Spaced repetition with FSRS.** You say how each retrieval went — Forgot,
+  Effortful, Remembered or Instant — and that becomes the answer FSRS hears:
+  Again, Hard, Good or Easy. The word comes back when you are about to forget
+  it, and a word is never rated twice on the same day.
 - **A day with a shape.** The Today page shows today's two steps, the week
   ahead as day tiles, the words you keep missing, and the last 30 days.
 - **A workload brake.** When a day's reviews go over your limit (250 by
@@ -318,11 +319,12 @@ history.
 
 The four answers do not move a word along a fixed track; they change one
 number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. For a word with a meaning to ask from you do not pick the
-answer: your review decides it — **Good** when you recalled the word, **Easy**
-when at once, **Hard** with a hint, a slip, slowly, or when you could only
-pick it out among four, **Again** when not even that. With the default
-settings:
+follows from it. You say how each retrieval went — **Instant**, **Remembered**,
+**Effortful** or **Forgot** — after typing the word right, after writing a
+sentence, or for a word shown without a meaning, and that becomes the answer:
+**Easy**, **Good**, **Hard** or **Again**. A wrong answer is followed by an
+easier question; picking the word out among four only after missing it is
+**Hard**, and missing that too is **Again**. With the default settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |
@@ -596,10 +598,9 @@ key in one place, with a filter.
 
 | Where | Key | Action |
 | --- | --- | --- |
-| Today's session | `Enter` | Check the word you typed; empty: I don't know; after the result: next |
+| Today's session | `Enter` | Check the word you typed; empty: Forgot; after the result: next |
 | | `Ctrl+H` | Show the first letter |
-| | `1` / `2` / `3` / `4` | Choose among four; for a word with no meaning, Again / Hard / Good / Easy |
-| | `Space` | For a word with no meaning: show it, then answer Good |
+| | `1` / `2` / `3` / `4` | Choose among four; or say how it went: Forgot / Effortful / Remembered / Instant |
 | | `Esc` | Stop and keep what you answered |
 | | `Ctrl+Z` | Take back your last answer |
 | Flashcards | `K` | I Know |

@@ -192,12 +192,6 @@ class SettingsDialog(QDialog):
             "how LexiTrack learns whether its predictions were right.",
             self.review_known,
         )
-        self.hide_meaning = _switch()
-        known.add(
-            "Hide the meaning until I ask",
-            "Study reviews only. Flashcards and the word table always show it.",
-            self.hide_meaning,
-        )
         layout.addWidget(known)
 
         language = _Group("LANGUAGE")
@@ -597,7 +591,6 @@ class SettingsDialog(QDialog):
         self.fragile_every.setValue(s.fragile_every)
         self.mastery_days.setValue(int(s.mastery_stability_days))
         self.review_known.setChecked(s.review_known_words)
-        self.hide_meaning.setChecked(s.hide_meaning_in_study)
         index = self.learner_language.findData(s.learner_language or "")
         self.learner_language.setCurrentIndex(max(index, 0))
         self.timezone_note.setText(f"Times are in {s.timezone}.")
@@ -771,7 +764,6 @@ class SettingsDialog(QDialog):
             Setting.REVIEW_CAPACITY_PER_DAY: self.capacity.value(),
             Setting.MASTERY_STABILITY_DAYS: self.mastery_days.value(),
             Setting.REVIEW_KNOWN_WORDS: self.review_known.isChecked(),
-            Setting.HIDE_MEANING_IN_STUDY: self.hide_meaning.isChecked(),
             Setting.LEARNER_LANGUAGE: self.learner_language.currentData() or "",
             Setting.DAY_START_HOUR: self.day_start.value(),
             Setting.NOTIFY_HOUR: self.notify_hour.value(),

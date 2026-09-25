@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..models.attempt import SelfReport
 from ..models.srs import Rating
 from ..models.word_entry import CEFR_ORDER
 from ..repositories import ContentRepository
@@ -477,9 +478,7 @@ class StudyPage(QWidget):
         self.card = card
         card.submitted.connect(self._on_submitted)
         card.chosen.connect(self._on_chosen)
-        card.graded.connect(self._on_graded)
-        card.rated.connect(self._answer)
-        card.reveal_requested.connect(self._reveal)
+        card.assessed.connect(self._on_assessed)
         card.continue_requested.connect(self._continue)
         card.undo_requested.connect(self.undo_last)
         # The card's parts, by the names the page has always had.
@@ -487,9 +486,6 @@ class StudyPage(QWidget):
         self.session_flag = card.session_flag
         self.word_label = card.word_label
         self.meta_label = card.meta_label
-        self.reveal_button = card.reveal_button
-        self.definition_label = card.definition_label
-        self.note_label = card.note_label
         self.answer_buttons = card.answer_buttons
         self.answer_hint = card.answer_hint
         self.undo_button = card.undo_button
@@ -786,7 +782,7 @@ class StudyPage(QWidget):
         if step is None:
             self.end_session()
             return
-        self.card.show_step(step, revealed=self.flow.revealed, intervals=self.flow.intervals())
+        self.card.show_step(step, intervals=self.flow.intervals())
         self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
         if step.kind not in (StepKind.TYPE, StepKind.WRITE):
@@ -815,30 +811,27 @@ class StudyPage(QWidget):
     def _show_intervals(self, preview: dict[Rating, int]) -> None:
         self.card.show_intervals(preview)
 
-    def _reveal(self) -> None:
-        if self.flow.reveal():
-            self.card.show_meaning(True)
-
-    def _answer(self, rating: Rating) -> None:
-        """A V1 answer to a word with nothing to ask from: no pause after it."""
-        step = self.flow.current
-        if step is None or step.kind is not StepKind.RECALL:
-            return
-        feedback = self.flow.rate(rating)
-        self._after_rating(feedback)
-        if feedback.finished:
-            self.end_session()
-            return
-        self._show_card()
-
     def _on_submitted(self, text: str, response_ms: int, hinted: bool) -> None:
         self._show_feedback(self.flow.submit(text, response_ms, hinted))
 
     def _on_chosen(self, index: int, response_ms: int) -> None:
         self._show_feedback(self.flow.choose(index, response_ms))
 
-    def _on_graded(self, used_well: bool, effortful: bool) -> None:
-        self._show_feedback(self.flow.grade(used_well, effortful))
+    def _on_assessed(self, report: SelfReport) -> None:
+        """The learner's report: after a right answer, a sentence, or a shown word."""
+        step = self.flow.current
+        if step is None:
+            return
+        feedback = self.flow.assess(report)
+        if step.kind is StepKind.RECALL:
+            # Nothing to read after a shown word: straight on.
+            self._after_rating(feedback)
+            if feedback.finished:
+                self.end_session()
+                return
+            self._show_card()
+            return
+        self._show_feedback(feedback)
 
     def _show_feedback(self, feedback: Feedback) -> None:
         self._after_rating(feedback)
@@ -894,23 +887,13 @@ class StudyPage(QWidget):
             return
         step = self.flow.current
         number = _NUMBER_KEYS.get(key)
-        if step is not None and step.kind is StepKind.RECALL:
-            if enter:
-                if self.flow.revealed:
-                    self._answer(Rating.GOOD)
-                else:
-                    self._reveal()
-                return
-            if number is not None:
-                self._answer(Rating(number + 1))
-                return
         if step is not None and number is not None and not self.card.waiting:
             if step.kind is StepKind.CHOOSE:
                 self.card.choose(number)
                 return
-            if step.kind is StepKind.WRITE:
-                self.card.grade(number)
-                return
+            # A report, wherever the card asks for one: 1 Forgot … 4 Instant.
+            self.card.report_by_key(number)
+            return
         super().keyPressEvent(event)
 
 

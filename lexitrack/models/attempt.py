@@ -97,6 +97,52 @@ class Effort(StrEnum):
     EFFORTFUL = "effortful"
 
 
+class SelfReport(StrEnum):
+    """The learner's own account of a retrieval: the primary cognitive result.
+
+    Asked after a correct typed answer (Effortful, Remembered or Instant), for
+    a written sentence, and for a word with no meaning to ask from — always
+    before the answer could be seen. Timing, hints and slips are kept beside
+    it as telemetry; they never replace it.
+    """
+
+    FORGOT = "forgot"
+    EFFORTFUL = "effortful"
+    REMEMBERED = "remembered"
+    INSTANT = "instant"
+
+    @property
+    def label(self) -> str:
+        return {
+            "forgot": "Forgot",
+            "effortful": "Effortful",
+            "remembered": "Remembered",
+            "instant": "Instant",
+        }[self.value]
+
+    @property
+    def key(self) -> str:
+        """The number key, the same order everywhere: 1 Forgot … 4 Instant."""
+        return str(list(SelfReport).index(self) + 1)
+
+    @property
+    def success(self) -> bool:
+        return self is not SelfReport.FORGOT
+
+    @property
+    def effort(self) -> Effort | None:
+        return {
+            "forgot": None,
+            "effortful": Effort.EFFORTFUL,
+            "remembered": Effort.NORMAL,
+            "instant": Effort.INSTANT,
+        }[self.value]
+
+
+#: The reports after a correct answer: forgetting it is not one of them.
+SUCCESS_REPORTS = (SelfReport.EFFORTFUL, SelfReport.REMEMBERED, SelfReport.INSTANT)
+
+
 class MemoryResult(StrEnum):
     """What a review showed about the word-meaning memory.
 
