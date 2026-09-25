@@ -69,7 +69,9 @@ def words(database: Database) -> list[int]:
 
 @pytest.fixture
 def engine(database: Database, clock: FrozenClock, words: list[int]) -> LearningService:
-    StateRepository(database).set_status_many(words, ReviewStatus.UNKNOWN)
+    # On the test's clock, like every later event: status history is read in time
+    # order, and a wall-clock "now" can fall after the frozen days that follow.
+    StateRepository(database).set_status_many(words, ReviewStatus.UNKNOWN, at=clock.now_utc())
     service = LearningService(database, clock)
     service.create_plan("Test plan", list_ids=[ListRepository(database).all()[0].id])
     service.save_settings({Setting.NEW_WORDS_PER_DAY: 5})
