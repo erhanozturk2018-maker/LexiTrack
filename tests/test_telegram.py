@@ -48,6 +48,7 @@ from lexitrack.telegram.messages import (
 from lexitrack.telegram.schedule import Notification, due_notifications, mark_sent
 
 from .conftest import entry
+from .flow_helpers import record_known_evidence
 
 OWNER = "4242"
 STRANGER = "9999"
@@ -616,6 +617,9 @@ class TestLearningOnThePhone:
         SettingsRepository(seeded).set_many(
             {Setting.NEW_WORDS_PER_DAY: 0, Setting.MASTERY_STABILITY_DAYS: 1}
         )
+        # Used well in two ways already; today's recall comes after the gap.
+        bot.engine.refresh_settings()
+        record_known_evidence(bot.engine, bot.engine.plan_word_ids(), gap_days=None)
         run(bot.command(OWNER, "/review"))
         session = _session_of(outbox.sent[-1][1])
         step = respond(bot, outbox, session)

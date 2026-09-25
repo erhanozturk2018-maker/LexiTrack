@@ -41,6 +41,7 @@ from lexitrack.services.review_session import ReviewSession
 from lexitrack.services.srs_scheduler import SrsScheduler
 
 from .conftest import entry
+from .flow_helpers import record_known_evidence
 
 
 def _name(index: int) -> str:
@@ -87,7 +88,14 @@ def answer_all(engine: LearningService, rating: Rating, session_id: str | None =
 
 
 def confirm_suggested(engine: LearningService) -> int:
-    """Say yes to every "mark Known?" suggestion, as the user would."""
+    """Say yes to every "mark Known?" suggestion, as the user would — after
+    giving the words in long-term memory the evidence a suggestion needs
+    (productive use and a recall after a long gap), which these tests take
+    as given."""
+    threshold = engine.settings.mastery_stability_days
+    stable = [card.word_id for card in CardRepository(engine.database).all_cards()
+              if (card.stability or 0) >= threshold]
+    record_known_evidence(engine, stable)
     return engine.confirm_known([word.id for word in engine.known_suggestions()])
 
 
@@ -287,10 +295,13 @@ class TestUndo:
         engine.introduce()
         clock.advance_to_day_start(1)
         answer_all(engine, Rating.EASY)
-        clock.advance_to_day_start(8)
+        # Used well in two ways already; what is missing is a long-gap recall.
+        record_known_evidence(engine, engine.plan_word_ids(), gap_days=None)
+        assert engine.known_suggestions() == []
+        clock.advance_to_day_start(30)
         queue = engine.review_queue()
         outcome = engine.answer(queue[0].word.id, Rating.EASY)
-        assert outcome.suggest_known
+        assert outcome.suggest_known, "recalled after 29 days: the case is made"
         assert queue[0].word.id in {word.id for word in engine.known_suggestions()}
         engine.undo_last_answer()
         assert queue[0].word.id not in {word.id for word in engine.known_suggestions()}

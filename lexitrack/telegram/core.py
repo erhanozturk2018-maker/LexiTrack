@@ -390,7 +390,10 @@ class BotCore:
             if outcome is not None and not outcome.duplicate:
                 self._on_activity()
                 if outcome.suggest_known:
-                    line += f" “{outcome.word.word}” is in long-term memory."
+                    line += (
+                        f" “{outcome.word.word}”: long-term memory and productive use"
+                        " — consider marking it Known."
+                    )
                     known = (outcome.word.id, outcome.word.word)
         with self._db.lock:
             finished = flow.current is None

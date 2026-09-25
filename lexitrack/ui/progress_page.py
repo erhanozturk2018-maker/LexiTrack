@@ -49,7 +49,6 @@ from ..services.learning_service import LearningService
 from ..services.maintenance import Maintenance
 from ..services.optimizer import Personaliser
 from ..services.progress import (
-    LONG_INTERVAL_DAYS,
     AnswerRow,
     Calibration,
     Group,
@@ -578,9 +577,11 @@ class ProgressPage(QWidget):
         count = len(suggestions)
         self.suggestions_title.setText(f"READY TO MARK KNOWN · {count:,}")
         self.suggestions_note.setText(
-            f"The schedule expects you to remember {'this word' if count == 1 else 'these'} "
-            f"for at least {threshold:g} days. Marking a word Known is your call; until "
-            "you do, it keeps its place in your reviews."
+            f"Long-term memory and productive evidence are strong: "
+            f"{'this word has' if count == 1 else 'each of these has'} been used well in "
+            f"two different ways and recalled after {threshold:g}+ days without a review. "
+            "Consider marking it Known — it is your call; until you do, it keeps its "
+            "place in your reviews."
         )
         stability = {row.word.id: row.stability for row in self._rows}
         for index, word in enumerate(suggestions[:_SUGGESTIONS_SHOWN]):
@@ -639,9 +640,10 @@ class ProgressPage(QWidget):
         self.skill_bar.set_stages(list(overview.stages))
         self.evidence.setText(
             f"<b>{overview.automatic:,}</b> retrieved instantly on several days · "
-            f"<b>{overview.long_interval:,}</b> remembered after {LONG_INTERVAL_DAYS}+ days "
-            f"without a review · <b>{overview.new_context:,}</b> recognised in a sentence "
-            "they had not been seen in"
+            f"<b>{overview.long_interval:,}</b> recalled after "
+            f"{self._engine.settings.mastery_stability_days:g}+ days without a review · "
+            f"<b>{overview.new_context:,}</b> recognised in a sentence they had not been "
+            "seen in"
         )
         notes = []
         if overview.only_v1:
@@ -715,12 +717,8 @@ class ProgressPage(QWidget):
         return rows
 
     def _is_ready(self, row: WordProgress) -> bool:
-        """Long-term and not Known: what is offered as Known."""
-        return (
-            row.group is Group.IN_PROGRESS
-            and row.stability is not None
-            and row.stability >= self._engine.settings.mastery_stability_days
-        )
+        """What is offered as Known: productive, and recalled after a long gap."""
+        return row.word.id in getattr(self, "_suggested", ())
 
     def _fill_words(self) -> None:
         rows = self._visible_rows()

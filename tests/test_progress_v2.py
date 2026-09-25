@@ -28,6 +28,7 @@ from lexitrack.services.progress import LONG_INTERVAL_DAYS, ProgressService
 from lexitrack.ui import progress_page as page_module
 from lexitrack.ui.progress_page import ANSWERS, OVERVIEW, READY, SCHEDULER, WORDS, ProgressPage
 
+from .flow_helpers import record_known_evidence
 from .test_progress_history import clock, engine, words  # noqa: F401 - fixtures
 
 
@@ -119,10 +120,13 @@ def test_memory_shows_words_in_long_term_memory_apart_from_known(
     database: Database, engine: LearningService, studied  # noqa: F811
 ) -> None:
     engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 1})
-    stages = {s.label: s.count for s in ProgressService(database, engine).pipeline()}
-    ready = len(engine.known_suggestions())
-    assert ready and stages["Long-term, not Known yet"] == ready
+    progress = ProgressService(database, engine)
+    stages = {s.label: s.count for s in progress.pipeline()}
+    lasting = sum(1 for row in progress.words() if (row.stability or 0) >= 1)
+    assert lasting and stages["1+ days, not Known"] == lasting
     assert stages["Known"] == 0, "long-term is not Known until the learner says so"
+    # Memory alone is no case for Known: nothing is offered yet.
+    assert engine.known_suggestions() == []
 
 
 # -- the page ----------------------------------------------------------------
@@ -148,10 +152,11 @@ def test_one_tab_at_a_time_and_only_its_height(page) -> None:
 
 
 def test_known_is_offered_and_marked_only_on_a_yes(
-    page, engine: LearningService, database: Database  # noqa: F811
+    page, engine: LearningService, database: Database, studied  # noqa: F811
 ) -> None:
     assert page.suggestions.isHidden(), "nothing is long-term yet"
     engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 1})
+    record_known_evidence(engine, studied, gap_days=5)
     page.refresh()
     ready = [word.id for word in engine.known_suggestions()]
     assert not page.suggestions.isHidden()
@@ -168,10 +173,11 @@ def test_known_is_offered_and_marked_only_on_a_yes(
 
 
 def test_the_rest_of_the_suggestions_open_in_words(
-    page, engine: LearningService, monkeypatch  # noqa: F811
+    page, engine: LearningService, monkeypatch, studied  # noqa: F811
 ) -> None:
     monkeypatch.setattr(page_module, "_SUGGESTIONS_SHOWN", 1)
     engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 1})
+    record_known_evidence(engine, studied, gap_days=5)
     page.refresh()
     ready = len(engine.known_suggestions())
     assert ready > 1 and not page.suggestions_more.isHidden()

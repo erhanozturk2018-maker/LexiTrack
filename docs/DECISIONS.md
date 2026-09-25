@@ -1298,3 +1298,20 @@ encoding → retrieval; the mnemonic was shown only at DEEP, and register and
 related words were stored but never shown. A guess made before the meaning
 gives the meaning something to confirm or correct, which is what makes it
 stick; the translation is left off the guess page because it is the answer.
+
+## 84. Known is offered on productive use and a long-gap recall, not on stability
+
+**Decision.** A word is offered as Known when its skill is Productive (used
+well in two different contexts or tasks) **and** it was recalled — not only
+recognised, not Again — at least once after a gap of the threshold or more
+without a review (21 days by default; the setting is now *Long-term evidence
+after*). Stability passing 21 days is no longer enough on its own: the memory
+bar still shows it, as memory. The offer says why: long-term memory and
+productive evidence. Only the learner marks a word Known.
+
+**Reason.** Refines decision 70. Stability is FSRS's forecast of retention of
+a word-to-meaning link; it can pass 21 days on recognition alone and before
+any long gap has actually been survived. The learning plan asks for
+intuitive, usable retrieval, so the case for Known is made by what the
+learner has done — produced the word, and retrieved it after a real long
+interval — rather than by what the scheduler predicts.

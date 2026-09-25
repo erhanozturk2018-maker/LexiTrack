@@ -897,7 +897,8 @@ class StudyPage(QWidget):
                 self.data_changed.emit()
 
         self.notify_action.emit(
-            f"“{word.word}” is in long-term memory.", ("Mark Known", confirm)
+            f"“{word.word}”: long-term memory and productive use. Consider marking it Known.",
+            ("Mark Known", confirm),
         )
 
     # -- keyboard ----------------------------------------------------------

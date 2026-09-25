@@ -62,14 +62,17 @@ easier question; picking the word out among four only after missing it is
 | 0 | Studied the new words and confirmed | — | Tomorrow |
 | 1 | Good | 2 days | Day 3 |
 | 3 | Good | 11 days | Day 14 |
-| 14 | Good | 46 days | In long-term memory: **Mark Known?** |
+| 14 | Good | 46 days | Day 60, in long-term memory |
 
 A word is in **long-term memory** when that number passes 21 days — three
 Goods, or two Easys, but never on the day you first study it. Answering Easy
 every time gets there on day 9; Hard alone never does, because it barely moves
-the number. LexiTrack then offers to mark it Known; it never does so itself,
-because Known is your judgement, and until you say yes the word keeps coming
-back.
+the number. That is a forecast, not yet a reason to call the word Known.
+LexiTrack offers to mark it Known when the record makes the case: you have
+**used it well in two different ways** — a collocation, a sentence of your own
+— and **recalled it after 21 days or more without a review**. It never marks a
+word Known itself, because Known is your judgement, and until you say yes the
+word keeps coming back.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not
@@ -106,8 +109,8 @@ You say how the retrieval went; LexiTrack records the answer it means.
 Only **Remembered** and **Instant** move a word forward. Keep **Instant** for
 words that come without thinking: it spaces a word out fastest, so an Instant
 you did not mean costs the most. Time, a hint or a slip never change what you
-said; they are kept beside it. A word in long-term memory is offered as Known,
-never made Known for you.
+said; they are kept beside it. A word you have used well and recalled after a
+long gap is offered as Known, never made Known for you.
 
 ## What is recorded, and where to see it
 

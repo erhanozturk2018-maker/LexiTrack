@@ -331,14 +331,17 @@ easier question; picking the word out among four only after missing it is
 | 0 | Studied the new words and confirmed | — | Tomorrow |
 | 1 | Good | 2 days | Day 3 |
 | 3 | Good | 11 days | Day 14 |
-| 14 | Good | 46 days | In long-term memory: **Mark Known?** |
+| 14 | Good | 46 days | Day 60, in long-term memory |
 
 A word is in **long-term memory** when that number passes 21 days — three
 Goods, or two Easys, but never on the day you first study it. Answering Easy
 every time gets there on day 9; Hard alone never does, because it barely moves
-the number. LexiTrack then offers to mark it Known; it never does so itself,
-because Known is your judgement, and until you say yes the word keeps coming
-back.
+the number. That is a forecast, not yet a reason to call the word Known.
+LexiTrack offers to mark it Known when the record makes the case: you have
+**used it well in two different ways** — a collocation, a sentence of your own
+— and **recalled it after 21 days or more without a review**. It never marks a
+word Known itself, because Known is your judgement, and until you say yes the
+word keeps coming back.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not
@@ -369,8 +372,8 @@ tabs:
 - **Overview** — four numbers kept apart: **learned here** (reached
   long-term memory and you marked it Known), **in progress**, **marked Known
   by hand** and **known before your plan**. Then the words **ready to mark
-  Known**: in long-term memory, offered, marked only when you say so — one by
-  one or all at once. Then **memory and skill** on two bars: how long each
+  Known**: used well in two ways and recalled after 21+ days without a review,
+  offered, marked only when you say so — one by one or all at once. Then **memory and skill** on two bars: how long each
   word is expected to be remembered, and what your answers on later days have
   shown you can do with it (recognise it, recall it, use it). Beside them,
   evidence that is neither: words retrieved instantly on several days, words

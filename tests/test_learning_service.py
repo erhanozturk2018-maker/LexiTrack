@@ -27,6 +27,7 @@ from lexitrack.repositories import (
 from lexitrack.services.learning_service import LearningService
 
 from .conftest import entry
+from .flow_helpers import record_known_evidence
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1"]
 
@@ -408,16 +409,42 @@ class TestWorkload:
 
 
 class TestMastery:
-    def test_a_stable_word_is_suggested_as_known_never_marked(
-        self, engine: LearningService, database: Database, clock: FrozenClock
+    def test_stability_alone_is_never_a_case_for_known(
+        self, engine: LearningService, clock: FrozenClock
     ) -> None:
-        """Long-term memory is derived from the schedule; Known is the user's word."""
+        """A forecast is not evidence: no productive use, no suggestion."""
         engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 10})
         engine.introduce()
+        for _ in range(60):
+            clock.advance_to_day_start(1)
+            for item in engine.review_queue():
+                assert not engine.answer(item.word.id, Rating.EASY).suggest_known
+        assert engine.known_suggestions() == []
+
+    def test_productive_use_alone_is_not_enough_either(
+        self, engine: LearningService, clock: FrozenClock
+    ) -> None:
+        ids = [word.id for word in engine.introduce().introduced]
+        clock.advance_to_day_start(1)
+        for word_id in ids:
+            engine.answer(word_id, Rating.GOOD)
+        record_known_evidence(engine, ids, gap_days=None)
+        assert engine.known_suggestions() == [], "no recall after a long gap yet"
+        record_known_evidence(engine, ids[:1], gap_days=21)
+        assert [word.id for word in engine.known_suggestions()] == ids[:1]
+
+    def test_a_proven_word_is_suggested_as_known_never_marked(
+        self, engine: LearningService, database: Database, clock: FrozenClock
+    ) -> None:
+        """Productive and recalled after a long gap: offered; Known is the user's word."""
+        engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 10})
+        ids = [word.id for word in engine.introduce().introduced]
+        record_known_evidence(engine, ids, gap_days=None)
         word_id = None
         # Easy answers stretch the interval fast, so most of these days have
         # nothing due; mastery is reached in reviews, not in elapsed time.
-        for _ in range(60):
+        # Easy answers stretch the gaps fast: past the threshold within months.
+        for _ in range(200):
             clock.advance_to_day_start(1)
             for item in engine.review_queue():
                 outcome = engine.answer(item.word.id, Rating.EASY)

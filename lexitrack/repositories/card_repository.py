@@ -416,6 +416,24 @@ class CardRepository:
         ).fetchall()
         return [_to_log(row) for row in rows]
 
+    def recalled_after(self, word_ids: Iterable[int], days: float) -> set[int]:
+        """Of ``word_ids``, those recalled at least once after ``days`` or more
+        without a review: an answer not taken back, not Again, and — when
+        recorded — a recall rather than a recognition."""
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        found: set[int] = set()
+        for start in range(0, len(ids), _CHUNK):
+            chunk = ids[start : start + _CHUNK]
+            marks = ",".join("?" * len(chunk))
+            rows = self._db.connection.execute(
+                f"SELECT DISTINCT word_id FROM review_logs WHERE word_id IN ({marks}) "
+                "AND undone_at IS NULL AND rating != ? AND elapsed_days >= ? "
+                "AND (memory_result IS NULL OR memory_result IN ('RECALLED', 'RECALLED_EFFORT'))",
+                [*chunk, int(Rating.AGAIN), float(days)],
+            ).fetchall()
+            found.update(int(row["word_id"]) for row in rows)
+        return found
+
     def rated_on(self, word_id: int, local_date: str) -> bool:
         """True when the word has an answer on that day that was not taken back."""
         row = self._db.connection.execute(

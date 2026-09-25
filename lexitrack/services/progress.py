@@ -53,9 +53,9 @@ from .skill_tracker import SkillTracker
 if TYPE_CHECKING:
     from .learning_service import LearningService
 
-#: A word remembered after this many days without a review has shown memory
-#: that outlasts the ordinary schedule.
-LONG_INTERVAL_DAYS = 30
+#: The default gap after which a recall is long-term evidence; the one in use
+#: is the learner's setting (*Long-term evidence after*, 21 days by default).
+LONG_INTERVAL_DAYS = 21
 #: The Overview's recent window.
 RECENT_DAYS = 30
 
@@ -524,14 +524,9 @@ class ProgressService:
         rows = self.words() if rows is None else rows
         skills = [row.skill for row in rows if row.skill is not None]
         counts = Counter(skill.stage for skill in skills)
-        studied = {row.word.id for row in rows}
-        remembered_late = {
-            log.word_id
-            for log in self._cards.all_logs(include_undone=False)
-            if log.word_id in studied
-            and log.rating is not Rating.AGAIN
-            and (log.elapsed_days or 0) >= LONG_INTERVAL_DAYS
-        }
+        remembered_late = self._cards.recalled_after(
+            (row.word.id for row in rows), self._engine.settings.mastery_stability_days
+        )
         return SkillOverview(
             stages=tuple(
                 PipelineStage(stage.label, counts[stage])
@@ -567,7 +562,8 @@ class ProgressService:
             elif row.stability is None:
                 stages["new"] += 1
             elif row.stability >= threshold:
-                # Long-term, and offered as Known: the user has not said yes.
+                # Expected to last past the threshold. Memory only: whether it
+                # is offered as Known depends on skill and a real long recall.
                 # Checked first, so a low threshold never hides it as fragile.
                 stages["ready"] += 1
             elif row.stability < 3:
@@ -581,7 +577,7 @@ class ProgressService:
             PipelineStage("Under 3 days", stages["short"]),
             PipelineStage("3 to 7 days", stages["week"]),
             PipelineStage(f"7 to {threshold:g} days", stages["near"]),
-            PipelineStage("Long-term, not Known yet", stages["ready"]),
+            PipelineStage(f"{threshold:g}+ days, not Known", stages["ready"]),
             PipelineStage("Known", stages["known"]),
         ]
 

@@ -1004,3 +1004,18 @@ sentence.
 the desktop's sentence check and the bot's `write_check` list them as a
 checklist before the examples. The engine document still described the old
 show-and-rate review for words with no meaning; corrected.
+
+## 2026-09-26 — Learning plan gaps, step 7: the case for Known
+
+`LearningService.known_evidence` (Productive skill and a recall after the
+threshold, via `CardRepository.recalled_after`) drives both the list on
+Progress and the offer after an answer. Long-interval evidence on Progress
+uses the same threshold (21 days) instead of 30; the memory bar's long-term
+stage is labelled as memory. Tests that took "stable" to mean "offered" now
+give their words the record the offer needs (`flow_helpers.record_known_evidence`).
+
+**Problems and solutions**
+
+- A test answered Easy for 60 days expecting a long-gap recall; with Easy the
+  third review falls past day 60, so no gap was ever survived. It now runs
+  200 days.

@@ -46,6 +46,7 @@ from ..models.attempt import (
     Task,
 )
 from ..models.settings import LearningSettings, Setting
+from ..models.skill import SkillStage
 from ..models.srs import (
     CardState,
     Channel,
@@ -71,6 +72,7 @@ from ..repositories import (
 )
 from .review_queue import Queue, effective_capacity
 from .review_queue import build as build_queue
+from .skill_tracker import SkillTracker
 from .srs_scheduler import SrsScheduler
 
 #: How far ahead the Study page looks.
@@ -753,7 +755,9 @@ class LearningService:
             interval_days=self._clock.days_between(now, result.card.due_at),
             became_struggling=result.became_struggling,
             reached_mastery=result.reached_mastery,
-            suggest_known=result.reached_mastery and word.status is not ReviewStatus.KNOWN,
+            suggest_known=(
+                word.status is not ReviewStatus.KNOWN and word.id in self.known_evidence([word.id])
+            ),
             log_id=log_id,
             memory_result=memory_result,
         )
@@ -843,22 +847,35 @@ class LearningService:
             self._cards.set_state(ids, CardState.ARCHIVED)
         return changed
 
-    def known_suggestions(self) -> list[StoredWord]:
-        """Words in long-term memory that are not Known yet, most stable first.
+    def known_evidence(self, word_ids: Sequence[int]) -> set[int]:
+        """Of ``word_ids``, the words whose record makes a strong case for Known.
 
-        Long-term means the card's stability has passed the threshold in
-        Settings (21 days by default): FSRS expects the word to be remembered
-        at least that long. The engine only suggests; :meth:`confirm_known`
-        is the user saying yes.
+        Both, never one alone: the skill is **Productive** (the word used well
+        in two different contexts or tasks), and it was **recalled after a long
+        gap** — at least the threshold in Settings (21 days by default) without
+        a review. A forecast is not evidence: stability alone never counts.
         """
-        threshold = self._settings.mastery_stability_days
+        recalled = self._cards.recalled_after(word_ids, self._settings.mastery_stability_days)
+        if not recalled:
+            return set()
+        skills = SkillTracker(self._db).skills(recalled)
+        return {
+            word_id for word_id, skill in skills.items() if skill.stage is SkillStage.PRODUCTIVE
+        }
+
+    def known_suggestions(self) -> list[StoredWord]:
+        """Words not Known yet whose record makes a strong case for Known
+        (:meth:`known_evidence`), most stable first.
+
+        The engine only suggests; :meth:`confirm_known` is the user saying yes.
+        """
         cards = [
             card
             for card in self._cards.all_cards()
-            if card.stability is not None
-            and card.stability >= threshold
-            and card.state is not CardState.ARCHIVED
+            if card.state is not CardState.ARCHIVED
         ]
+        evidence = self.known_evidence([card.word_id for card in cards])
+        cards = [card for card in cards if card.word_id in evidence]
         cards.sort(key=lambda card: card.stability or 0, reverse=True)
         words = self._words_in_order([card.word_id for card in cards])
         return [word for word in words if word.status is not ReviewStatus.KNOWN]
