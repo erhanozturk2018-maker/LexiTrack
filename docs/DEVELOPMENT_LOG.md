@@ -970,3 +970,10 @@ results, used prompts, cycles, resolution) and the half-answered step;
 `restore` rebuilds them, reading version 1 as before. The bot keeps a
 written sentence in the flow (`note_written`) instead of its own memory; the
 desktop resumes an open session and shows a half-answered step as it stood.
+
+## 2026-09-26 — Learning plan gaps, step 4: repair and relearning
+
+A repair TEACH step carries the level it repairs (`Step.focus`) and
+`teaching_page` makes it short; relearning stays whole. Every follow-up
+page holds back the context its re-ask uses (`Step.hold_back`) — before,
+the page could print the very sentence the next question blanked out.

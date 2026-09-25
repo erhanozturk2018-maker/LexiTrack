@@ -1271,3 +1271,16 @@ choices, so asking the first question again records a recall that is really
 recognition, and the missed first question was lost from the skill record.
 Version-1 states still restore the old way, so nothing open is lost by the
 upgrade.
+
+## 82. Repair is short; relearning is whole; the page never gives the re-ask away
+
+**Decision.** A forgotten word is relearned from its full teaching page. A
+skill that failed while the memory held gets a short repair page about that
+skill: the meaning and pattern, plus one example for a context, the
+collocations for a collocation, both for a sentence. Any teaching page before
+a re-ask leaves out the context that re-ask will use.
+
+**Reason.** Both used the same full page, so a word that was only one skill
+short got a full relearning, and a long page before a quick re-ask turns it
+into reading. Showing the very sentence the next question blanks out made
+the re-ask a copy, not a retrieval.

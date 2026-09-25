@@ -137,8 +137,13 @@ the learner could **do** (`services/review_route.py` for the rules,
 
 4. **Relearning** (D) and **repair** (C, F): the word is taught again at
    once, and asked again three cards later with a *different* prompt — the
-   other meaning source, another context, another collocation. At most two
-   cycles. That practice is recorded, linked to the answer, and never
+   other meaning source, another context, another collocation. **Relearning**
+   a forgotten word shows everything stored; **repair** — a skill failed
+   while the memory held — is a short page about that skill: the meaning and
+   the pattern, with one example for a missed context, the collocations for a
+   missed collocation, both for a sentence. The context the re-ask will use
+   is kept off the page, so the page never gives the answer away. At most
+   two cycles. That practice is recorded, linked to the answer, and never
    changes the rating: a same-session success is not a day's memory.
 5. **One rating per word per day**, from any client: a second answer the same
    day is recognised as a duplicate and changes nothing.

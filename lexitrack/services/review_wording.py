@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models.attempt import Depth, MemoryResult, Phase, Role
+from ..models.attempt import Depth, Level, MemoryResult, Phase, Role
 from .review_flow import Feedback, Step
 
 
@@ -81,12 +81,26 @@ class TeachingPage:
         return not self.sections and not self.examples
 
 
+#: A repair page, by the level that failed: what it shows besides the meaning.
+_REPAIR = {
+    Level.MEANING_TO_WORD: ("pattern",),
+    Level.CONTEXT_TO_WORD: ("pattern", "example"),
+    Level.COLLOCATION: ("pattern", "collocations"),
+    Level.PRODUCTION: ("pattern", "collocations", "example"),
+}
+
+
 def teaching_page(step: Step) -> TeachingPage:
     """What is known about the word, as much as its depth asks.
 
     SHORT: the meaning. LIGHT: also how it is used and one example. DEEP, and
-    teaching again after a miss: everything stored, two examples.
+    relearning a forgotten word: everything stored, two examples. A repair —
+    a skill failed while the memory held — is short and about that skill
+    (:data:`_REPAIR`). A context kept back for the question that follows is
+    never shown.
     """
+    if step.focus is not None:
+        return _repair_page(step)
     depth = step.depth
     usage = depth is not Depth.SHORT
     everything = depth is None or depth is Depth.DEEP
@@ -113,6 +127,36 @@ def teaching_page(step: Step) -> TeachingPage:
         add("Note", localization.notes)
     examples: list[tuple[str, str | None]] = []
     if teaching and teaching.contexts and usage:
-        for context in teaching.contexts[: 2 if everything else 1]:
+        for context in _shown_contexts(step)[: 2 if everything else 1]:
             examples.append((context.plain, teaching.translation(context)))
     return TeachingPage(tuple(sections), tuple(examples))
+
+
+def _shown_contexts(step: Step) -> list:
+    teaching = step.teaching
+    if not teaching:
+        return []
+    return [c for c in teaching.contexts if c.id is None or c.id not in step.hold_back]
+
+
+def _repair_page(step: Step) -> TeachingPage:
+    word = step.word
+    teaching = step.teaching
+    content = teaching.content if teaching else None
+    parts = _REPAIR.get(step.focus, ("pattern",))
+    sections: list[tuple[str, str]] = []
+    for title, text in (
+        ("Meaning", teaching.core_meaning if teaching else None),
+        ("Definition", word.definition),
+    ):
+        if text:
+            sections.append((title, text))
+    if content and "pattern" in parts and content.pattern:
+        sections.append(("Pattern", content.pattern))
+    if content and "collocations" in parts and content.collocations:
+        sections.append(("Goes with", " · ".join(content.collocations)))
+    examples: tuple[tuple[str, str | None], ...] = ()
+    if "example" in parts:
+        shown = _shown_contexts(step)[:1]
+        examples = tuple((c.plain, teaching.translation(c)) for c in shown)
+    return TeachingPage(tuple(sections), examples)

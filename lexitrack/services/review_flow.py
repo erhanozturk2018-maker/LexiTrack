@@ -122,6 +122,12 @@ class Step:
     reason: str | None = None
     #: For TEACH: how much to show (SHORT, LIGHT, DEEP); None shows everything.
     depth: Depth | None = None
+    #: For a repair TEACH: the level that failed, which the short page is
+    #: about (services/review_wording.py). None: not a repair.
+    focus: Level | None = None
+    #: For TEACH: contexts kept off the page, because the question asked
+    #: after it will use them.
+    hold_back: tuple[int, ...] = ()
 
     @property
     def label(self) -> str:
@@ -681,9 +687,17 @@ class ReviewFlow:
         if run.new and run.depth is not None:
             # A new word missed right after teaching is taught again, deeper.
             run.depth = deeper(run.depth, run.teaching)
-        self._steps.insert(0, Step(word, StepKind.TEACH, phase=phase, teaching=run.teaching,
-                                   depth=run.depth if run.new else None))
+        # The question first, so the page can keep its context back.
         prompt = self._retrieval_prompt(run)
+        held = (prompt.context_id,) if prompt is not None and prompt.context_id else ()
+        # Relearning a forgotten word teaches it whole; repairing a skill that
+        # failed while the memory held is short and about that skill.
+        focus = None
+        if phase is Phase.REPAIR and run.resolution is not None:
+            focus = run.resolution.repair_level or Level.MEANING_TO_WORD
+        self._steps.insert(0, Step(word, StepKind.TEACH, phase=phase, teaching=run.teaching,
+                                   depth=run.depth if run.new else None, focus=focus,
+                                   hold_back=held))
         if prompt is None:
             return
         position = min(1 + REASK_GAP, len(self._steps))
@@ -974,6 +988,8 @@ def _step_to_json(step: Step) -> dict:
         "is_struggling": step.is_struggling,
         "reason": step.reason,
         "depth": step.depth.value if step.depth else None,
+        "focus": int(step.focus) if step.focus else None,
+        "hold_back": list(step.hold_back),
     }
 
 
@@ -990,6 +1006,8 @@ def _step_from_json(raw: dict, run: _Run, words: dict) -> Step:
         is_struggling=bool(raw.get("is_struggling")),
         reason=raw.get("reason"),
         depth=Depth(raw["depth"]) if raw.get("depth") else None,
+        focus=Level(raw["focus"]) if raw.get("focus") else None,
+        hold_back=tuple(int(i) for i in raw.get("hold_back", [])),
     )
 
 

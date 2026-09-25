@@ -494,3 +494,73 @@ def test_a_state_saved_by_version_one_still_restores(engine: LearningService) ->
     engine.save_flow_state(flow.session_id, json.dumps(old))
     again = _restored(engine, flow)
     assert again.current.role is Role.PRIMARY and again.total == flow.total
+
+
+# -- repair is short and about the skill; relearning is whole -------------------------
+
+
+def _teach_word(database: Database) -> int:
+    from lexitrack.models.content import WordContent
+
+    word_id = _ids(database)["reluctant"]
+    repo = ContentRepository(database)
+    repo.save_content(WordContent(word_id=word_id, pattern="reluctant to do sth",
+                                  collocations=("a reluctant hero",)))
+    repo.save_localization(WordLocalization(word_id=word_id, learner_language="de",
+                                            core_meaning="widerwillig", nuance="nuance-de",
+                                            encoding_cue="cue-de"))
+    repo.add_contexts([
+        WordContext(word_id=word_id, text="She was {{reluctant}} to leave."),
+        WordContext(word_id=word_id, text="A {{reluctant}} yes, after a long sigh."),
+    ])
+    return word_id
+
+
+def test_a_forgotten_word_is_relearned_in_full(
+    engine: LearningService, database: Database
+) -> None:
+    from lexitrack.services.review_wording import teaching_page
+
+    word_id = _teach_word(database)
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "reluctant")
+    flow.submit("", response_ms=4000)
+    flow.choose(next(i for i, o in enumerate(flow.current.options) if o.id != word_id))
+    teach = flow.current
+    assert teach.phase is Phase.RELEARN and teach.focus is None
+    titles = [title for title, _ in teaching_page(teach).sections]
+    assert "Nuance" in titles and "To remember" in titles
+
+
+def test_a_repair_page_is_short_and_keeps_back_the_context_asked_next(
+    engine: LearningService, database: Database
+) -> None:
+    from lexitrack.models.attempt import Level
+    from lexitrack.services.review_wording import teaching_page
+
+    word_id = _teach_word(database)
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    # Recalled once, so today's first question is a context.
+    AttemptRepository(database).add(LearningAttempt(
+        word_id=word_id, at=datetime(2026, 9, 17, 5, tzinfo=UTC), on_day="2026-09-17",
+        phase=Phase.REVIEW, role=Role.PRIMARY, task=Task.MEANING_TO_WORD, success=True,
+    ))
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "reluctant")
+    assert flow.current.prompt.task is Task.CONTEXT_CLOZE
+    flow.submit("unwilling", response_ms=5000)  # the context missed
+    say(flow, "reluctant")                     # the meaning held: repair
+    teach = flow.current
+    assert teach.phase is Phase.REPAIR and teach.focus is Level.CONTEXT_TO_WORD
+    page = teaching_page(teach)
+    titles = [title for title, _ in page.sections]
+    assert titles == ["Meaning", "Definition", "Pattern"], "short: no nuance, no mnemonic"
+    reask = next(s for s in flow._steps if s.word.id == word_id and s.role is Role.RETRIEVAL)
+    assert teach.hold_back == (reask.prompt.context_id,)
+    shown = [sentence for sentence, _ in page.examples]
+    assert len(shown) == 1 and "{{" not in reask.prompt.text
+    held = next(c for c in teach.teaching.contexts if c.id == reask.prompt.context_id)
+    assert held.plain not in shown, "the page never gives away the question after it"
