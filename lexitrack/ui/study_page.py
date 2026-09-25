@@ -414,7 +414,8 @@ class StudyPage(QWidget):
             ),
         ):
             button.setProperty("variant", "ghost")
-            button.setProperty("size", "small")
+            # Text-sized, like the section title beside them.
+            button.setProperty("compact", True)
             button.setToolTip(tip)
             section.header.addWidget(button)
         self.copy_button.clicked.connect(self._copy_words)

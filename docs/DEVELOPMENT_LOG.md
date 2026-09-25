@@ -895,7 +895,8 @@ and a long-term stage in the memory pipeline.
 - The memory pipeline sorted by "under 3 days" before the long-term
   threshold, so with a low threshold a word ready for Known was counted as
   fragile. The threshold is checked first.
-- `setProperty("size", ...)` collides with `QWidget.size` and never applied;
-  see decision 75.
+- `setProperty("size", ...)` collides with `QWidget.size` and never applied.
+  Rendered before and after, the header text buttons are now compact and the
+  Details toggle keeps its height; see decision 75.
 - The Known suggestions took eight tall rows and pushed memory and skill off
   the first screen: five compact rows now, and a link to the rest in Words.

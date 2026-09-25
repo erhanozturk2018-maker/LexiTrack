@@ -120,7 +120,7 @@ class ReviewPage(QWidget):
 
         self.actions_button = QPushButton("List actions")
         self.actions_button.setProperty("variant", "ghost")
-        self.actions_button.setProperty("size", "small")
+        self.actions_button.setProperty("compact", True)
         self.actions_menu = QMenu(self.actions_button)
         self.actions_menu.aboutToShow.connect(self._fill_actions_menu)
         self.actions_button.setMenu(self.actions_menu)

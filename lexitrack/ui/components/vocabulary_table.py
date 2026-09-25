@@ -410,7 +410,6 @@ class VocabularyTable(QWidget):
         self.details_button = QPushButton("Details")
         self.details_button.setObjectName("DetailsToggle")
         self.details_button.setCheckable(True)
-        self.details_button.setProperty("size", "small")
         self.details_button.setToolTip("Show or hide word details")
         self.details_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.details_button.toggled.connect(self._on_details_toggled)

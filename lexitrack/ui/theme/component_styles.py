@@ -512,14 +512,9 @@ QPushButton[variant="danger"]:hover {{
     color: {p.text_on_accent};
 }}
 
-QPushButton[size="small"] {{
-    padding: 5px 12px;
-    font-size: 13px;
-    min-height: 16px;
-}}
-
-/* "size" is a property every QWidget already has (its width and height), so
-   the rule above never matches; "compact" is free. */
+/* A button sized to text, for a section header. Not "size": every QWidget
+   already has that property (its width and height), so a [size=...] rule
+   never matches. */
 QPushButton[compact="true"] {{
     padding: 4px 12px;
     font-size: 13px;

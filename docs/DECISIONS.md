@@ -1156,6 +1156,8 @@ words rest on them alone.
 
 **Found on the way.** `QWidget` already has a `size` property, so
 `setProperty("size", "small")` never set anything and the `[size="small"]`
-style never matched. The new list uses `[compact="true"]`; the four older
-buttons that asked for "small" keep the size they have always had until
-that is decided on its own.
+style never matched. It is replaced by `[compact="true"]`, compared on screen
+before and after: the text buttons beside a section title (Copy, Export and
+Mark as studied on Today; List actions) are compact, which lines them up with
+the title; the Details toggle keeps full height, because it stands in a row
+of full-height controls and looked out of place shrunk.
