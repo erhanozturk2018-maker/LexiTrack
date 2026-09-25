@@ -54,8 +54,9 @@ from ..repositories import ContentRepository
 from ..services.first_learning import choose_depth, estimate
 from ..services.learning_service import DailyPlan, LearningService
 from ..services.review_flow import Feedback, ReviewFlow, StepKind
+from ..services.review_wording import interval_text
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
-from .components.review_card import ReviewCard, interval_text
+from .components.review_card import ReviewCard
 from .theme.palette import METRICS
 from .widgets import PageColumn
 

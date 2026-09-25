@@ -33,10 +33,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...models.attempt import Depth, MemoryResult, Phase, Role
+from ...models.attempt import Phase
 from ...models.srs import Rating
 from ...services.review_flow import Feedback, Step, StepKind
 from ...services.review_route import examples, hint_for
+from ...services.review_wording import feedback_text, interval_text, teaching_page
 from ..theme import current_palette
 from ..theme.palette import METRICS
 from .cards import repolish
@@ -60,21 +61,6 @@ GRADES = (
 )
 
 CARD_WIDTH = 640
-
-
-def interval_text(days: int | None) -> str:
-    """The interval under an answer button, in the shortest honest words."""
-    if days is None:
-        return "–"
-    if days <= 1:
-        return "tomorrow"
-    if days < 30:
-        return f"{days} days"
-    if days < 365:
-        months = round(days / 30)
-        return f"{months} month" + ("s" if months != 1 else "")
-    years = days / 365
-    return "1 year" if round(years) == 1 else f"{years:.1f} years"
 
 
 def _label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
@@ -606,7 +592,7 @@ class ReviewCard(QFrame):
         """Say what the answer did, and wait for Enter."""
         step = self.step
         self.waiting = True
-        text, tone = _feedback_text(step, feedback)
+        text, tone = feedback_text(step, feedback)
         self.feedback_label.setText(text)
         self.feedback_label.setProperty("tone", tone)
         repolish(self.feedback_label)
@@ -658,84 +644,23 @@ class ReviewCard(QFrame):
             parent.layout().activate()
 
 
-def _feedback_text(step: Step | None, feedback: Feedback) -> tuple[str, str]:
-    """The line under an answer, and its tone: good, bad or neutral."""
-    if feedback.answer is None:
-        return "Not quite. One more question about this word.", "bad"
-    answer = feedback.answer
-    outcome = feedback.outcome
-    back = ""
-    if outcome is not None and not outcome.duplicate:
-        back = f"Back {_when(outcome.interval_days)}"
-    later = ""
-    if feedback.resolution is not None and feedback.resolution.follow_up.value != "none":
-        later = "; you'll go over it again in a moment"
-    if step is not None and step.phase is not Phase.REVIEW:
-        # Practice after teaching: never rated, so nothing about when.
-        if feedback.correct:
-            return f"✓ “{answer}”", "good"
-        return f"It is “{answer}”.", "bad"
-    probe = step is not None and step.role is Role.PROBE
-    if feedback.correct and not probe:
-        slip = " — accepted; mind the spelling" if feedback.near_miss else ""
-        return f"✓ “{answer}”{slip} · {back.lower()}" if back else f"✓ “{answer}”{slip}", "good"
-    memory = feedback.resolution.memory if feedback.resolution else None
-    tail = f" {back}{later}." if back else ""
-    if memory is MemoryResult.RECALLED or memory is MemoryResult.RECALLED_EFFORT:
-        return f"It is “{answer}” — the word itself you knew.{tail}", "neutral"
-    if memory is MemoryResult.RECOGNIZED:
-        return f"It is “{answer}” — you recognised it.{tail}", "neutral"
-    return f"It is “{answer}”.{tail}", "bad"
-
-
-def _when(days: int) -> str:
-    text = interval_text(days)
-    return text if text == "tomorrow" else f"in {text}"
-
-
 def _teaching_html(step: Step) -> str:
-    """What is known about the word, as a short page, as much as its depth asks.
-
-    SHORT: the meaning. LIGHT: also how it is used and one example. DEEP, and
-    teaching again after a miss: everything stored, two examples.
-    """
-    depth = step.depth
-    usage = depth is not Depth.SHORT
-    everything = depth is None or depth is Depth.DEEP
-    word = step.word
-    teaching = step.teaching
-    content = teaching.content if teaching else None
+    """The teaching page (services/review_wording.py) as rich text."""
+    page = teaching_page(step)
     parts: list[str] = []
 
-    def line(title: str, text: str | None, raw: bool = False) -> None:
-        # Content comes from imported files: shown as text, never as markup.
-        if text and not raw:
-            text = escape(text)
-        if text:
-            parts.append(
-                f"<p style='margin:0 0 8px 0'><span style='font-size:11px;"
-                f"font-weight:600;letter-spacing:0.6px'>{title.upper()}</span><br>{text}</p>"
-            )
+    def block(title: str, html: str) -> None:
+        parts.append(
+            f"<p style='margin:0 0 8px 0'><span style='font-size:11px;"
+            f"font-weight:600;letter-spacing:0.6px'>{title.upper()}</span><br>{html}</p>"
+        )
 
-    localization = teaching.localization if teaching else None
-    line("Meaning", teaching.core_meaning if teaching else None)
-    line("Definition", word.definition)
-    if content and usage:
-        line("Pattern", content.pattern)
-        if content.collocations:
-            line("Goes with", " · ".join(content.collocations))
-    if localization and everything:
-        line("Nuance", localization.nuance)
-        line("How it is used", localization.usage_note)
-        line("To remember", localization.encoding_cue)
-        line("Note", localization.notes)
-    if teaching and teaching.contexts and usage:
-        examples = []
-        for context in teaching.contexts[: 2 if everything else 1]:
-            translated = teaching.translation(context)
-            examples.append(
-                f"“{escape(context.plain)}”"
-                + (f"<br><i>{escape(translated)}</i>" if translated else "")
-            )
-        line("In use", "<br>".join(examples), raw=True)
+    # Content comes from imported files: shown as text, never as markup.
+    for title, text in page.sections:
+        block(title, escape(text))
+    if page.examples:
+        block("In use", "<br>".join(
+            f"“{escape(sentence)}”" + (f"<br><i>{escape(translated)}</i>" if translated else "")
+            for sentence, translated in page.examples
+        ))
     return "".join(parts) or "<p>No more is stored about this word yet.</p>"

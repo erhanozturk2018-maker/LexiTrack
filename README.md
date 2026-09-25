@@ -60,12 +60,13 @@ local SQLite file. The only network use is the optional Telegram bot.
   ahead as day tiles, the words you keep missing, and the last 30 days.
 - **A workload brake.** When a day's reviews go over your limit (250 by
   default), new words pause until you catch up, and the page says why.
-- **Mastery.** Once a word is expected to stick for 21 days it is marked
-  Known by itself.
+- **Mastery.** Once a word is expected to stick for 21 days it is offered as
+  Known; you mark it, on the card or on Progress. Nothing becomes Known on
+  its own.
 - **Missed days are harmless.** Nothing is owed for a day you skipped. Overdue
   reviews come first, and you still get today's new words.
 - **Undo.** `Ctrl+Z`, or the button under the card, takes back your last
-  answer; on Telegram every card after the first has an Undo button. The
+  answer; on Telegram every card after an answer has an Undo button. The
   answer stays in the record, marked, and out of every count.
 
 ### Progress and transparency
@@ -87,10 +88,14 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 ### Telegram
 
-- **The day's words at 06:00**, each with a short meaning, and one button to
-  confirm you have studied them.
-- **Reviews on your phone.** One card at a time, each replacing the last, with
-  the meaning hidden until you tap it.
+- **The day's words at 06:00**, each with a short meaning, and a button to
+  start the day's session.
+- **The whole session on your phone**, the same as at the desk: reviews
+  first, then the new words taught and practised. Type the word as a reply,
+  choose among four with buttons, write a sentence and grade it. One card at
+  a time, each opening with how the last answer went.
+- **Picks up where you left off.** The session is saved after every step: if
+  LexiTrack restarts, `/review` or any tap shows the step you were on.
 - **An evening reminder**, only if something is still waiting.
 - **A weekly summary** on Sunday evening: the week's answers, words learned
   and the words giving you trouble.
@@ -415,10 +420,13 @@ teach, and its row says so: sort it on Sort words first, or turn on
 
 The bot sends the day's words at 06:00 and a reminder at 21:00 if something is
 left (both hours are settings). `/today` shows today's words and `/review`
-starts a session. It works only while LexiTrack is running, so turn on *Start
+starts the day's session — or resumes the one in progress. A question that
+asks for the word is answered by replying with it; a sentence is written as
+a reply, then graded with a button. *Mark the new words as studied* skips
+their practice, as *Mark as studied* does on the desktop. It works only while LexiTrack is running, so turn on *Start
 with Windows* to have it come back after a restart. If the computer was off at
 06:00, the message comes when it starts — once, never a pile of old ones.
-Every card after the first has **↶ Undo** for a mis-tap, and on Sunday
+Every card after an answer has **↶ Undo** for a mis-tap, and on Sunday
 evening a **weekly summary** arrives (it can be switched off in *Settings →
 Telegram*).
 

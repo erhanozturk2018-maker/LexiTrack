@@ -204,6 +204,8 @@ class TelegramRuntime:
             CallbackQueryHandler,
             CommandHandler,
             ContextTypes,
+            MessageHandler,
+            filters,
         )
 
         self._stop = asyncio.Event()
@@ -242,12 +244,19 @@ class TelegramRuntime:
                 getattr(message, "text_html", "") or "",
             )
 
+        async def on_text(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+            # A reply to a typed or written step (see core.BotCore.text).
+            if update.effective_chat is None or update.effective_message is None:
+                return
+            await core.text(str(update.effective_chat.id), update.effective_message.text or "")
+
         async def on_error(_update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
             log.warning("Telegram handler error: %s", context.error, exc_info=context.error)
 
         for name in ("start", "today", "brief", "review", "help"):
             application.add_handler(CommandHandler(name, on_command))
         application.add_handler(CallbackQueryHandler(on_button))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
         application.add_error_handler(on_error)
 
         try:

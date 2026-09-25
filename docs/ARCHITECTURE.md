@@ -433,20 +433,26 @@ wherever the CEFR level changes.
 
 ### The study flow
 
-`StudyFlow` (`services/study_flow.py`) is a review session as a state machine
-with no widgets: the queue, the card on screen, whether its meaning is
-revealed, how many were answered, and what Undo would take back. The Today
-page shows it and passes on key presses; it holds no session state of its own
-(a test reads the page's source to keep it that way). Every answer still goes
-through `LearningService.answer` and every Undo through `undo_last_answer`:
-the flow decides what to show next, never what an answer means.
+`ReviewFlow` (`services/review_flow.py`) is a session as a state machine with
+no widgets: the steps still to come, which word each belongs to, what Undo
+would take back. The desktop's Today page and the Telegram bot both drive it
+and hold no session state of their own; each says which channel it is, so the
+answers are recorded as coming from there. Every rating goes through
+`LearningService.review` (or `answer` for a shown-and-rated word) and every
+Undo through `undo_last_answer`: the flow decides what to ask next, never
+what an answer means. Each step shown has a number that changes whenever the
+step does, so a client can tell a tap on the current step from an older one.
 
 After every step the flow writes its state to `review_sessions.flow_state` as
-versioned JSON (`version`, `route`, `kind`, the queue as word ids, `index`,
-`revealed`, `answered`, `last_answer`), and clears it when the session ends.
-`StudyFlow.restore` rebuilds an open session from it; a state written by a
-newer version is not guessed at. Route V1 is the desktop's review exactly as
-it was; route V2 is built on this object.
+versioned JSON (`version`, `route`, `order`, the words not yet rated, the new
+words not yet learned, `answered`, `learned`, `step`, `last_answer`), and
+clears it when the session ends. `ReviewFlow.restore` rebuilds an open session
+from it: a word part-way through its probes starts again at its first
+question. A state from another version or route is not guessed at.
+
+What a step says — the feedback after an answer, an interval in words, a
+teaching page — is in `services/review_wording.py`, as plain text each client
+lays out: rich text on the desktop, Telegram HTML on the phone.
 
 ### Content
 
@@ -660,9 +666,9 @@ database, one writer. Five modules:
 | Module | Role |
 | --- | --- |
 | `telegram/config.py` | The token and optional chat id, from `LEXITRACK_TELEGRAM_TOKEN` / `LEXITRACK_TELEGRAM_CHAT_ID` or a `.env` in the data folder (and the clone, when running from one). Never from the database. |
-| `telegram/messages.py` | Every message as plain data: Telegram HTML text and button rows. Callback data: `intro:<date>`, `start`, `ans:<session>:<word>:<rating>`, `end:<session>`, `undo:<session>`. Each card is a new message, so a spoiler starts hidden. |
+| `telegram/messages.py` | Every message as plain data: Telegram HTML text and button rows. Callback data: `intro:<date>`, `start`, `st:<session>:<step>:<value>`, `known:<session>:<word>`, `end:<session>`, `undo:<session>`. One card per step, each a new message, so a spoiler starts hidden. |
 | `telegram/schedule.py` | Whether the morning brief, the evening reminder or the Sunday weekly summary is owed now, from the clock, the settings and what `runtime_state` says was sent. |
-| `telegram/core.py` | `BotCore`: commands, button presses and the half-minute tick, spoken through an `Outbox` protocol. No Telegram types, so it is tested with a list. |
+| `telegram/core.py` | `BotCore`: commands, button presses, replies and the half-minute tick, spoken through an `Outbox` protocol. Drives a `ReviewFlow` per session. No Telegram types, so it is tested with a list. |
 | `telegram/runtime.py` | The only module importing `python-telegram-bot`: an asyncio loop on a daemon thread, long polling, every tap acknowledged before it is handled, a clean stop. |
 
 Rules `BotCore` keeps:
@@ -672,17 +678,25 @@ Rules `BotCore` keeps:
   refusal and nothing else.
 - **Engine calls run under the database lock**, so a tap's read–answer–read is
   not interleaved with a desktop answer.
-- **A button does only what it said on its day.** A confirm button carries its
-  date; an answer carries its session and word, is ignored unless that word is
-  the session's current card, and claims the idempotency key
-  `ans:<session>:<word>` in `telegram_updates` before anything is written.
+- **A button does only what it said on its day.** A mark-as-studied button
+  carries its date; a step's button carries its session and the step's number
+  and is ignored unless that step is on screen, so a double tap or an old card
+  does nothing.
+- **A restart loses nothing and guesses nothing.** The flow is restored from
+  its saved state; the first tap or reply after a restart shows the step the
+  session is on rather than acting, because the question may have changed.
+  `/review` resumes an open session instead of starting another.
+- **Replies answer typed steps.** A message that is not a command answers the
+  step on screen when it asks for the word, or is the sentence of a writing
+  step, which is then graded with buttons. Answer times are not measured on
+  the phone (see decision 76).
 - **Notifications are decisions, not timers.** A brief is owed once a day after
   the notify hour; five days offline produce one brief; a brief sent after the
   reminder hour, or on `/start`, also counts for the day. The weekly summary
   is owed only on Sunday after the reminder hour, once, and a week with
   nothing in it stays quiet.
-- **Undo reaches one answer.** Every card after the first carries Undo; it
-  sends the word's card back as a new message and deletes the current one.
+- **Undo reaches one answer.** Every card after an answer carries Undo; it
+  asks that word again as a new message and deletes the current one.
 
 `ui/telegram_controller.py` starts and stops the thread from two facts — the
 `telegram_enabled` setting and whether a token exists — and turns the

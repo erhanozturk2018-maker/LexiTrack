@@ -480,7 +480,8 @@ Settings with their defaults:
       │ candidate     │  status = unknown          │ (user override)
       │ (no card yet) │                            │
       └──────┬────────┘                            │
-             │ user confirms "I studied these"     │
+             │ learned in a session, or marked     │
+             │ as studied                          │
              ▼                                     │
       ┌───────────────┐   due = next day start     │
       │ introduced    │   no rating recorded       │
@@ -651,41 +652,40 @@ No randomisation unless a setting asks for it.
 ## J. Telegram architecture
 
 ```text
-06:00  NotificationService
-         → build_today()
-         → one message: 25 new words grouped by level, review count,
-           remaining unknown count, [I studied these] [Start review]
-         → runtime_state.last_notification_on = today
+06:00  the morning brief (telegram/schedule.py decides it is owed)
+         → today's new words with a short meaning, the review count
+         → [▶ Start session (N)]  [Mark the 25 new words as studied]
+         → runtime_state: sent today
 
-user taps [I studied these 25]  (or [I studied the first N])
-         → ReviewService.introduce(word_ids)     # cards created, no rating
-         → message edited: "introduced ✓ — 25 new words done"
+user taps [Start session]  (or sends /review)
+         → an open Telegram session?  restore its ReviewFlow and show its step
+           else ReviewFlow(engine, Channel.TELEGRAM).start()
+         → one message per step, the last one deleted:
 
-user taps [Start review]
-         → review_sessions row (chat_id, message_id, planned_count)
-         → one editable message per session, one card at a time:
+             MEANING → WORD
+             unwilling and hesitant
+             Reply with the word.
+             3 / 33
+             [I don't know]
+             [↶ Undo] [Stop here]
 
-             🇬🇧 abandon
-             14 / 140
-             [Again] [Hard] [Good] [Easy]
-
-         → callback: "rev:<session_id>:<rating>"
+         → a reply answers a typed step; buttons answer the rest:
+           "st:<session>:<step number>:<value>"
          → answerCallbackQuery immediately (Telegram's ~10 s window)
-         → telegram_updates: has this update_key been handled?
-              yes → ignore
-              no  → ReviewService.answer(card, rating)
-                      SrsScheduler.review(fsrs_state, rating, now)
-                      write srs_cards + review_logs in one transaction
-                      MasteryPolicy.evaluate(card)
-         → edit the same message with the next card
+         → the step number must be the one on screen, else ignored
+         → ReviewFlow.submit / choose / rate / grade / proceed
+              → LearningService.review (FSRS, logs, attempts) once per word
+         → the flow's state saved to review_sessions.flow_state
+         → the next card, opening with how that answer went
 21:00  one reminder, only if today's work is unfinished
-end    summary: new introduced, reviews done, Again rate, tomorrow's load
+end    summary: reviews done, Again rate, new words learned, what is left
 ```
 
-Callback data carries a session id and a rating, nothing else; the current
-card is resolved from `review_sessions`. Duplicate taps are stopped by
-`telegram_updates`, which is pruned after a few days — the permanent record is
-`review_logs`.
+A step's buttons carry its session and its number; the number changes with
+every step, so a double tap, a re-delivered update or an old card finds a
+different number and does nothing. After a restart the flow is rebuilt from
+its saved state, and the first tap or reply shows the current step instead of
+acting on it. `review_logs` is the permanent record.
 
 ### Why the callback is acknowledged before the work
 
@@ -694,7 +694,7 @@ When the user taps a button, Telegram expects a short "got it" reply
 button keeps spinning in the client and Telegram re-delivers the same update,
 which is how one tap turns into two reviews. So the order is: acknowledge
 first, then do the work (schedule the card, write the log, edit the message).
-Combined with the `telegram_updates` key, a re-delivered tap changes nothing.
+Combined with the step number on every button, a re-delivered tap changes nothing.
 
 ### Where the bot token lives
 
@@ -782,7 +782,7 @@ backup job reuses it rather than copying files while they are open.
 | FSRS library upgrade | Card state shape may change | Store state as JSON with `scheduler_version`; never silently reinterpret |
 | Known vs SRS conflict | Two sources of truth for "I know this" | Manual Known wins and archives the card; automatic mastery only sets the status and leaves scheduling alone |
 | Definitions visible on the card | Now that every word has one, recall is not being tested | Hide the meaning until revealed **in study-plan reviews only**; ordinary flashcard and list browsing keep showing it |
-| Duplicate Telegram callbacks | A review applied twice | `telegram_updates` idempotency key, pruned periodically |
+| Duplicate Telegram callbacks | A review applied twice | Every button names its step; a tap for any other step does nothing |
 | Bot token leakage | Account takeover of the bot | Environment variable or local file; never in the database or the repository |
 | Scope creep into an app that teaches | The brief explicitly keeps content generation out | The engine answers *what and when*; the day's brief is exported for an external AI workflow |
 
@@ -954,7 +954,7 @@ the wall time the suite happens to run at:
 | Review capacity | Configurable, default 250; overdue-first when capped |
 | SRS card ownership | One card per word; the plan is scope, not a key |
 | Acquisition | Explicit introduced state, `due_at` = next day start, no rating |
-| Introduction confirmation | One tap for the batch ("I studied these 25", or the first N) |
+| Introduction | Learned in the session (taught, then practised), or marked as studied with one tap |
 | Known after mastery | Cards keep being reviewed at long intervals; a setting can turn it off |
 | Manual Known | Wins over the scheduler, archives the card, never deletes it |
 | Struggling words | Flagged by three configurable leech conditions; a filtered view, not a separate queue |

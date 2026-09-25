@@ -16,9 +16,17 @@ Three rules the handlers below all follow:
    queue, answers a card and reads the queue again; holding the lock across
    the three means the desktop cannot slip an answer in between and make the
    bot show a card that was just reviewed.
-3. **A button only does what it says on the day it was sent.** Confirming new
-   words carries the date; answering carries the session and the word. A tap
-   on anything older is acknowledged and ignored.
+3. **A button only does what it says on the day it was sent.** Marking new
+   words carries the date; a step carries the session and the step's number.
+   A tap on anything older is acknowledged and ignored.
+
+A session is the desktop's :class:`ReviewFlow` — the same questions, the same
+rules, recorded as answers from Telegram. Its state is saved after every
+step, so a restart of the app loses nothing: the next tap, reply or /review
+finds the session, restores it, and shows the step it is on, rather than
+acting on a card whose question may no longer be the one asked. Answer times
+are not measured here: a phone's delivery and typing delays would read as
+effort, so typed answers count as normal effort unless they slip.
 """
 
 from __future__ import annotations
@@ -30,10 +38,12 @@ from typing import Protocol
 
 from ..core.clock import DayClock
 from ..database.connection import Database
-from ..models.srs import Channel
+from ..models.srs import Channel, Rating
 from ..repositories import RuntimeRepository
 from ..services.learning_service import AnswerOutcome, LearningService
 from ..services.progress import ProgressService
+from ..services.review_flow import Feedback, ReviewFlow, StepKind
+from ..services.review_wording import feedback_text
 from . import messages
 from .messages import Message
 from .schedule import Notification, due_notifications, mark_sent
@@ -73,6 +83,11 @@ class BotCore:
         self._runtime = RuntimeRepository(database)
         self._configured_chat = allowed_chat_id
         self._on_activity = on_activity or (lambda: None)
+        #: Open sessions' flows, by session id. Rebuilt from the saved state
+        #: when missing (after a restart), never trusted across one.
+        self._flows: dict[str, ReviewFlow] = {}
+        #: A sentence written for a WRITE step, waiting for its grade.
+        self._written: dict[str, str] = {}
 
     @property
     def engine(self) -> LearningService:
@@ -146,8 +161,10 @@ class BotCore:
             await self._introduce(chat_id, message_id, parsed.local_date or "", text_html)
         elif parsed.action == "start":
             await self._begin_session(chat_id)
-        elif parsed.action == "answer":
-            await self._answer(chat_id, message_id, parsed)
+        elif parsed.action == "step":
+            await self._step(chat_id, message_id, parsed)
+        elif parsed.action == "known":
+            await self._known(chat_id, message_id, parsed)
         elif parsed.action == "end":
             await self._end(chat_id, message_id, parsed.session_id or "", stopped_early=True)
         elif parsed.action == "undo":
@@ -164,117 +181,242 @@ class BotCore:
                 result = self._engine.introduce()
                 note = messages.introduced(result.count, result.first_due_on)
                 due = self._engine.daily_plan().due_count
-        buttons = ((((f"▶ Start reviews ({due})", messages.START_DATA),),) if due else ())
+        buttons = ((((f"▶ Start session ({due})", messages.START_DATA),),) if due else ())
         await self._outbox.edit(chat_id, message_id, Message(f"{text_html}\n\n{note}", buttons))
         if result is not None and result.count:
             self._on_activity()
 
+    # -- the session -----------------------------------------------------------
+
+    def _flow(self, session_id: str) -> tuple[ReviewFlow | None, bool]:
+        """The session's flow, and whether it had to be restored. Under the lock."""
+        flow = self._flows.get(session_id)
+        if flow is not None and flow.active:
+            return flow, False
+        flow = ReviewFlow.restore(self._engine, session_id)
+        if flow is None:
+            return None, False
+        self._flows[session_id] = flow
+        self._written.pop(session_id, None)
+        return flow, True
+
+    def _card(
+        self,
+        flow: ReviewFlow,
+        *,
+        feedback: str | None = None,
+        note: str | None = None,
+        known_word: tuple[int, str] | None = None,
+    ) -> messages.Message:
+        step = flow.current
+        assert step is not None and flow.session_id is not None
+        return messages.step_card(
+            step,
+            flow.session_id,
+            flow.step_number,
+            min(flow.position + 1, flow.total),
+            flow.total,
+            feedback=feedback,
+            note=note,
+            can_undo=flow.can_undo(),
+            known_word=known_word,
+        )
+
+    async def _show(
+        self, chat_id: str, flow: ReviewFlow, card: messages.Message, replaces: str | None
+    ) -> None:
+        """Send the step's card, remember it, and remove the card it replaces."""
+        sent = await self._outbox.send(chat_id, card)
+        with self._db.lock:
+            step = flow.current
+            if flow.session_id is not None:
+                self._engine.show_in_session(
+                    flow.session_id, step.word.id if step else None, message_id=sent
+                )
+        if replaces is not None and replaces != sent:
+            await self._outbox.delete(chat_id, replaces)
+
     async def _begin_session(self, chat_id: str) -> None:
+        """Resume the open session if there is one; else start the day's."""
+        note = None
+        empty = "Nothing is due right now, and today's new words are in."
         with self._db.lock:
             self._engine.refresh_settings()
             existing = self._engine.open_session(Channel.TELEGRAM)
+            flow = None
+            replaces = None
             if existing is not None:
-                self._engine.finish_session(existing.id)
-            queue = self._engine.review_queue()
-            if not queue:
-                plan = self._engine.daily_plan()
-            else:
-                session = self._engine.start_session(Channel.TELEGRAM, chat_id=chat_id)
-                first = queue[0]
-                card = messages.review_card(first, session.id, 1, session.planned_count)
-        if not queue:
-            text = (
-                "Nothing is due right now."
-                if not plan.new_words
-                else "Nothing is due yet — today's new words are reviewed from tomorrow."
-            )
-            await self._outbox.send(chat_id, Message(text))
+                flow, _restored = self._flow(existing.id)
+                if flow is not None and flow.current is not None:
+                    note = "Picking up where you left off."
+                    replaces = existing.message_id
+                else:
+                    # Nothing left in it, or saved by an older version.
+                    if flow is not None:
+                        flow.finish()
+                    else:
+                        self._engine.finish_session(existing.id)
+                    self._flows.pop(existing.id, None)
+                    flow = None
+            if flow is None:
+                flow = ReviewFlow(self._engine, Channel.TELEGRAM, chat_id)
+                if not flow.start():
+                    flow = None
+                else:
+                    self._flows[flow.session_id] = flow
+            card = self._card(flow, note=note) if flow is not None else None
+        if card is None:
+            await self._outbox.send(chat_id, Message(empty))
             return
-        sent = await self._outbox.send(chat_id, card)
-        with self._db.lock:
-            self._engine.show_in_session(session.id, first.word.id, message_id=sent)
+        await self._show(chat_id, flow, card, replaces)
 
-    async def _answer(self, chat_id: str, message_id: str, parsed: messages.Callback) -> None:
-        assert parsed.session_id and parsed.word_id and parsed.rating
+    async def _step(self, chat_id: str, message_id: str, parsed: messages.Callback) -> None:
+        assert parsed.session_id is not None and parsed.value is not None
         with self._db.lock:
             self._engine.refresh_settings()
-            session = self._engine.session(parsed.session_id)
-            if (
-                session is None
-                or not session.is_open
-                or session.current_word_id != parsed.word_id
-            ):
-                # A tap on a card that is no longer the one on screen: the
-                # same card tapped twice, or an old message. Nothing to do.
+            flow, restored = self._flow(parsed.session_id)
+            if flow is None or flow.current is None:
                 return
-            outcome: AnswerOutcome | None = self._engine.answer(
-                parsed.word_id,
-                parsed.rating,
-                session_id=session.id,
-                channel=Channel.TELEGRAM,
-                update_key=f"ans:{session.id}:{parsed.word_id}",
-            )
-            queue = self._engine.review_queue()
-            session = self._engine.session(session.id)
-            assert session is not None
-            if queue:
-                nxt = queue[0]
-                self._engine.show_in_session(session.id, nxt.word.id)
-                card = messages.review_card(
-                    nxt,
-                    session.id,
-                    session.done_count + 1,
-                    max(session.planned_count, session.done_count + len(queue)),
-                    previous=outcome,
-                    can_undo=self._engine.can_undo(session.id),
-                )
-        self._on_activity()
-        if queue:
-            # Each card is a new message rather than an edit of the last one:
-            # Telegram keeps a spoiler open once tapped, through every later
-            # edit of the same message, so an edited card would show the next
-            # meaning uncovered. The answered card is removed to keep the chat
-            # to one card; the new one opens with that card's result.
-            sent = await self._outbox.send(chat_id, card)
-            with self._db.lock:
-                self._engine.show_in_session(session.id, nxt.word.id, message_id=sent)
-            await self._outbox.delete(chat_id, message_id)
-        else:
+            if restored:
+                # The app restarted since that card was sent: show where the
+                # session is instead of acting on it.
+                card = self._card(flow, note="LexiTrack restarted; here is where you were.")
+            elif parsed.step != flow.step_number:
+                # An older card, or the same card tapped twice.
+                return
+            else:
+                card = None
+                step = flow.current
+                result = self._act(flow, parsed.value)
+                if result is None:
+                    return
+        if card is not None:
+            await self._show(chat_id, flow, card, message_id)
+            return
+        await self._after(chat_id, message_id, flow, step, result)
+
+    def _act(self, flow: ReviewFlow, value: str) -> Feedback | bool | None:
+        """Do what a button says to the step on screen. None when it does not fit."""
+        step = flow.current
+        kind = step.kind
+        try:
+            if kind is StepKind.TEACH and value == "go":
+                return flow.proceed() or None
+            if kind is StepKind.TYPE and value == "dk":
+                return flow.submit("")
+            if kind is StepKind.CHOOSE and value.isdigit():
+                return flow.choose(int(value))
+            if kind is StepKind.RECALL and value.startswith("r"):
+                return flow.rate(Rating(int(value[1:])))
+            if kind is StepKind.WRITE and value in ("g0", "g1", "g2"):
+                self._written.pop(flow.session_id or "", None)
+                return flow.grade(used_well=value != "g0", effortful=value == "g1")
+        except ValueError:
+            return None
+        return None
+
+    async def text(self, chat_id: str, text: str) -> None:
+        """A message that is not a command: the answer to a typed or written step."""
+        chat_id = str(chat_id)
+        if not self._admit(chat_id) or self.owner() is None:
+            return
+        answer = " ".join(text.split())
+        with self._db.lock:
+            self._engine.refresh_settings()
+            session = self._engine.open_session(Channel.TELEGRAM)
+            flow, restored = self._flow(session.id) if session is not None else (None, False)
+            step = flow.current if flow is not None else None
+            reply = None
+            card = None
+            result = None
+            if step is None:
+                reply = messages.no_session()
+            elif restored:
+                card = self._card(flow, note="LexiTrack restarted; here is where you were.")
+            elif step.kind is StepKind.TYPE:
+                # No time is passed: see the module docstring.
+                result = flow.submit(answer)
+            elif step.kind is StepKind.WRITE and answer:
+                self._written[flow.session_id] = answer
+                card = messages.write_check(step, answer, flow.session_id, flow.step_number)
+            else:
+                reply = messages.use_the_buttons()
+            replaces = session.message_id if session is not None else None
+        if reply is not None:
+            await self._outbox.send(chat_id, Message(reply))
+        elif card is not None:
+            await self._show(chat_id, flow, card, replaces)
+        elif result is not None:
+            await self._after(chat_id, replaces, flow, step, result)
+
+    async def _after(
+        self,
+        chat_id: str,
+        message_id: str | None,
+        flow: ReviewFlow,
+        step,
+        result: Feedback | bool,
+    ) -> None:
+        """Move on from a step: the next card, opening with what this one did."""
+        feedback = result if isinstance(result, Feedback) else None
+        line = None
+        known = None
+        if feedback is not None:
+            line, _tone = feedback_text(step, feedback)
+            outcome = feedback.outcome
+            if outcome is not None and not outcome.duplicate:
+                self._on_activity()
+                if outcome.suggest_known:
+                    line += f" “{outcome.word.word}” is in long-term memory."
+                    known = (outcome.word.id, outcome.word.word)
+        with self._db.lock:
+            finished = flow.current is None
+            card = None if finished else self._card(flow, feedback=line, known_word=known)
+        if finished:
             await self._end(
-                chat_id, message_id, session.id, stopped_early=False, last=outcome
+                chat_id, message_id or "", flow.session_id or "", stopped_early=False,
+                last_line=line,
             )
+            return
+        await self._show(chat_id, flow, card, message_id)
+
+    async def _known(self, chat_id: str, message_id: str, parsed: messages.Callback) -> None:
+        """The learner said yes to Known for a word the answer offered."""
+        assert parsed.session_id is not None and parsed.word_id is not None
+        with self._db.lock:
+            marked = self._engine.confirm_known([parsed.word_id])
+            flow, restored = self._flow(parsed.session_id)
+            card = None
+            if flow is not None and flow.current is not None and not restored:
+                word = self._engine.study_item(parsed.word_id)
+                name = word.word.word if word is not None else "It"
+                card = self._card(
+                    flow, note=f"“{name}” is marked Known." if marked else None
+                )
+        if marked:
+            self._on_activity()
+        if card is not None:
+            # Same step, same number: the card is edited, not replaced.
+            await self._outbox.edit(chat_id, message_id, card)
 
     async def _undo(self, chat_id: str, message_id: str, session_id: str) -> None:
-        """Take back the last answer and put that word's card back on screen.
+        """Take back the last answer and ask that word again.
 
-        The card comes back as a new message, like every card, so its meaning
-        starts hidden again. A second tap finds nothing to take back and does
-        nothing: Undo reaches one answer, never a chain of them.
+        The card comes back as a new message, like every card. A second tap
+        finds nothing to take back and does nothing: Undo reaches one answer,
+        never a chain of them.
         """
         with self._db.lock:
             self._engine.refresh_settings()
-            session = self._engine.session(session_id)
-            if session is None or not session.is_open:
+            flow, restored = self._flow(session_id)
+            if flow is None or restored:
                 return
-            word = self._engine.undo_last_answer(session_id)
-            if word is None:
+            word = flow.undo()
+            if word is None or flow.current is None:
                 return
-            item = self._engine.study_item(word.id)
-            session = self._engine.session(session_id)
-            assert item is not None and session is not None
-            remaining = len(self._engine.review_queue())
-            card = messages.review_card(
-                item,
-                session_id,
-                session.done_count + 1,
-                max(session.planned_count, session.done_count + remaining),
-                note=f"Took back your answer to {word.word}.",
-            )
+            card = self._card(flow, note=f"Took back your answer to {word.word}.")
         self._on_activity()
-        sent = await self._outbox.send(chat_id, card)
-        with self._db.lock:
-            self._engine.show_in_session(session_id, word.id, message_id=sent)
-        await self._outbox.delete(chat_id, message_id)
+        await self._show(chat_id, flow, card, message_id)
 
     async def _end(
         self,
@@ -283,23 +425,37 @@ class BotCore:
         session_id: str,
         stopped_early: bool,
         last: AnswerOutcome | None = None,
+        last_line: str | None = None,
     ) -> None:
         with self._db.lock:
             session = self._engine.session(session_id)
             if session is None:
                 return
-            if session.is_open:
-                session = self._engine.finish_session(session_id)
+            flow = self._flows.pop(session_id, None)
+            self._written.pop(session_id, None)
+            learned = flow.learned if flow is not None else 0
+            if flow is not None and flow.active:
+                flow.finish()
+            elif session.is_open:
+                self._engine.finish_session(session_id)
             ratings = self._session_ratings(session_id)
+            # Counted from the record, so answers taken back are left out.
+            answered = sum(ratings.values())
             plan = self._engine.daily_plan()
-        text = messages.session_summary(session.done_count, ratings, plan, stopped_early)
-        if last is not None and not last.duplicate:
+        text = messages.session_summary(answered, ratings, plan, stopped_early, learned)
+        if last_line:
+            text = f"<i>{escape(last_line)}</i>\n\n{text}"
+        elif last is not None and not last.duplicate:
             text = f"<i>{escape(messages.answer_line(last))}</i>\n\n{text}"
-        await self._outbox.edit(chat_id, message_id, Message(text))
+        if message_id:
+            await self._outbox.edit(chat_id, message_id, Message(text))
+        else:
+            await self._outbox.send(chat_id, Message(text))
 
     def _session_ratings(self, session_id: str) -> dict[int, int]:
         rows = self._db.connection.execute(
-            "SELECT rating, COUNT(*) AS n FROM review_logs WHERE session_id = ? GROUP BY rating",
+            "SELECT rating, COUNT(*) AS n FROM review_logs "
+            "WHERE session_id = ? AND undone_at IS NULL GROUP BY rating",
             (session_id,),
         ).fetchall()
         return {int(row["rating"]): int(row["n"]) for row in rows}

@@ -1161,3 +1161,28 @@ before and after: the text buttons beside a section title (Copy, Export and
 Mark as studied on Today; List actions) are compact, which lines them up with
 the title; the Details toggle keeps full height, because it stands in a row
 of full-height controls and looked out of place shrunk.
+
+## 76. Telegram runs the desktop's session, without timing answers
+
+**Decision.** The bot drives the same `ReviewFlow` as the desktop: the same
+questions, probes, relearning and new-word teaching, recorded as Telegram
+answers. A typed step is answered by replying with the word, a sentence by
+replying and then grading it with buttons; the rest are buttons. The flow's
+state is saved after every step; after a restart the first tap or reply
+shows the current step instead of acting on it, and `/review` resumes the
+open session. The effort of a typed answer is not taken from its timing on
+the phone: it counts as normal unless it slipped.
+
+**Reason.** Two routes would mean two meanings for one rating: a word
+reviewed on the bus must count exactly as one reviewed at the desk, or the
+schedule and the skill record drift apart. A typed reply is the phone's
+natural way of typing an answer. Timing is left out because a phone's
+notification delay and typing speed would read as effort and push honest
+answers towards Hard, which schedules them too soon; no measure is better
+than a biased one. Acting on a tap after a restart could apply it to a
+different question than the one the learner saw, so the step is shown again
+and the learner answers what is really asked.
+
+**Removed.** `StudyFlow`, the route-V1 flow Telegram's session was meant to
+move to, had no user left once both clients ran `ReviewFlow`. A session saved
+by it is closed and a new one started, as any state from another route is.

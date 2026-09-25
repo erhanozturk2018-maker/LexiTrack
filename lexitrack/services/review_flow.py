@@ -22,6 +22,12 @@ A word with no meaning to ask from (no definition, and no meaning in the
 learner's language) is
 reviewed the V1 way: shown, revealed, rated by the learner. The page shows
 steps and reports what the learner did; it holds no state of its own.
+
+Any client drives the same flow — the desktop card, the Telegram bot — and
+says which channel it is, so every answer is recorded as coming from there.
+Each step shown has a number (:attr:`ReviewFlow.step_number`) that changes
+whenever the step on screen does, so a client can tell a tap on the current
+step from a tap on an older message.
 """
 
 from __future__ import annotations
@@ -42,7 +48,7 @@ from ..models.attempt import (
     Task,
 )
 from ..models.content import WordTeaching
-from ..models.srs import Rating
+from ..models.srs import Channel, Rating
 from ..repositories import AttemptRepository, ContentRepository
 from ..repositories.word_repository import StoredWord
 from .first_learning import choose_depth, deeper, groups, second_question
@@ -187,8 +193,17 @@ class _Run:
 class ReviewFlow:
     """A day's reviews by route V2."""
 
-    def __init__(self, engine: LearningService) -> None:
+    def __init__(
+        self,
+        engine: LearningService,
+        channel: Channel = Channel.DESKTOP,
+        chat_id: str | None = None,
+    ) -> None:
         self._engine = engine
+        self._channel = channel
+        self._chat_id = chat_id
+        #: Changes whenever the step on screen does; saved with the state.
+        self._step_number = 0
         self._content = ContentRepository(engine.database)
         self._attempts = AttemptRepository(engine.database)
         self._steps: list[Step] = []
@@ -215,6 +230,15 @@ class ReviewFlow:
     @property
     def current(self) -> Step | None:
         return self._steps[0] if self.active and self._steps else None
+
+    @property
+    def step_number(self) -> int:
+        """Which step is on screen, counted over the whole session."""
+        return self._step_number
+
+    @property
+    def channel(self) -> Channel:
+        return self._channel
 
     @property
     def position(self) -> int:
@@ -269,7 +293,7 @@ class ReviewFlow:
         new_words = list(self._engine.daily_plan().new_words) if include_new else []
         if not queue and not new_words:
             return False
-        self._session_id = self._engine.start_session().id
+        self._session_id = self._engine.start_session(self._channel, chat_id=self._chat_id).id
         self._last_session_id = self._session_id
         self._answered = 0
         self._learned = 0
@@ -378,7 +402,9 @@ class ReviewFlow:
         """A V1 answer to a RECALL step."""
         step = self._take(StepKind.RECALL)
         run = self._runs[step.word.id]
-        outcome = self._engine.answer(step.word.id, rating, session_id=self._session_id)
+        outcome = self._engine.answer(
+            step.word.id, rating, session_id=self._session_id, channel=self._channel
+        )
         self._steps.pop(0)
         self._rated(run, outcome, rating)
         self._on_step()
@@ -526,6 +552,7 @@ class ReviewFlow:
             memory_result=resolution.memory,
             attempts=run.attempts,
             session_id=self._session_id,
+            channel=self._channel,
         )
         self._rated(run, outcome, resolution.rating)
         if resolution.follow_up is not FollowUp.NONE:
@@ -613,6 +640,7 @@ class ReviewFlow:
             self._learned += 1
 
     def _on_step(self) -> None:
+        self._step_number += 1
         step = self.current
         self._revealed = step is not None and step.kind is StepKind.RECALL and not (
             step.hide_meaning
@@ -638,6 +666,7 @@ class ReviewFlow:
             "new_pending": new_pending,
             "answered": self._answered,
             "learned": self._learned,
+            "step": self._step_number,
             "last_answer": (
                 {"word": self._last_answer[0], "rating": int(self._last_answer[1])}
                 if self._last_answer
@@ -670,11 +699,13 @@ class ReviewFlow:
             or data.get("route") != ROUTE_V2
         ):
             return None
-        flow = cls(engine)
+        flow = cls(engine, session.channel, session.chat_id)
         flow._session_id = session_id
         flow._last_session_id = session_id
         flow._answered = int(data.get("answered", 0))
         flow._learned = int(data.get("learned", 0))
+        # Past the number saved: the step on screen before is not this one.
+        flow._step_number = int(data.get("step", 0))
         order = [int(word_id) for word_id in data.get("order", [])]
         pending = {int(word_id) for word_id in data.get("pending", [])}
         new_pending = [int(word_id) for word_id in data.get("new_pending", [])]

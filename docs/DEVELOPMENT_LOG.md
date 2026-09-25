@@ -900,3 +900,23 @@ and a long-term stage in the memory pipeline.
   Details toggle keeps its height; see decision 75.
 - The Known suggestions took eight tall rows and pushed memory and skill off
   the first screen: five compact rows now, and a link to the rest in Words.
+
+## 2026-09-25 — Learning Engine V2, phase 12: Telegram on the review flow
+
+The bot runs `ReviewFlow` on the Telegram channel: reviews first, then new
+words taught and practised; typed steps answered by reply, choose-among-four
+and ratings by buttons, a sentence written and graded. Each card opens with
+how the last answer went (the wording shared with the desktop, moved to
+`services/review_wording.py`), offers Mark Known when a word reaches
+long-term memory, and carries Undo and Stop. Every button names its step;
+the flow's state is saved each step, so a restart, a double tap and an old
+card are all harmless. `StudyFlow` is removed.
+
+**Problems and solutions**
+
+- The session summary counted from the session's counter, which included an
+  answer taken back; it now counts the record, leaving undone answers out.
+- Phone answer times would have read as effort and rated honest answers
+  Hard; the bot records no time (decision 76).
+- A tap arriving after a restart could have answered a different question
+  than the one on screen; it now shows the current step instead.

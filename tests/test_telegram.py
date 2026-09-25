@@ -17,7 +17,7 @@ from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
 from lexitrack.models.settings import Setting
 from lexitrack.models.source import Source
-from lexitrack.models.srs import Rating
+from lexitrack.models.srs import Channel, Rating
 from lexitrack.models.user_word_state import ReviewStatus
 from lexitrack.repositories import (
     ListRepository,
@@ -27,17 +27,23 @@ from lexitrack.repositories import (
     StateRepository,
     WordRepository,
 )
+from lexitrack.repositories.word_repository import StoredWord
 from lexitrack.services.learning_service import LearningService
+from lexitrack.services.review_flow import Step, StepKind
 from lexitrack.telegram import config as telegram_config
 from lexitrack.telegram.config import load_config, read_env_file
 from lexitrack.telegram.core import BotCore
 from lexitrack.telegram.messages import (
+    START_DATA,
     Message,
-    answer_data,
     end_data,
     intro_data,
+    known_data,
     parse_callback,
+    step_card,
+    step_data,
     undo_data,
+    write_check,
 )
 from lexitrack.telegram.schedule import Notification, due_notifications, mark_sent
 
@@ -183,20 +189,27 @@ class TestConfig:
 class TestCallbackData:
     def test_round_trips(self) -> None:
         assert parse_callback(intro_data("2026-09-17")).local_date == "2026-09-17"
-        parsed = parse_callback(answer_data("abc", 12, Rating.HARD))
-        assert (parsed.session_id, parsed.word_id, parsed.rating) == ("abc", 12, Rating.HARD)
+        parsed = parse_callback(step_data("abc", 12, "r3"))
+        assert (parsed.action, parsed.session_id, parsed.step, parsed.value) == (
+            "step", "abc", 12, "r3"
+        )
+        known = parse_callback(known_data("abc", 7))
+        assert (known.action, known.word_id) == ("known", 7)
         assert parse_callback(end_data("abc")).action == "end"
         assert parse_callback("start").action == "start"
 
     @pytest.mark.parametrize(
-        "data", ["", "intro:yesterday", "ans:x:y:3", "ans:s:1:9", "nonsense", "end"]
+        "data",
+        ["", "intro:yesterday", "st:x:y:go", "st:s:1:", "known:s:x", "nonsense", "end",
+         # A card of the route before version 5: ignored, not misread.
+         "ans:s:1:3"],
     )
     def test_malformed_data_is_ignored_not_an_error(self, data: str) -> None:
         assert parse_callback(data) is None
 
     def test_every_callback_fits_telegrams_64_bytes(self) -> None:
-        longest = answer_data("f" * 32, 999_999_999, Rating.EASY)
-        assert len(longest.encode()) <= 64
+        for data in (step_data("f" * 32, 999_999, "go"), known_data("f" * 32, 999_999_999)):
+            assert len(data.encode()) <= 64
 
 
 # -- ownership -----------------------------------------------------------------
@@ -260,7 +273,7 @@ class TestNewWords:
         chat, message_id, edited = outbox.edits[-1]
         assert (chat, message_id) == (OWNER, "55")
         assert edited.text.startswith("<b>brief</b>")
-        assert "25 new words added" in edited.text
+        assert "25 new words marked as studied" in edited.text
 
     def test_confirming_twice_adds_nothing_the_second_time(
         self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
@@ -292,160 +305,336 @@ class TestNewWords:
 # -- review sessions -----------------------------------------------------------
 
 
+def _session_of(message: Message) -> str:
+    data = next(d for d in FakeOutbox.callbacks(message) if d.startswith(("st:", "end:")))
+    return parse_callback(data).session_id
+
+
+def respond(bot: BotCore, outbox: FakeOutbox, session: str, right: bool = True) -> Step:
+    """Answer the step on screen as the learner would, from the phone."""
+    flow = bot._flows[session]
+    step, number, card = flow.current, flow.step_number, outbox.last_id()
+
+    def press(value: str) -> None:
+        run(bot.callback(OWNER, outbox.last_id(), step_data(session, number, value), ""))
+
+    if step.kind is StepKind.TYPE:
+        run(bot.text(OWNER, step.prompt.accepted[0] if right else "nothing like it"))
+    elif step.kind is StepKind.CHOOSE:
+        ids = [option.id for option in step.options]
+        right_index = ids.index(step.word.id)
+        press(str(right_index if right else (right_index + 1) % len(ids)))
+    elif step.kind is StepKind.RECALL:
+        press("r3" if right else "r1")
+    elif step.kind is StepKind.TEACH:
+        press("go")
+    else:  # WRITE: the sentence as a reply, then the grade
+        run(bot.text(OWNER, "A sentence of my own."))
+        press("g2" if right else "g0")
+    assert card  # the card answered was the one on screen
+    return step
+
+
 class TestReviews:
     @pytest.fixture
     def due(self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock) -> BotCore:
+        """25 words marked as studied yesterday, due now."""
         run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
         clock.advance_to_day_start(1)
         clock.advance(hours=18)
+        SettingsRepository(bot.engine.database).set(Setting.NEW_WORDS_PER_DAY, 0)
         outbox.sent.clear()
         outbox.edits.clear()
         return bot
 
-    def start(self, bot: BotCore, outbox: FakeOutbox) -> tuple[str, str, int]:
+    def start(self, bot: BotCore, outbox: FakeOutbox) -> str:
         run(bot.command(OWNER, "/review"))
-        message = outbox.sent[-1][1]
-        answer = next(d for d in FakeOutbox.callbacks(message) if d.startswith("ans:"))
-        parsed = parse_callback(answer)
-        return outbox.last_id(), parsed.session_id, parsed.word_id
+        return _session_of(outbox.sent[-1][1])
 
-    @staticmethod
-    def next_word(outbox: FakeOutbox) -> int | None:
-        """The word on the card now on screen, or None once the session ended."""
-        answers = [d for d in FakeOutbox.callbacks(outbox.sent[-1][1]) if d.startswith("ans:")]
-        return parse_callback(answers[0]).word_id if answers else None
-
-    def test_a_session_shows_the_first_card_with_four_answers(
+    def test_a_session_asks_the_first_word_the_way_the_desktop_would(
         self, due: BotCore, outbox: FakeOutbox
     ) -> None:
-        self.start(due, outbox)
-        message = outbox.sent[-1][1]
-        assert "1 / 25" in message.text
-        assert "<tg-spoiler>" in message.text, "the meaning starts hidden"
-        labels = [label for row in message.buttons for label, _ in row]
-        assert labels[:4] == ["Again", "Hard", "Good", "Easy"]
+        session = self.start(due, outbox)
+        flow = due._flows[session]
+        assert flow.channel is Channel.TELEGRAM
+        card = outbox.sent[-1][1]
+        assert "1 / 25" in card.text
+        assert flow.current.label.upper() in card.text
+        assert end_data(session) in FakeOutbox.callbacks(card)
 
-    def test_an_answer_is_recorded_and_the_next_card_replaces_it(
-        self, due: BotCore, outbox: FakeOutbox
+    def test_a_typed_reply_answers_and_the_next_card_replaces_it(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-        assert due.engine.rating_counts()[int(Rating.GOOD)] == 1
+        session = self.start(due, outbox)
+        first_card = outbox.last_id()
+        step = respond(due, outbox, session)
+        assert due.engine.rating_counts()[int(Rating.GOOD)] + due.engine.rating_counts()[
+            int(Rating.EASY)
+        ] == 1
+        channel = seeded.connection.execute(
+            "SELECT channel FROM review_logs WHERE session_id = ?", (session,)
+        ).fetchone()[0]
+        assert channel == Channel.TELEGRAM.value
         card = outbox.sent[-1][1]
         assert "2 / 25" in card.text
-        assert "Good" in card.text and "back" in card.text
-        assert outbox.deleted == [(OWNER, message_id)]
+        assert "✓" in card.text and step.word.word in card.text, "it opens with the result"
+        assert (OWNER, first_card) in outbox.deleted
         assert due.engine.session(session).message_id == outbox.last_id()
 
-    def test_every_card_is_a_new_message_so_its_meaning_starts_hidden(
-        self, due: BotCore, outbox: FakeOutbox
+    def test_the_answer_is_recorded_with_its_question(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
-        """Telegram keeps a tapped spoiler open through edits of that message."""
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-        assert outbox.edits == [], "a card is never edited into the next one"
-        assert "<tg-spoiler>" in outbox.sent[-1][1].text
-        assert outbox.last_id() != message_id
+        session = self.start(due, outbox)
+        respond(due, outbox, session)
+        row = seeded.connection.execute(
+            "SELECT a.route_version, a.role FROM learning_attempts a "
+            "JOIN review_logs r ON r.id = a.review_log_id WHERE r.session_id = ?",
+            (session,),
+        ).fetchone()
+        assert tuple(row) == ("v2", "primary")
 
     def test_a_double_tap_counts_once(self, due: BotCore, outbox: FakeOutbox) -> None:
         """Telegram re-delivers a tap it was unsure about."""
-        message_id, session, word = self.start(due, outbox)
-        data = answer_data(session, word, Rating.GOOD)
-        run(due.callback(OWNER, message_id, data, ""))
-        run(due.callback(OWNER, message_id, data, ""))
-        assert sum(due.engine.rating_counts().values()) == 1
+        session = self.start(due, outbox)
+        flow = due._flows[session]
+        number = flow.step_number
+        data = step_data(session, number, "dk")
+        run(due.callback(OWNER, outbox.last_id(), data, ""))
+        sent = len(outbox.sent)
+        run(due.callback(OWNER, outbox.last_id(), data, ""))
+        assert len(outbox.sent) == sent, "the second tap found an older step number"
 
     def test_a_tap_on_an_old_card_is_ignored(self, due: BotCore, outbox: FakeOutbox) -> None:
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-        # The first card's Again button, pressed after the card moved on.
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.AGAIN), ""))
-        counts = due.engine.rating_counts()
-        assert counts[int(Rating.AGAIN)] == 0
-        assert counts[int(Rating.GOOD)] == 1
+        session = self.start(due, outbox)
+        old = step_data(session, due._flows[session].step_number, "dk")
+        respond(due, outbox, session)
+        before = sum(due.engine.rating_counts().values())
+        run(due.callback(OWNER, "1", old, ""))
+        assert sum(due.engine.rating_counts().values()) == before
 
-    def test_undo_appears_from_the_second_card_and_puts_the_word_back(
+    def test_a_reply_with_no_session_or_on_a_button_card_says_what_to_do(
         self, due: BotCore, outbox: FakeOutbox
     ) -> None:
-        message_id, session, word = self.start(due, outbox)
+        run(due.text(OWNER, "hello"))
+        assert "/review" in outbox.sent[-1][1].text
+        session = self.start(due, outbox)
+        flow = due._flows[session]
+        # Wrong on purpose until a button step (choose among four) is on screen.
+        respond(due, outbox, session, right=False)
+        # A missed "meaning to word" is probed by choosing among four.
+        assert flow.current.kind is StepKind.CHOOSE
+        run(due.text(OWNER, "a word"))
+        assert "buttons" in outbox.sent[-1][1].text
+
+    def test_undo_puts_the_word_back(self, due: BotCore, outbox: FakeOutbox) -> None:
+        session = self.start(due, outbox)
         assert not any(
             d.startswith("undo:") for d in FakeOutbox.callbacks(outbox.sent[-1][1])
         ), "nothing to take back on the first card"
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.EASY), ""))
-        second_id = outbox.last_id()
+        step = respond(due, outbox, session)
+        second = outbox.last_id()
         assert undo_data(session) in FakeOutbox.callbacks(outbox.sent[-1][1])
-        run(due.callback(OWNER, second_id, undo_data(session), ""))
+        run(due.callback(OWNER, second, undo_data(session), ""))
         card = outbox.sent[-1][1]
         assert "Took back your answer" in card.text
         assert "1 / 25" in card.text
-        assert "<tg-spoiler>" in card.text, "a new message, so hidden again"
-        assert (OWNER, second_id) in outbox.deleted
+        assert due._flows[session].current.word.id == step.word.id
+        assert (OWNER, second) in outbox.deleted
         assert sum(due.engine.rating_counts().values()) == 0
-        # The same word can be answered again, even with the same button.
-        run(due.callback(OWNER, outbox.last_id(), answer_data(session, word, Rating.GOOD), ""))
-        assert due.engine.rating_counts()[int(Rating.GOOD)] == 1
-
-    def test_a_second_undo_does_nothing(self, due: BotCore, outbox: FakeOutbox) -> None:
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-        run(due.callback(OWNER, outbox.last_id(), undo_data(session), ""))
         sent = len(outbox.sent)
         run(due.callback(OWNER, outbox.last_id(), undo_data(session), ""))
-        assert len(outbox.sent) == sent
+        assert len(outbox.sent) == sent, "a second Undo finds nothing to take back"
 
     def test_the_last_answer_ends_with_a_summary(self, due: BotCore, outbox: FakeOutbox) -> None:
-        message_id, session, word = self.start(due, outbox)
-        for _ in range(25):
-            sent_before = len(outbox.sent)
-            run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
-            if len(outbox.sent) == sent_before:
+        session = self.start(due, outbox)
+        for _ in range(200):
+            if session not in due._flows:
                 break
-            message_id, word = outbox.last_id(), self.next_word(outbox)
-        _, summary_id, summary = outbox.edits[-1]
-        assert summary_id == message_id, "the last card becomes the summary"
-        text = summary.text
+            respond(due, outbox, session)
+        text = outbox.edits[-1][2].text
         assert "Session finished" in text
         assert "25 reviewed" in text
-        assert due.engine.open_session(due.engine.session(session).channel) is None
+        assert due.engine.open_session(Channel.TELEGRAM) is None
 
     def test_stop_here_keeps_what_was_answered(self, due: BotCore, outbox: FakeOutbox) -> None:
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.HARD), ""))
+        session = self.start(due, outbox)
+        respond(due, outbox, session)
         run(due.callback(OWNER, outbox.last_id(), end_data(session), ""))
         text = outbox.edits[-1][2].text
         assert "Stopped" in text
         assert "1 reviewed" in text
         assert "24 still due" in text
 
-    def test_starting_again_closes_the_previous_session(
-        self, due: BotCore, outbox: FakeOutbox
-    ) -> None:
-        _, first, _ = self.start(due, outbox)
-        _, second, _ = self.start(due, outbox)
-        assert first != second
-        assert due.engine.session(first).is_open is False
+    def test_review_resumes_the_open_session(self, due: BotCore, outbox: FakeOutbox) -> None:
+        session = self.start(due, outbox)
+        respond(due, outbox, session)
+        again = self.start(due, outbox)
+        assert again == session
+        assert "Picking up where you left off" in outbox.sent[-1][1].text
+        assert "2 / 25" in outbox.sent[-1][1].text
 
     def test_nothing_due_says_so_instead_of_an_empty_session(
-        self, bot: BotCore, outbox: FakeOutbox
+        self, bot: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
+        SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 0)
         run(bot.command(OWNER, "/review"))
         assert "Nothing is due" in outbox.sent[-1][1].text
 
     def test_the_desktop_study_page_counts_phone_answers(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
-        message_id, session, word = self.start(due, outbox)
-        run(due.callback(OWNER, message_id, answer_data(session, word, Rating.GOOD), ""))
+        session = self.start(due, outbox)
+        respond(due, outbox, session)
         desktop = LearningService(seeded, clock).daily_plan()
         assert desktop.due_count == 24
         assert desktop.reviews_done_today == 1
 
-    def test_a_visible_meaning_when_the_setting_says_so(
-        self, due: BotCore, outbox: FakeOutbox, seeded: Database
+
+class TestInterruptions:
+    """The app closes mid-session; the phone carries on where it was."""
+
+    @pytest.fixture
+    def due(self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock) -> BotCore:
+        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        clock.advance_to_day_start(1)
+        clock.advance(hours=18)
+        SettingsRepository(bot.engine.database).set(Setting.NEW_WORDS_PER_DAY, 0)
+        return bot
+
+    def test_a_restart_loses_nothing_and_acts_on_no_old_card(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
-        SettingsRepository(seeded).set(Setting.HIDE_MEANING_IN_STUDY, False)
-        self.start(due, outbox)
-        assert "<tg-spoiler>" not in outbox.sent[-1][1].text
+        run(due.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        respond(due, outbox, session)
+        respond(due, outbox, session)
+        old = step_data(session, due._flows[session].step_number, "dk")
+        answered = sum(due.engine.rating_counts().values())
+
+        # The app is closed and opened again: a new bot, the same database.
+        restarted = BotCore(seeded, outbox, clock=clock)
+        run(restarted.callback(OWNER, outbox.last_id(), old, ""))
+        card = outbox.sent[-1][1]
+        assert "restarted" in card.text, "the step is shown again, not acted on"
+        assert sum(restarted.engine.rating_counts().values()) == answered
+        assert _session_of(card) == session
+        assert f"{answered + 1} / 25" in card.text
+        # And the session carries on from there.
+        respond(restarted, outbox, session)
+        assert sum(restarted.engine.rating_counts().values()) == answered + 1
+
+    def test_a_reply_after_a_restart_is_not_taken_as_an_answer(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        """The question on screen may have changed: the reply is not guessed at."""
+        run(due.command(OWNER, "/review"))
+        restarted = BotCore(seeded, outbox, clock=clock)
+        run(restarted.text(OWNER, "anything"))
+        assert "restarted" in outbox.sent[-1][1].text
+        assert sum(restarted.engine.rating_counts().values()) == 0
+
+    def test_review_after_a_restart_resumes(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        run(due.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        respond(due, outbox, session)
+        restarted = BotCore(seeded, outbox, clock=clock)
+        run(restarted.command(OWNER, "/review"))
+        assert _session_of(outbox.sent[-1][1]) == session
+        assert "Picking up where you left off" in outbox.sent[-1][1].text
+
+    def test_the_next_day_starts_afresh(
+        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        run(due.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        clock.advance_to_day_start(1)
+        clock.advance(hours=8)
+        restarted = BotCore(seeded, outbox, clock=clock)
+        restarted.engine.close_stale_sessions()
+        run(restarted.command(OWNER, "/review"))
+        assert _session_of(outbox.sent[-1][1]) != session
+
+
+class TestLearningOnThePhone:
+    def test_new_words_are_taught_and_practised_in_the_session(
+        self, bot: BotCore, outbox: FakeOutbox, seeded: Database
+    ) -> None:
+        SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 4)
+        run(bot.callback(OWNER, "1", START_DATA, ""))
+        session = _session_of(outbox.sent[-1][1])
+        card = outbox.sent[-1][1]
+        assert "NEW WORD" in card.text
+        assert any(label.startswith("Continue") for row in card.buttons for label, _ in row)
+        for _ in range(100):
+            if session not in bot._flows:
+                break
+            respond(bot, outbox, session)
+        assert len(bot.engine.daily_plan().introduced_today) == 4
+        assert "4 new words learned" in outbox.edits[-1][2].text
+        # Practice is recorded, never rated.
+        assert sum(bot.engine.rating_counts().values()) == 0
+
+    def test_a_word_in_long_term_memory_is_offered_as_known(
+        self, bot: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
+    ) -> None:
+        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        clock.advance_to_day_start(1)
+        clock.advance(hours=18)
+        SettingsRepository(seeded).set_many(
+            {Setting.NEW_WORDS_PER_DAY: 0, Setting.MASTERY_STABILITY_DAYS: 1}
+        )
+        run(bot.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        step = respond(bot, outbox, session)
+        offer = known_data(session, step.word.id)
+        assert offer in FakeOutbox.callbacks(outbox.sent[-1][1])
+        assert "long-term memory" in outbox.sent[-1][1].text
+        run(bot.callback(OWNER, outbox.last_id(), offer, ""))
+        status = seeded.connection.execute(
+            "SELECT status FROM user_word_state WHERE word_id = ?", (step.word.id,)
+        ).fetchone()[0]
+        assert status == ReviewStatus.KNOWN.value
+        assert "marked Known" in outbox.edits[-1][2].text
+
+
+class TestCards:
+    """How each kind of step reads on the phone."""
+
+    word = StoredWord(id=1, word="reluctant", normalized_word="reluctant",
+                      part_of_speech="adjective", cefr_level="B2",
+                      definition="unwilling to do something")
+
+    def test_a_recall_card_hides_the_meaning_when_asked(self) -> None:
+        hidden = step_card(Step(self.word, StepKind.RECALL), "s", 1, 1, 1)
+        shown = step_card(Step(self.word, StepKind.RECALL, hide_meaning=False), "s", 1, 1, 1)
+        assert "<tg-spoiler>" in hidden.text and "<tg-spoiler>" not in shown.text
+        labels = [label for row in hidden.buttons for label, _ in row]
+        assert labels[:4] == ["Again", "Hard", "Good", "Easy"]
+
+    def test_a_written_sentence_is_graded_beside_the_examples(self) -> None:
+        step = Step(self.word, StepKind.WRITE)
+        check = write_check(step, "I was <reluctant> to go.", "s", 3)
+        assert "&lt;reluctant&gt;" in check.text, "the learner's text is escaped"
+        labels = [label for row in check.buttons for label, _ in row]
+        assert labels[:3] == ["Couldn't use it", "With effort", "Used it well"]
+        assert step_data("s", 3, "g2") in FakeOutbox.callbacks(check)
+
+    def test_a_grade_maps_to_the_desktops(self, bot: BotCore) -> None:
+        graded = []
+
+        class Flow:
+            session_id = "s"
+            current = Step(TestCards.word, StepKind.WRITE)
+
+            def grade(self, used_well: bool, effortful: bool = False):
+                graded.append((used_well, effortful))
+                return True
+
+        for value in ("g0", "g1", "g2"):
+            bot._act(Flow(), value)
+        assert graded == [(False, False), (True, True), (True, False)]
 
 
 # -- notifications -------------------------------------------------------------
