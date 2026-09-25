@@ -704,6 +704,37 @@ thread's callbacks into Qt signals delivered on the UI thread.
 
 ---
 
+## 11a. Ready to leave the desktop
+
+A phone client is not built, but nothing in the learning engine stands in
+its way, and `tests/test_mobile_ready.py` keeps it so:
+
+- **No desktop libraries.** The models, repositories, database layer and the
+  learning services (`learning_service`, `srs_scheduler`, `review_flow`,
+  `review_route`, `review_wording`, `review_queue`, `task_selector`,
+  `first_learning`, `skill_tracker`, `progress`, `content_service`,
+  `portable`) import with Qt, ReportLab, PyMuPDF and python-telegram-bot all
+  blocked. Their only third-party dependency is `fsrs`. `services/__init__`
+  resolves its names lazily so that importing one service does not load the
+  import and export pipeline.
+- **No platform reach.** None of those modules imports the platform glue in
+  `core/` (paths, autostart, shortcut, logging setup) at module level. The
+  database takes its path from the client; the desktop's default location is
+  looked up only when none is given.
+- **State is plain data.** A session's state is JSON of ids and counts,
+  restorable by any client (`ReviewFlow.restore`); the whole database leaves
+  as the `.lexitrack` JSON archive (`services/portable.py`).
+- **Two clients already.** The desktop and the Telegram bot drive the same
+  `ReviewFlow` and share its wording (`services/review_wording.py`).
+
+Still desktop-shaped, and listed for a port rather than changed here: ids are
+SQLite integers (two devices would collide; merging needs global ids), every
+setting is one table though some belong to a device and some to the learner,
+the default time zone is fixed rather than the system's, and the wording is
+English sentences rather than message keys.
+
+---
+
 ## 12. Process, threads and lifetime
 
 - **One process.** `ui/single_instance.py` listens on a local socket named

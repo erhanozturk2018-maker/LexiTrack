@@ -1186,3 +1186,18 @@ and the learner answers what is really asked.
 **Removed.** `StudyFlow`, the route-V1 flow Telegram's session was meant to
 move to, had no user left once both clients ran `ReviewFlow`. A session saved
 by it is closed and a new one started, as any state from another route is.
+
+## 77. The engine stays portable; a phone is a separate project
+
+**Decision.** No mobile client is built in this repository. The learning
+engine is kept free of desktop libraries and platform calls, and its session
+state is plain data, and tests hold both. What a port would still have to
+change — global ids for merging, device versus learner settings, the default
+time zone, translatable wording — is documented, not pre-built.
+
+**Reason.** A phone app is a different product decision (platform, language,
+sync) that should be made with its own requirements in hand. What can be
+done now at no cost to the desktop is to keep the rules portable, so either
+reusing them or re-implementing them against the same behaviour stays
+possible. Building sync or a second UI speculatively would add complexity
+the desktop does not need.

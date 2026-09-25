@@ -15,7 +15,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from ..core import paths
 from ..core.errors import StorageError
 from .migrations import SCHEMA_VERSION, migrate, read_version, seed_settings
 
@@ -49,6 +48,10 @@ class Database:
 
     def __init__(self, path: Path | str | None = None) -> None:
         if path is None:
+            # The desktop's default location, only when none is given: another
+            # client (a phone) passes the path its platform provides.
+            from ..core import paths
+
             paths.ensure_data_dirs()
             path = paths.database_path()
         self.path = Path(path)

@@ -920,3 +920,18 @@ card are all harmless. `StudyFlow` is removed.
   Hard; the bot records no time (decision 76).
 - A tap arriving after a restart could have answered a different question
   than the one on screen; it now shows the current step instead.
+
+## 2026-09-25 — Learning Engine V2, phase 13: mobile preparation
+
+Verified rather than built: the learning modules import with Qt, the PDF
+libraries and the Telegram library blocked; they reach no platform glue;
+a session's state is JSON of ids. `tests/test_mobile_ready.py` holds all
+three.
+
+**Problems and solutions**
+
+- Importing any service — even the pure route rules — loaded ReportLab and
+  PyMuPDF, because `services/__init__` imported the import and export
+  services eagerly. Its names now resolve on first use.
+- `database/connection.py` imported the desktop's path rules at module
+  level for a default; the import now happens only when no path is given.
