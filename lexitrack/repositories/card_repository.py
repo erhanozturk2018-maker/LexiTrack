@@ -376,8 +376,8 @@ class CardRepository:
                         (word_id, session_id, channel, reviewed_at, reviewed_on, rating,
                          state_before, state_after, due_before, due_after, elapsed_days,
                          scheduled_days, stability_after, difficulty_after,
-                         scheduler_version, params_hash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         scheduler_version, params_hash, memory_result, route_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         entry.word_id,
@@ -396,6 +396,8 @@ class CardRepository:
                         entry.difficulty_after,
                         entry.scheduler_version,
                         entry.params_hash,
+                        entry.memory_result,
+                        entry.route_version,
                     ),
                 )
                 return int(cursor.lastrowid)
@@ -533,4 +535,6 @@ def _to_log(row: sqlite3.Row) -> ReviewLogEntry:
         scheduler_version=row["scheduler_version"],
         params_hash=row["params_hash"],
         undone_at=_parse(row["undone_at"]),
+        memory_result=row["memory_result"],
+        route_version=row["route_version"],
     )

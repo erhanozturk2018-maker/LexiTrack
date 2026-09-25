@@ -46,6 +46,8 @@ class ReviewSession:
     current_word_id: int | None = None
     planned_count: int = 0
     done_count: int = 0
+    #: Versioned JSON describing where the flow stands, or None.
+    flow_state: str | None = None
 
     @property
     def is_open(self) -> bool:
@@ -205,6 +207,13 @@ class SessionRepository:
 
     # -- Telegram idempotency ---------------------------------------------
 
+    def set_flow_state(self, session_id: str, state: str | None) -> None:
+        """Store where the session's flow stands, as JSON text, or clear it."""
+        with self._db.transaction() as conn:
+            conn.execute(
+                "UPDATE review_sessions SET flow_state = ? WHERE id = ?", (state, session_id)
+            )
+
     def release_update(self, update_key: str) -> None:
         """Forget a claimed key, so the same answer can be given again.
 
@@ -273,4 +282,5 @@ def _to_session(row: sqlite3.Row) -> ReviewSession:
         current_word_id=row["current_word_id"],
         planned_count=int(row["planned_count"]),
         done_count=int(row["done_count"]),
+        flow_state=row["flow_state"],
     )

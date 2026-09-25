@@ -78,7 +78,7 @@ def rows(db: Database, sql: str, params=()) -> list[tuple]:
 
 
 def test_a_version_1_database_is_upgraded_on_open(migrated: Database) -> None:
-    assert read_version(migrated.connection) == SCHEMA_VERSION == 4
+    assert read_version(migrated.connection) == SCHEMA_VERSION == 5
 
 
 def test_a_backup_is_taken_before_upgrading(v1_path: Path, migrated: Database) -> None:

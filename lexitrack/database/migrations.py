@@ -29,7 +29,7 @@ from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class MigrationError(StorageError):
@@ -123,12 +123,20 @@ def _run_step(
     try:
         connection.execute("BEGIN IMMEDIATE")
         try:
+            before = _preserved_counts(connection)
             step(connection)
+            _verify_preserved(connection, before, new_version)
             problems = connection.execute("PRAGMA foreign_key_check").fetchall()
             if problems:
                 raise MigrationError(
                     f"Upgrade to schema version {new_version} left "
                     f"{len(problems)} broken references."
+                )
+            check = connection.execute("PRAGMA quick_check").fetchone()[0]
+            if check != "ok":
+                raise MigrationError(
+                    f"Upgrade to schema version {new_version} failed the integrity check: "
+                    f"{check}"
                 )
             connection.execute("DELETE FROM schema_version")
             connection.execute(
@@ -427,10 +435,64 @@ def reconstruct_mastery_events(connection: sqlite3.Connection) -> int:
     return cursor.rowcount
 
 
+# -- version 4 -> 5 ----------------------------------------------------------
+#
+# Version 5 is the learning engine V2: pedagogical content (word_content,
+# word_contexts), the skill record (learning_attempts), the memory result and
+# route version on review_logs, and resumable flow state on review_sessions.
+# Purely additive. Existing answers keep route_version 'v1' and no memory
+# result: they were given under the old route, and nothing is invented for
+# them.
+
+_CONTENT_SCHEMA = Path(__file__).with_name("content.sql")
+
+
+def _migrate_4_to_5(connection: sqlite3.Connection) -> None:
+    _run_sql(connection, _CONTENT_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+
+
+# -- verification ------------------------------------------------------------
+
+#: Tables holding the user's data. An upgrade may add to them, never lose a
+#: row; a step that did would be rolled back.
+_PRESERVED = (
+    "words",
+    "word_sources",
+    "user_word_state",
+    "lists",
+    "list_words",
+    "srs_cards",
+    "review_logs",
+    "word_status_events",
+)
+
+
+def _preserved_counts(connection: sqlite3.Connection) -> dict[str, int]:
+    existing = {
+        row[0]
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    return {table: _count(connection, table) for table in _PRESERVED if table in existing}
+
+
+def _verify_preserved(
+    connection: sqlite3.Connection, before: dict[str, int], new_version: int
+) -> None:
+    for table, count in before.items():
+        after = _count(connection, table)
+        if after < count:
+            raise MigrationError(
+                f"Upgrade to schema version {new_version} would lose "
+                f"{count - after} rows of {table}."
+            )
+
+
 _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     1: _migrate_1_to_2,
     2: _migrate_2_to_3,
     3: _migrate_3_to_4,
+    4: _migrate_4_to_5,
 }
 
 

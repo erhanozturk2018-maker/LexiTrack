@@ -109,6 +109,16 @@ class JsonParser(DocumentParser):
         file_language = _file_language(root)
         source_key = self.source_key(document)
 
+        # A content enrichment file also has a "words" list, of existing words
+        # with teaching content. Imported as a word list it would add nothing
+        # useful and lose the content, so it is refused with directions.
+        if root.get("format") == "lexitrack-content":
+            raise InvalidFileError(
+                f"{document.path.name} is a LexiTrack content file, not a word list. "
+                "Import it with Import content, which adds the meanings and contexts "
+                "to the words you already have."
+            )
+
         if "words" not in root:
             raise InvalidFileError(
                 f"{document.path.name} has no “words” list, so there is "

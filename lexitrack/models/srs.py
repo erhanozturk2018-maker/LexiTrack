@@ -178,4 +178,9 @@ class ReviewLogEntry:
     params_hash: str | None = None
     #: Set when the answer was taken back. The row stays, for the record.
     undone_at: datetime | None = None
+    #: What the review showed about the memory (MemoryResult value), or
+    #: None for an answer given before version 5 recorded it.
+    memory_result: str | None = None
+    #: Which learning route produced the answer: 'v1' before version 5.
+    route_version: str = "v1"
     id: int | None = None
