@@ -87,6 +87,59 @@ hardest *delayed* success:
 - Answers from before schema 5 have no attempt. They are read from the log,
   and only as recognition: that is all a V1 review ever asked.
 
+### Review route V2
+
+A V2 review asks the hard way first and works down only after a failure, so
+that the rating says how well the **memory** held and the attempts say what
+the learner could **do** (`services/review_route.py` for the rules,
+`services/review_flow.py` for the session).
+
+1. **The first question** depends on the word's skill: its meaning → type
+   the word (level 2); once recalled, a context with the word blanked (3);
+   once productive, a collocation with its partner blanked (4). *Phase 5
+   replaces this simple choice with the TaskSelector.* The meaning is the
+   Turkish core meaning when there is one, otherwise the English definition
+   with the word and its forms hidden ("showing ___" for *reluctance*).
+2. **Probes** follow a failure, each a fresh question: after level 3 or
+   above, the word from its meaning; after that, **the word chosen among
+   four**. The answer stays hidden until the word is rated, so no probe can
+   be answered from having just seen it.
+3. **One rating**, from the strongest success before the answer was shown:
+
+| Case | What happened | Memory result | Rating | Then |
+| --- | --- | --- | --- | --- |
+| A | recalled at the first question | Recalled | Good (Easy if instant) | — |
+| B | recalled, with a hint, a slip or slowly | Recalled with effort | Hard | — |
+| C | only chosen among four | Recognised | Hard | repair recall |
+| D | not even chosen | Forgotten | Again | relearn |
+| E | recalled from a context never seen before | Recalled | Good | transfer counted |
+| F | a harder question failed, the meaning → word held | Recalled | Good (Hard if effortful) | repair that skill |
+
+4. **Relearning** (D) and **repair** (C, F): the word is taught again at
+   once, and asked again three cards later with a *different* prompt — the
+   other meaning source, another context, another collocation. At most two
+   cycles. That practice is recorded, linked to the answer, and never
+   changes the rating: a same-session success is not a day's memory.
+5. **One rating per word per day**, from any client: a second answer the same
+   day is recognised as a duplicate and changes nothing.
+
+**Typed answers.** Compared without case, spacing or punctuation; a
+multi-word entry is accepted without its frame ("expelled" for *be
+expelled*). One slip is accepted in four to ten letters, two from eleven,
+and makes the answer effortful. So does a hint (the first letter and the
+shape). Otherwise time decides: within about 2.5 s plus 0.12 s a letter is
+instant, beyond 12 s plus 0.2 s a letter is effortful. An empty answer is
+"I don't know".
+
+**Level 5** (a sentence) cannot be checked by the app: you write one, see
+example sentences, and grade it yourself.
+
+**No meaning to ask from** — no definition and no Turkish meaning — means the
+word is reviewed the V1 way: shown, revealed, rated by you (route `v1`).
+
+**Undo** takes back the last rated word whole: its rating, its probes and any
+practice after it, and asks it again from the first question.
+
 ---
 
 ## The original design

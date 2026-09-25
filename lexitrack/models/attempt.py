@@ -53,6 +53,9 @@ class Task(StrEnum):
     """A concrete task. Several tasks can share a level."""
 
     WORD_TO_MEANING = "word_to_meaning"
+    #: The word chosen among four for a meaning: recognition, level 1, and
+    #: the probe after a failed recall, because the word is not shown first.
+    CHOOSE_WORD = "choose_word"
     MEANING_TO_WORD = "meaning_to_word"
     SITUATION_TO_WORD = "situation_to_word"
     CONTEXT_CLOZE = "context_cloze"
@@ -66,6 +69,7 @@ class Task(StrEnum):
 
 _TASK_LEVEL = {
     Task.WORD_TO_MEANING: Level.WORD_TO_MEANING,
+    Task.CHOOSE_WORD: Level.WORD_TO_MEANING,
     Task.MEANING_TO_WORD: Level.MEANING_TO_WORD,
     Task.SITUATION_TO_WORD: Level.CONTEXT_TO_WORD,
     Task.CONTEXT_CLOZE: Level.CONTEXT_TO_WORD,

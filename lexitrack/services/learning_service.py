@@ -28,13 +28,23 @@ run a year of study in a second, and it never sleeps or polls.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
 from ..core.clock import DayClock
 from ..database.connection import Database
-from ..models.attempt import ROUTE_V1, Effort, LearningAttempt, Phase, Role, Task
+from ..models.attempt import (
+    ROUTE_V1,
+    ROUTE_V2,
+    Effort,
+    LearningAttempt,
+    MemoryResult,
+    Phase,
+    Role,
+    Task,
+)
 from ..models.settings import LearningSettings, Setting
 from ..models.srs import (
     CardState,
@@ -157,6 +167,10 @@ class AnswerOutcome:
     #: True when the word is in long-term memory and not yet Known: the
     #: caller offers to mark it Known. The engine never does it itself.
     suggest_known: bool = False
+    #: The answer's row in review_logs, for practice that follows it.
+    log_id: int | None = None
+    #: What a V2 review found; None for a V1 answer.
+    memory_result: MemoryResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +211,21 @@ class LearningService:
     @property
     def settings(self) -> LearningSettings:
         return self._settings
+
+    @property
+    def database(self) -> Database:
+        """The database this engine reads and writes, for services built beside it."""
+        return self._db
+
+    def choice_pool(self, word_id: int, seed: str, size: int = 40) -> list[StoredWord]:
+        """Other words from the active plan to choose among, a stable sample."""
+        plan = self.active_plan()
+        ids = [i for i in (self._plans.word_ids(plan.id) if plan else []) if i != word_id]
+        if len(ids) < 3:
+            # A plan too small for a choice borrows from the whole vocabulary.
+            ids = [i for i in self._words.all_ids() if i != word_id]
+        sample = random.Random(seed).sample(ids, min(size, len(ids)))
+        return self._words_in_order(sample)
 
     @property
     def clock(self) -> DayClock:
@@ -526,7 +555,8 @@ class LearningService:
         channel: Channel = Channel.DESKTOP,
         update_key: str | None = None,
     ) -> AnswerOutcome | None:
-        """Record one answer and reschedule the word.
+        """Record one V1 answer — the word shown, its meaning recalled — and
+        reschedule the word.
 
         ``update_key`` makes the call idempotent, which is what Telegram needs:
         it re-delivers a callback whenever it is not certain the answer
@@ -538,13 +568,76 @@ class LearningService:
         before the word was removed, say. A duplicate returns an outcome with
         ``duplicate`` set, so the caller can still answer the user.
         """
+        return self._rate(
+            word_id,
+            Rating(int(rating)),
+            session_id=session_id,
+            channel=channel,
+            update_key=update_key,
+            memory_result=None,
+            route=ROUTE_V1,
+            attempts=None,
+        )
+
+    def review(
+        self,
+        word_id: int,
+        rating: Rating,
+        *,
+        memory_result: MemoryResult,
+        attempts: Sequence[LearningAttempt],
+        session_id: str | None = None,
+        channel: Channel = Channel.DESKTOP,
+        update_key: str | None = None,
+    ) -> AnswerOutcome | None:
+        """Record a V2 review: the rating its memory result earned, and the
+        attempts (primary and probes) that produced it, as one event.
+
+        The attempts are linked to the answer's log row, so Undo reaches them
+        all. See ``services/review_route.py`` for how the rating is decided.
+        """
+        return self._rate(
+            word_id,
+            Rating(int(rating)),
+            session_id=session_id,
+            channel=channel,
+            update_key=update_key,
+            memory_result=memory_result,
+            route=ROUTE_V2,
+            attempts=attempts,
+        )
+
+    def record_practice(self, attempt: LearningAttempt, log_id: int | None) -> int:
+        """Record relearning or repair practice, which never changes the schedule.
+
+        Linked to the answer it followed (``log_id``), so taking that answer
+        back takes the practice with it.
+        """
+        return self._attempts.add(replace(attempt, review_log_id=log_id))
+
+    def _rate(
+        self,
+        word_id: int,
+        rating: Rating,
+        *,
+        session_id: str | None,
+        channel: Channel,
+        update_key: str | None,
+        memory_result: MemoryResult | None,
+        route: str,
+        attempts: Sequence[LearningAttempt] | None,
+    ) -> AnswerOutcome | None:
         card = self._cards.get(int(word_id))
         word = self._words.get(int(word_id))
         if card is None or word is None:
             return None
-        rating = Rating(int(rating))
+        today = self._clock.today()
 
-        if update_key and not self._sessions.claim_update(update_key):
+        duplicate = bool(update_key) and not self._sessions.claim_update(update_key)
+        # One rating per word per day, whichever client asks: the schedule
+        # hears about a day's memory of a word once. A second answer the same
+        # day — from the other client, from a stale screen — changes nothing.
+        if duplicate or self._cards.rated_on(word.id, today):
             return AnswerOutcome(
                 word=word,
                 rating=rating,
@@ -555,9 +648,8 @@ class LearningService:
             )
 
         now = self._clock.now_utc()
-        today = self._clock.today()
         result = self._scheduler.review(card, rating, now)
-        # One answer is one event: the card, its log, the attempt and the
+        # One answer is one event: the card, its log, the attempts and the
         # session count are written together or not at all, and Undo takes
         # all of them back. The word's status is not part of it: reaching
         # long-term memory is reported, and only the user marks a word Known.
@@ -581,11 +673,19 @@ class LearningService:
                     difficulty_after=result.card.difficulty,
                     scheduler_version=result.card.scheduler_version,
                     params_hash=self._scheduler.params_hash,
+                    memory_result=memory_result.value if memory_result else None,
+                    route_version=route,
                 )
             )
-            self._attempts.add(_v1_attempt(word.id, rating, now, today, session_id, log_id))
+            if attempts is None:
+                attempts = [_v1_attempt(word.id, rating, now, today, session_id, log_id)]
+            for attempt in attempts:
+                self._attempts.add(
+                    replace(attempt, review_log_id=log_id, session_id=session_id)
+                )
             if session_id:
                 self._sessions.update(session_id, done_increment=1, clear_current=True)
+
         self._last_answer = _LastAnswer(
             word_id=word.id,
             card_before=card,
@@ -605,6 +705,8 @@ class LearningService:
             became_struggling=result.became_struggling,
             reached_mastery=result.reached_mastery,
             suggest_known=result.reached_mastery and word.status is not ReviewStatus.KNOWN,
+            log_id=log_id,
+            memory_result=memory_result,
         )
 
     # -- undo --------------------------------------------------------------

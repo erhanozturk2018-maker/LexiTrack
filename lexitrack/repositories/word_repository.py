@@ -276,6 +276,9 @@ class WordRepository:
         ).fetchall()
         return [_row_to_word(row) for row in rows]
 
+    def all_ids(self) -> list[int]:
+        return [int(row[0]) for row in self._db.connection.execute("SELECT id FROM words")]
+
     def count(self) -> int:
         row = self._db.connection.execute("SELECT COUNT(*) AS n FROM words").fetchone()
         return int(row["n"])

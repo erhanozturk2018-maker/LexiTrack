@@ -416,6 +416,15 @@ class CardRepository:
         ).fetchall()
         return [_to_log(row) for row in rows]
 
+    def rated_on(self, word_id: int, local_date: str) -> bool:
+        """True when the word has an answer on that day that was not taken back."""
+        row = self._db.connection.execute(
+            "SELECT 1 FROM review_logs WHERE word_id = ? AND reviewed_on = ? "
+            "AND undone_at IS NULL LIMIT 1",
+            (int(word_id), local_date),
+        ).fetchone()
+        return row is not None
+
     def count_logs_on(self, local_date: str) -> int:
         row = self._db.connection.execute(
             "SELECT COUNT(*) AS n FROM review_logs "
