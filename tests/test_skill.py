@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
-from lexitrack.models.attempt import Effort, LearningAttempt, Phase, Role, Task
+from lexitrack.models.attempt import Effort, LearningAttempt, Level, Phase, Role, Task
 from lexitrack.models.skill import SkillStage
 from lexitrack.models.srs import Rating
 from lexitrack.repositories import AttemptRepository, CardRepository
@@ -106,6 +106,86 @@ def test_old_answers_count_as_recognition_only() -> None:
     assert skill.stage is SkillStage.RECOGNIZED
     assert skill.recognized == 6 and skill.failures == 1 and skill.from_v1 == 7
     assert skill.recalled == 0
+
+
+def _review(log_id: int, *attempts: LearningAttempt) -> list[LearningAttempt]:
+    """One review: its primary and probes, linked to one answer."""
+    from dataclasses import replace
+
+    return [replace(attempt, review_log_id=log_id) for attempt in attempts]
+
+
+def _probe(task: Task, success: bool = True) -> LearningAttempt:
+    return _attempt(task, success, role=Role.PROBE)
+
+
+def test_forgetting_caps_skill_at_recognition_until_recalled_again() -> None:
+    produced = _review(1, _attempt(Task.PRODUCTION, context_id=1)) + _review(
+        2, _attempt(Task.COLLOCATION, context_id=2)
+    )
+    assert derive_skill(1, produced).stage is SkillStage.PRODUCTIVE
+    forgotten = produced + _review(
+        3,
+        _attempt(Task.PRODUCTION, False),
+        _probe(Task.MEANING_TO_WORD, False),
+        _probe(Task.CHOOSE_WORD, False),
+    )
+    skill = derive_skill(1, forgotten)
+    assert skill.stage is SkillStage.RECOGNIZED and skill.regressed
+    assert skill.produced_in == 2, "the evidence stays; only the current level falls"
+    recovered = forgotten + _review(4, _attempt(Task.MEANING_TO_WORD))
+    assert derive_skill(1, recovered).stage is SkillStage.RECALLED
+    assert derive_skill(1, recovered).level is Level.MEANING_TO_WORD
+
+
+def test_productive_must_be_shown_again_after_a_fall() -> None:
+    history = (
+        _review(1, _attempt(Task.PRODUCTION, context_id=1))
+        + _review(2, _attempt(Task.COLLOCATION, context_id=2))
+        + _review(3, _attempt(Task.PRODUCTION, False), _probe(Task.MEANING_TO_WORD, False),
+                  _probe(Task.CHOOSE_WORD, False))
+        + _review(4, _attempt(Task.MEANING_TO_WORD))
+        + _review(5, _attempt(Task.PRODUCTION, context_id=1))
+    )
+    assert derive_skill(1, history).stage is SkillStage.RECALLED, "one use again is not enough"
+    again = history + _review(6, _attempt(Task.COLLOCATION, context_id=3))
+    assert derive_skill(1, again).stage is SkillStage.PRODUCTIVE
+
+
+def test_two_misses_in_a_row_at_its_level_take_it_down_one() -> None:
+    at_three = _review(1, _attempt(Task.CONTEXT_CLOZE))
+    assert derive_skill(1, at_three).level is Level.CONTEXT_TO_WORD
+    one_miss = at_three + _review(
+        2, _attempt(Task.CONTEXT_CLOZE, False), _probe(Task.MEANING_TO_WORD)
+    )
+    assert derive_skill(1, one_miss).level is Level.CONTEXT_TO_WORD
+    two_misses = one_miss + _review(
+        3, _attempt(Task.SITUATION_TO_WORD, False), _probe(Task.MEANING_TO_WORD)
+    )
+    skill = derive_skill(1, two_misses)
+    assert skill.level is Level.MEANING_TO_WORD and skill.regressed
+    assert skill.stage is SkillStage.RECALLED
+
+
+def test_a_success_between_misses_breaks_the_run() -> None:
+    history = (
+        _review(1, _attempt(Task.CONTEXT_CLOZE))
+        + _review(2, _attempt(Task.CONTEXT_CLOZE, False), _probe(Task.MEANING_TO_WORD))
+        + _review(3, _attempt(Task.CONTEXT_CLOZE))
+        + _review(4, _attempt(Task.CONTEXT_CLOZE, False), _probe(Task.MEANING_TO_WORD))
+    )
+    skill = derive_skill(1, history)
+    assert skill.level is Level.CONTEXT_TO_WORD and not skill.regressed
+
+
+def test_a_miss_above_its_level_is_a_stretch_not_a_fall() -> None:
+    history = (
+        _review(1, _attempt(Task.MEANING_TO_WORD))
+        + _review(2, _attempt(Task.CONTEXT_CLOZE, False), _probe(Task.MEANING_TO_WORD))
+        + _review(3, _attempt(Task.CONTEXT_CLOZE, False), _probe(Task.MEANING_TO_WORD))
+    )
+    assert derive_skill(1, history).level is Level.MEANING_TO_WORD
+    assert not derive_skill(1, history).regressed
 
 
 # -- the record -------------------------------------------------------------------

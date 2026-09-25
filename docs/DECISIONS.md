@@ -1201,3 +1201,17 @@ done now at no cost to the desktop is to keep the rules portable, so either
 reusing them or re-implementing them against the same behaviour stays
 possible. Building sync or a second UI speculatively would add complexity
 the desktop does not need.
+
+## 78. Skill can fall
+
+**Decision.** A word's skill stage is read from its current level, which
+follows the record review by review: a review ending Forgotten caps it at
+recognition until a recall succeeds again, and two missed first questions in
+a row at its level take it down one. The counts of past successes stay; only
+the current level falls. Productive must be shown again after a fall.
+
+**Reason.** Replaces "failing never lowers a stage". A stage that only rises
+says what was once shown, not what the learner can do now, and the task
+selector (decision 79) aims each question from it: a word that has fallen
+must be asked at the level it can actually reach. The two-in-a-row rule
+keeps a single bad day from undoing a level.

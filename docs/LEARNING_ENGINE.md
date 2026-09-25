@@ -63,7 +63,7 @@ Version 2 separates three things that 0.4 kept in one number:
 | **Status** | *Do I count it as known?* | `user_word_state` | the user |
 
 **Skill stages** (`models/skill.py`, `services/skill_tracker.py`), from the
-hardest *delayed* success:
+word's **current level** — the hardest *delayed* retrieval it can do now:
 
 | Stage | Shown by |
 | --- | --- |
@@ -78,8 +78,16 @@ hardest *delayed* success:
   repair) are recorded as practice but measure working memory, not learning.
 - **Automatic** is evidence, not a stage: instant successes above level 1 on
   two different days.
-- Failing never lowers a stage. A stage says what has been shown; forgetting
-  is memory's question, and FSRS answers it.
+- **Skill can fall.** The evidence (how often each thing succeeded) only grows,
+  but the current level follows the record review by review:
+  - a review that ends **Forgotten** (nothing succeeded, not even a probe)
+    caps the level at recognition until a recall succeeds again;
+  - **two missed first questions in a row at the current level** take it
+    down one; a success at that level in between breaks the run, and a miss
+    above the level is a stretch, not a fall;
+  - a success raises the level to what succeeded. **Productive** must be
+    shown again — two different contexts or tasks — after the level has
+    been below 4.
 - Every answer now records its attempt with its log, in one transaction, and
   Undo takes both back. A V1 review is recorded as what it is — word to
   meaning, level 1, route `v1` — with Easy / Good / Hard as instant / normal

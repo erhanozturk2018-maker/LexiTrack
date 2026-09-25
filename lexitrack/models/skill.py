@@ -8,8 +8,10 @@ Skill is one of three things kept apart (docs/LEARNING_ENGINE.md):
 * **status** — Known / Unknown / Not reviewed; the user's word, never set
   from either of the others.
 
-A stage is the highest thing the record shows, and only *delayed* retrievals
-count: a review, or the probe inside a review. A retrieval straight after
+A stage is what the record shows the learner can do *now*, and only
+*delayed* retrievals count: a review, or the probe inside a review. Skill can
+fall: a word forgotten is at most recognised until it is recalled again, and
+two missed first questions in a row at its level take it down one. A retrieval straight after
 being taught (introduction, relearning, repair) is practice and is kept, but
 it measures what is still in working memory, not what was learned.
 """
@@ -18,6 +20,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+
+from .attempt import Level
 
 
 class SkillStage(IntEnum):
@@ -71,6 +75,12 @@ class WordSkill:
     #: ever asked word → meaning and so count as recognition only.
     from_v1: int = 0
     last_on: str | None = None
+    #: The hardest retrieval the learner can do now (1–5), after any fall;
+    #: None before any delayed success. What the task selector aims from.
+    level: Level | None = None
+    #: True when the record shows a fall: a word forgotten, or two misses in
+    #: a row at its level.
+    regressed: bool = False
 
     @property
     def automatic(self) -> bool:

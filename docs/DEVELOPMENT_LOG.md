@@ -935,3 +935,11 @@ three.
   services eagerly. Its names now resolve on first use.
 - `database/connection.py` imported the desktop's path rules at module
   level for a default; the import now happens only when no path is given.
+
+## 2026-09-26 — Learning plan gaps, step 1: skill regression
+
+`derive_skill` walks the review events in order and keeps a current level
+beside the evidence: Forgotten caps it at recognition, two misses in a row at
+the level drop it one, a success raises it. `WordSkill` gains `level` and
+`regressed`. The engine document said failing never lowered a stage; it now
+describes the fall.
