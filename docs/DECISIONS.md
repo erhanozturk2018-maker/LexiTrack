@@ -1131,3 +1131,31 @@ Helvetica, the PDF built-in used before, cannot set ş, ğ or ı. Text Vera
 cannot set (Cyrillic, Greek) switches the whole sheet to a system font that
 has it (Arial, Segoe UI, DejaVu or Noto); with none installed the export is
 still written and the log says which characters are missing.
+
+## 75. Progress in four tabs, memory and skill on two bars
+
+**Decision.** Progress has four tabs: Overview, Words, Answers, Scheduler.
+The Overview shows memory (how long each word is expected to be remembered)
+and skill (what delayed answers showed the learner can do) as two separate
+bars, with the evidence that is neither — instant retrieval on several days,
+recall after 30+ days without a review, recognition in an unseen sentence —
+counted beside them. Words in long-term memory are listed as ready to mark
+Known, with a button for each and one for all; nothing is marked without it.
+
+**Reason.** One page had grown to answer four different questions, and the
+expert one — does the scheduler fit — sat between the learner's two. The
+engine keeps memory and skill apart because they diverge: a word can be
+remembered for weeks and still only be recognised. Showing one number would
+hide exactly what the learner can act on. Known is the learner's decision
+(decision 70), so the suggestions need a place to be decided, and the
+Overview is where the question "am I there yet?" is asked.
+
+**Honest about old answers.** Answers from before version 5 asked only word
+→ meaning, so they count as recognition at most, and the page says how many
+words rest on them alone.
+
+**Found on the way.** `QWidget` already has a `size` property, so
+`setProperty("size", "small")` never set anything and the `[size="small"]`
+style never matched. The new list uses `[compact="true"]`; the four older
+buttons that asked for "small" keep the size they have always had until
+that is decided on its own.

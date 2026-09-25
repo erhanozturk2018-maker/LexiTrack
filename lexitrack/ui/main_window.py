@@ -313,6 +313,8 @@ class MainWindow(QMainWindow):
         self.progress = ProgressPage(self._progress, self._engine)
         self.progress.history_opener = self.open_word_history
         self.progress.settings_requested.connect(self.open_settings)
+        self.progress.data_changed.connect(self._on_data_changed)
+        self.progress.notify.connect(self._toast)
         self.study.manage_plan.connect(self.manage_plan)
         self.study.show_review.connect(lambda: self.show_page(REVIEW))
         self.study.help_requested.connect(self.show_help)

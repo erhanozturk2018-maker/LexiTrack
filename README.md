@@ -71,8 +71,9 @@ local SQLite file. The only network use is the optional Telegram bot.
 ### Progress and transparency
 
 - **Progress tab.** Words learned here, in progress, marked Known by hand and
-  known before your plan, kept apart; where the words stand; words introduced
-  and learned over time.
+  known before your plan, kept apart; the words ready to be marked Known;
+  where the words stand in memory and in skill, on two bars; words
+  introduced and learned over time.
 - **Every answer and every change of status**, with its cause, in two complete
   tables. Nothing the app records is out of your sight.
 - **A word's history.** When it was introduced and in which plan, every
@@ -355,19 +356,30 @@ move with it.
 
 ### Progress
 
-**Progress** (`Alt+P`) is everything since your first new word:
+**Progress** (`Alt+P`) is everything since your first new word, in four
+tabs:
 
-- four numbers kept apart — **learned here** (reached long-term memory and
-  you marked it Known),
-  **in progress**, **marked Known by hand**, and **known before your plan**;
-- **where your words are**, from not yet answered to Known;
-- **over time**: words introduced and words learned, as running totals;
-- **does the schedule fit you?** — for each band of predicted recall, how
-  often you actually remembered, and a one-line verdict;
-- **words**: every studied word, filterable, with when it was introduced and
-  became Known, how many answers and how many Agains;
-- **all answers**: every answer from Study and Telegram, newest first,
-  including the ones taken back.
+- **Overview** — four numbers kept apart: **learned here** (reached
+  long-term memory and you marked it Known), **in progress**, **marked Known
+  by hand** and **known before your plan**. Then the words **ready to mark
+  Known**: in long-term memory, offered, marked only when you say so — one by
+  one or all at once. Then **memory and skill** on two bars: how long each
+  word is expected to be remembered, and what your answers on later days have
+  shown you can do with it (recognise it, recall it, use it). Beside them,
+  evidence that is neither: words retrieved instantly on several days, words
+  remembered after 30 days or more without a review, words recognised in a
+  sentence they had not been seen in. Then **the last 30 days** and the words
+  introduced and learned **over time**.
+- **Words** — every studied word, filterable (learned here, in progress,
+  marked Known, ready for Known, hard for you), with when it was introduced
+  and became Known, its answers and Agains, how long it is remembered for,
+  and its skill.
+- **Answers** — every answer from Today and Telegram, newest first: what it
+  asked, your answer, what it showed about the memory. Filter to the Agains
+  or the answers taken back, find a word, or export them all as CSV.
+- **Scheduler** — does the schedule fit you: for each band of predicted
+  recall, how often you actually remembered, a one-line verdict, and which
+  parameters are in use.
 
 Double-click any row, or select a word in any table and choose *Show history*
 in the details panel, for that word's whole history.

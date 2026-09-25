@@ -225,7 +225,7 @@ upgrade moved it into `tr` localizations and dropped those columns.
    when the status really changes; callers state the cause.
 9. **An answer is never deleted** except by Reset. Undo marks it `undone_at`;
    every count, the calibration and fitting leave such rows out, the history
-   and the All answers table show them.
+   and the Answers table show them.
 
 ### Learning status is word-level
 
@@ -765,16 +765,18 @@ MainWindow
 │   ├── no plan             the first-run setup: what to learn (all Unknown
 │   │                       words, or some lists), how many a day, the phone;
 │   │                       Start learning creates the plan
-│   ├── the day             Today panel (two steps, a progress line, one primary
-│   │                       button whose label is the next thing to do) · New
-│   │                       words as CEFR-grouped chips · This week (day tiles)
-│   │                       · Words you find hard · The last 30 days (stat tiles)
+│   ├── the day             one Today card (what waits, how long it takes,
+│   │                       Start session) · New words as CEFR-grouped chips ·
+│   │                       This week (day tiles) · Words you find hard
 │   └── session             one card: progress line, word, meaning behind Space,
 │                           Again / Hard / Good / Easy with keys and intervals,
 │                           "Undo <answer> on <word>" in the footer (Ctrl+Z)
-├── ProgressPage            four tiles · where the words are · over time · does
-│                           the schedule fit you (and which parameters are in
-│                           use) · Words table with filters · All answers table
+├── ProgressPage            four tabs, one shown at a time:
+│   ├── Overview            four tiles · ready to mark Known · memory and skill
+│   │                       bars with the evidence · the last 30 days · over time
+│   ├── Words               filters · every studied word with its skill
+│   ├── Answers             filters · what each answer asked and showed · CSV
+│   └── Scheduler           does the schedule fit you, and which parameters
 ├── HomePage    (on screen: Lists)
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
 │   ├── Overview            four totals; the Unknown tile opens Unknown Words

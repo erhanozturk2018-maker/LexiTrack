@@ -214,6 +214,17 @@ QPushButton[variant="known-solid"] #AnswerKey {{
 #HistoryDetail {{ font-size: 13px; color: {p.text}; background: transparent; }}
 #HistoryDetail[undone="true"] {{ color: {p.text_faint}; text-decoration: line-through; }}
 #HistoryUndone {{ font-size: 11px; color: {p.unknown_text}; background: transparent; }}
+#HistorySkill {{ font-size: 13px; color: {p.text_muted}; background: transparent; }}
+
+/* ---------------------------------------------------------------- progress */
+
+#SubsectionTitle {{
+    font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+    color: {p.text_muted}; background: transparent;
+}}
+#EvidenceLine {{ font-size: 13px; color: {p.text}; background: transparent; }}
+#SuggestionRow {{ background: transparent; border-top: 1px solid {p.border}; }}
+#SuggestionRow[first="true"] {{ border-top: none; }}
 
 /* -------------------------------------------------------------- study plan */
 

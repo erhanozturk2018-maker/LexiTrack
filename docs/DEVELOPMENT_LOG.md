@@ -872,3 +872,30 @@ the card's 58 px, but the label was laid out one line tall, so both lines
 were clipped. The headword is now a `WordLabel` (`components/word_label.py`):
 it steps its size down until the text fits on at most two lines, and asks for
 the height those lines need. The session card and Sort words both use it.
+
+## 2026-09-25 — Learning Engine V2, phase 11: progress, memory and skill
+
+Progress is four tabs. The Overview adds the words ready to mark Known (with
+Mark Known, and Mark all), memory and skill as two bars with the evidence
+beside them, and the last 30 days, which left the Today page in phase 6.
+Words gains a skill column and a Ready for Known filter; Answers says what
+each answer asked and what it showed, filters, and exports CSV; Scheduler is
+the calibration on its own. A word's history names its skill and, for each
+answer, what was asked. `ProgressService` gained `skill_overview`, `recent`
+and a long-term stage in the memory pipeline.
+
+**Problems and solutions**
+
+- The tabs lived in a stacked widget, which is as tall as its tallest page:
+  the short Scheduler tab was spread down the height of the Answers table.
+  The tabs now share the column and only the shown one is visible.
+- All table columns stretched equally, so "Recall the meaning" wrapped onto
+  two lines; the text columns now take the spare width, the rest fit their
+  content, and cells do not wrap.
+- The memory pipeline sorted by "under 3 days" before the long-term
+  threshold, so with a low threshold a word ready for Known was counted as
+  fragile. The threshold is checked first.
+- `setProperty("size", ...)` collides with `QWidget.size` and never applied;
+  see decision 75.
+- The Known suggestions took eight tall rows and pushed memory and skill off
+  the first screen: five compact rows now, and a link to the rest in Words.

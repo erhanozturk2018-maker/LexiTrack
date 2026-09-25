@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...models.skill import SkillStage
 from ...models.srs import CardState, Channel, Rating
 from ...models.user_word_state import ReviewStatus, StatusCause
 from ...services.progress import Group, JourneyStep, WordJourney
@@ -93,6 +94,33 @@ def status_sentence(step: JourneyStep) -> str:
     if step.reconstructed:
         text += " (dated from the answer, recorded before 0.4)"
     return text
+
+
+def skill_sentence(journey: WordJourney) -> str:
+    """What the record shows can be done with the word, in one line."""
+    skill = journey.skill
+    if skill is None or skill.stage is SkillStage.NONE:
+        return ""
+    counts = []
+    if skill.recognized:
+        counts.append(f"recognised {_times(skill.recognized)}")
+    if skill.recalled:
+        counts.append(f"recalled {_times(skill.recalled)}")
+    if skill.produced_in:
+        counts.append(f"used in {skill.produced_in} "
+                      f"{'context' if skill.produced_in == 1 else 'contexts'}")
+    text = f"Skill: {skill.stage.label}"
+    if counts:
+        text += " — " + ", ".join(counts) + " on later days"
+    if skill.automatic:
+        text += f"; instant on {skill.automatic_days} days, so automatic"
+    if skill.from_v1 and not skill.recalled and not skill.produced_in:
+        text += ". Answers from before this version asked for the meaning only"
+    return text + "."
+
+
+def _times(count: int) -> str:
+    return "once" if count == 1 else f"{count} times"
 
 
 def why_sentence(journey: WordJourney) -> str:
@@ -297,6 +325,12 @@ class WordHistoryView(QWidget):
             self._facts.append((caption, value))
         layout.addLayout(facts)
 
+        # Skill, beside the memory the facts describe: what the answers showed.
+        self.skill = QLabel()
+        self.skill.setObjectName("HistorySkill")
+        self.skill.setWordWrap(True)
+        layout.addWidget(self.skill)
+
         self.why = QLabel()
         self.why.setObjectName("HistoryWhy")
         self.why.setWordWrap(True)
@@ -333,6 +367,9 @@ class WordHistoryView(QWidget):
             caption.setText(title)
             value.setText(text)
 
+        skill = skill_sentence(journey)
+        self.skill.setText(skill)
+        self.skill.setVisible(bool(skill))
         self.why.setText(why_sentence(journey))
         points = [
             (step.day, step.stability, step.rating)
@@ -382,6 +419,10 @@ class _StepRow(QFrame):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(badge)
             parts = []
+            if step.asked is not None:
+                parts.append(step.asked.label)
+            if step.memory_result is not None:
+                parts.append(step.memory_result.label.lower())
             if step.state_before and step.state_after and step.state_before != step.state_after:
                 parts.append(
                     f"{_STATE_WORDS[step.state_before]} → {_STATE_WORDS[step.state_after]}"

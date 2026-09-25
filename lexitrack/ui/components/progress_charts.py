@@ -16,10 +16,11 @@ type and corner radii of the rest of the app in both themes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from ...services.progress import Calibration, DayTotals, PipelineStage
@@ -39,13 +40,22 @@ def _short(day: str) -> str:
 
 
 class PipelineBar(QWidget):
-    """Where the studied words are, as one bar with a legend underneath."""
+    """Where the studied words are, as one bar with a legend underneath.
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    The legend wraps onto as many lines as the width needs, and the widget
+    grows to hold them. ``colours`` gives each stage's colour from the palette;
+    by default grey, then warm while fragile, the accent as it grows, green
+    once long-term.
+    """
+
+    def __init__(
+        self,
+        colours: Callable[[], list[QColor]] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._stages: list[PipelineStage] = []
-        # The bar and one line of legend; five stages fit on a line at the
-        # page's narrowest width.
+        self._colour_source = colours or _memory_colours
         self.setMinimumHeight(52)
 
     def set_stages(self, stages: list[PipelineStage]) -> None:
@@ -53,20 +63,38 @@ class PipelineBar(QWidget):
         self.setAccessibleName(
             "; ".join(f"{stage.label}: {stage.count}" for stage in stages)
         )
+        self._fit_height()
         self.update()
 
     def _colours(self) -> list[QColor]:
-        """Grey, then warm while fragile, the accent as it grows, green once Known."""
-        p = current_palette()
-        growing = QColor(p.accent)
-        growing.setAlpha(110)
-        return [
-            QColor(p.border_strong),
-            QColor(p.unknown),
-            growing,
-            QColor(p.accent),
-            QColor(p.known),
-        ]
+        return self._colour_source()
+
+    def _legend(self, width: float) -> list[tuple[float, int]]:
+        """Each stage's legend position: its x, and its line."""
+        regular = QFontMetrics(_font(self, 12))
+        bold = QFontMetrics(_font(self, 12, bold=True))
+        places: list[tuple[float, int]] = []
+        x, line = 0.0, 0
+        for stage in self._stages:
+            needed = (
+                14 + regular.horizontalAdvance(f"{stage.label}  ")
+                + bold.horizontalAdvance(f"{stage.count:,}") + 22
+            )
+            if x + needed > width and x > 0:
+                x, line = 0.0, line + 1
+            places.append((x, line))
+            x += needed
+        return places
+
+    def _fit_height(self) -> None:
+        lines = 1 + max((line for _x, line in self._legend(self.width())), default=0)
+        height = 52 + 22 * (lines - 1)
+        if self.minimumHeight() != height:
+            self.setMinimumHeight(height)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_height()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         palette = current_palette()
@@ -89,16 +117,13 @@ class PipelineBar(QWidget):
 
         # the legend: a swatch, a label and a count for each stage
         painter.setFont(_font(self, 12))
-        x = 0.0
-        y = bar.bottom() + 16
-        for stage, colour in zip(self._stages, colours, strict=False):
+        top = bar.bottom() + 16
+        for stage, colour, (x, line) in zip(
+            self._stages, colours, self._legend(self.width()), strict=False
+        ):
+            y = top + 22 * line
             label = f"{stage.label}  "
-            count = f"{stage.count:,}"
             metrics = painter.fontMetrics()
-            needed = 14 + metrics.horizontalAdvance(label) + metrics.horizontalAdvance(count) + 22
-            if x + needed > self.width() and x > 0:
-                x = 0.0
-                y += 22
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(colour)
             painter.drawRoundedRect(QRectF(x, y - 5, 10, 10), 3, 3)
@@ -106,10 +131,36 @@ class PipelineBar(QWidget):
             painter.drawText(QPointF(x + 14, y + 4), label)
             painter.setPen(QColor(palette.text))
             painter.setFont(_font(self, 12, bold=True))
-            painter.drawText(QPointF(x + 14 + metrics.horizontalAdvance(label), y + 4), count)
+            painter.drawText(
+                QPointF(x + 14 + metrics.horizontalAdvance(label), y + 4), f"{stage.count:,}"
+            )
             painter.setFont(_font(self, 12))
-            x += needed
         painter.end()
+
+
+def _memory_colours() -> list[QColor]:
+    """Not answered, fragile, growing, strong, long-term, Known."""
+    p = current_palette()
+    growing = QColor(p.accent)
+    growing.setAlpha(110)
+    long_term = QColor(p.known)
+    long_term.setAlpha(120)
+    return [
+        QColor(p.border_strong),
+        QColor(p.unknown),
+        growing,
+        QColor(p.accent),
+        long_term,
+        QColor(p.known),
+    ]
+
+
+def skill_colours() -> list[QColor]:
+    """Encountered, recognised, recalled, productive: from grey to green."""
+    p = current_palette()
+    recognised = QColor(p.accent)
+    recognised.setAlpha(110)
+    return [QColor(p.border_strong), recognised, QColor(p.accent), QColor(p.known)]
 
 
 class TimelineChart(QWidget):

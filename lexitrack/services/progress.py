@@ -15,6 +15,13 @@ Four groups answer "which words did I learn here?":
   tab) before the schedule got there.
 * **Known before** - Known without ever being studied here; only counted.
 
+Memory and skill are shown apart, as the engine keeps them: *memory* is how
+long a word is expected to be remembered (the cards), *skill* what the
+learner has shown they can do with it (``learning_attempts``, through
+:class:`SkillTracker`). Evidence that is neither a stage nor a schedule —
+retrieval that came instantly on several days, a word remembered after a long
+gap, a word retrieved in a context never seen before — is counted on its own.
+
 The calibration check compares what the scheduler predicted with what the user
 then did. It is the honest answer to "does the algorithm fit me?", and it
 needs no training: see :meth:`ProgressService.calibration`.
@@ -29,18 +36,28 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..database.connection import Database
+from ..models.attempt import MemoryResult, Role, Task
+from ..models.skill import SkillStage, WordSkill
 from ..models.srs import CardState, Channel, Rating, ReviewLogEntry, SrsCard
 from ..models.user_word_state import ReviewStatus, StatusCause, StatusEvent
 from ..repositories import (
+    AttemptRepository,
     CardRepository,
     PlanRepository,
     StateRepository,
     StoredWord,
     WordRepository,
 )
+from .skill_tracker import SkillTracker
 
 if TYPE_CHECKING:
     from .learning_service import LearningService
+
+#: A word remembered after this many days without a review has shown memory
+#: that outlasts the ordinary schedule.
+LONG_INTERVAL_DAYS = 30
+#: The Overview's recent window.
+RECENT_DAYS = 30
 
 
 class Group(StrEnum):
@@ -68,6 +85,8 @@ class WordProgress:
     days_to_known: int | None
     answers: int
     agains: int
+    #: What the record shows the learner can do with the word.
+    skill: WordSkill | None = None
 
     @property
     def struggling(self) -> bool:
@@ -96,6 +115,10 @@ class JourneyStep:
     status_to: ReviewStatus | None = None
     cause: StatusCause | None = None
     reconstructed: bool = False
+    #: What the answer asked, when the review recorded it (version 5 on).
+    asked: Task | None = None
+    #: What the answer showed about the memory, when recorded.
+    memory_result: MemoryResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +141,8 @@ class WordJourney:
     mastery_days: float
     #: The last answer that still counts: why the word is due when it is.
     last_answer: JourneyStep | None
+    #: What the record shows the learner can do with it; None before study.
+    skill: WordSkill | None = None
 
     @property
     def introduced_on(self) -> str | None:
@@ -207,6 +232,45 @@ class AnswerRow:
     entry: ReviewLogEntry
     word: str
     day: str
+    #: What the answer asked, when the review recorded it.
+    asked: Task | None = None
+
+    @property
+    def memory_result(self) -> MemoryResult | None:
+        return _memory_result(self.entry.memory_result)
+
+
+@dataclass(frozen=True, slots=True)
+class SkillOverview:
+    """What the studied words' record shows, beside where their memory stands."""
+
+    #: Encountered, Recognised, Recalled, Productive: every studied word once.
+    stages: tuple[PipelineStage, ...]
+    #: Words retrieved instantly, above recognition, on several days.
+    automatic: int
+    #: Words remembered after LONG_INTERVAL_DAYS or more without a review.
+    long_interval: int
+    #: Words retrieved in a context they had not been seen in.
+    new_context: int
+    #: Words whose only evidence is answers from before version 5, which
+    #: asked word → meaning and so show recognition at most.
+    only_v1: int
+
+
+@dataclass(frozen=True, slots=True)
+class RecentTotals:
+    """The last so many learning days, today included."""
+
+    days: int
+    answers: int
+    agains: int
+    introduced: int
+    #: Studied words in long-term memory now, Known or not.
+    long_term: int
+
+    @property
+    def again_rate(self) -> float | None:
+        return self.agains / self.answers if self.answers else None
 
 
 class ProgressService:
@@ -219,6 +283,8 @@ class ProgressService:
         self._state = StateRepository(database)
         self._words = WordRepository(database)
         self._plans = PlanRepository(database)
+        self._attempts = AttemptRepository(database)
+        self._skills = SkillTracker(database)
 
     @property
     def database(self) -> Database:
@@ -236,6 +302,7 @@ class ProgressService:
         known = self._known_events()
         clock = self._engine.clock
         threshold = self._engine.settings.mastery_stability_days
+        skills = self._skills.skills(card.word_id for card in cards)
         rows: list[WordProgress] = []
         for card in cards:
             word = words.get(card.word_id)
@@ -264,6 +331,7 @@ class ProgressService:
                     days_to_known=days,
                     answers=answers,
                     agains=agains,
+                    skill=skills.get(card.word_id),
                 )
             )
         rows.sort(key=lambda row: (row.introduced_on, row.word.word.casefold()), reverse=True)
@@ -302,6 +370,7 @@ class ProgressService:
             self._cards.logs_for_word(word.id, limit=10_000),
             key=lambda log: (log.reviewed_at, log.id or 0),
         )
+        asked = _asked(self._attempts.for_word(word.id, include_undone=True))
         for log in logs:
             steps.append(
                 JourneyStep(
@@ -315,6 +384,8 @@ class ProgressService:
                     interval_days=log.scheduled_days,
                     channel=log.channel,
                     undone=log.undone_at is not None,
+                    asked=asked.get(log.id) if log.id is not None else None,
+                    memory_result=_memory_result(log.memory_result),
                 )
             )
         events = self._state.events_for_word(word.id)
@@ -375,6 +446,7 @@ class ProgressService:
             due_today=due_today,
             mastery_days=threshold,
             last_answer=last,
+            skill=self._skills.skill(word.id) if card is not None or logs else None,
         )
 
     # -- everything answered -----------------------------------------------
@@ -383,8 +455,14 @@ class ProgressService:
         """Every answer ever given, newest first, including those taken back."""
         logs = self._cards.all_logs()
         words = {w.id: w.word for w in self._words.get_many({log.word_id for log in logs})}
+        asked = _asked(self._attempts.all(include_undone=True))
         rows = [
-            AnswerRow(entry=log, word=words.get(log.word_id, "?"), day=log.reviewed_on)
+            AnswerRow(
+                entry=log,
+                word=words.get(log.word_id, "?"),
+                day=log.reviewed_on,
+                asked=asked.get(log.id) if log.id is not None else None,
+            )
             for log in logs
         ]
         rows.reverse()
@@ -418,6 +496,64 @@ class ProgressService:
             in_progress=sum(1 for row in rows if row.group is Group.IN_PROGRESS),
         )
 
+    def recent(
+        self, rows: list[WordProgress] | None = None, days: int = RECENT_DAYS
+    ) -> RecentTotals:
+        """The last ``days`` learning days, today included."""
+        rows = self.words() if rows is None else rows
+        clock = self._engine.clock
+        first = clock.shift_days(-(days - 1))
+        logs = [
+            log
+            for log in self._cards.all_logs(include_undone=False)
+            if log.reviewed_on >= first
+        ]
+        threshold = self._engine.settings.mastery_stability_days
+        return RecentTotals(
+            days=days,
+            answers=len(logs),
+            agains=sum(1 for log in logs if log.rating is Rating.AGAIN),
+            introduced=sum(1 for row in rows if row.introduced_on >= first),
+            long_term=sum(
+                1 for row in rows if row.stability is not None and row.stability >= threshold
+            ),
+        )
+
+    def skill_overview(self, rows: list[WordProgress] | None = None) -> SkillOverview:
+        """Where the studied words' skill stands, and the evidence beside it."""
+        rows = self.words() if rows is None else rows
+        skills = [row.skill for row in rows if row.skill is not None]
+        counts = Counter(skill.stage for skill in skills)
+        studied = {row.word.id for row in rows}
+        remembered_late = {
+            log.word_id
+            for log in self._cards.all_logs(include_undone=False)
+            if log.word_id in studied
+            and log.rating is not Rating.AGAIN
+            and (log.elapsed_days or 0) >= LONG_INTERVAL_DAYS
+        }
+        return SkillOverview(
+            stages=tuple(
+                PipelineStage(stage.label, counts[stage])
+                for stage in (
+                    SkillStage.ENCOUNTERED,
+                    SkillStage.RECOGNIZED,
+                    SkillStage.RECALLED,
+                    SkillStage.PRODUCTIVE,
+                )
+            ),
+            automatic=sum(1 for skill in skills if skill.automatic),
+            long_interval=len(remembered_late),
+            new_context=sum(1 for skill in skills if skill.novel_context),
+            only_v1=sum(
+                1
+                for skill in skills
+                if skill.from_v1
+                and skill.from_v1 == skill.recognized + skill.failures
+                and skill.recalled == 0
+            ),
+        )
+
     # -- charts --------------------------------------------------------------
 
     def pipeline(self, rows: list[WordProgress] | None = None) -> list[PipelineStage]:
@@ -430,6 +566,10 @@ class ProgressService:
                 stages["known"] += 1
             elif row.stability is None:
                 stages["new"] += 1
+            elif row.stability >= threshold:
+                # Long-term, and offered as Known: the user has not said yes.
+                # Checked first, so a low threshold never hides it as fragile.
+                stages["ready"] += 1
             elif row.stability < 3:
                 stages["short"] += 1
             elif row.stability < 7:
@@ -441,6 +581,7 @@ class ProgressService:
             PipelineStage("Under 3 days", stages["short"]),
             PipelineStage("3 to 7 days", stages["week"]),
             PipelineStage(f"7 to {threshold:g} days", stages["near"]),
+            PipelineStage("Long-term, not Known yet", stages["ready"]),
             PipelineStage("Known", stages["known"]),
         ]
 
@@ -533,6 +674,22 @@ class ProgressService:
             elif event.word_id in latest:
                 del latest[event.word_id]
         return latest
+
+
+def _asked(attempts) -> dict[int, Task]:
+    """The task of the first, measuring attempt behind each answer, by answer id."""
+    found: dict[int, Task] = {}
+    for attempt in attempts:
+        if attempt.review_log_id is not None and attempt.role is Role.PRIMARY:
+            found.setdefault(attempt.review_log_id, attempt.task)
+    return found
+
+
+def _memory_result(value: str | None) -> MemoryResult | None:
+    try:
+        return MemoryResult(value) if value else None
+    except ValueError:
+        return None
 
 
 def _group(

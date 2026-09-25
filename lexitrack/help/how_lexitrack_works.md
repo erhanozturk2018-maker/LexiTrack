@@ -110,7 +110,7 @@ Nothing is hidden from you.
 
 - **Every answer** from Today and Telegram, with its time, the answer, how
   long you were expected to remember the word afterwards and where you
-  answered. See it in *Progress → All answers*, or save it as a spreadsheet
+  answered. See it in *Progress → Answers*, or save it as a spreadsheet
   from *Settings → Data → Export history*.
 - **Every change of status** - Known, Unknown, reset - with its cause: the
   schedule, a button, Sort words or Undo.

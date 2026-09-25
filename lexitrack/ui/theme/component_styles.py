@@ -517,4 +517,12 @@ QPushButton[size="small"] {{
     font-size: 13px;
     min-height: 16px;
 }}
+
+/* "size" is a property every QWidget already has (its width and height), so
+   the rule above never matches; "compact" is free. */
+QPushButton[compact="true"] {{
+    padding: 4px 12px;
+    font-size: 13px;
+    min-height: 16px;
+}}
 """

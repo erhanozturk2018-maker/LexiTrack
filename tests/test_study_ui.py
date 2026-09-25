@@ -415,7 +415,7 @@ class TestProgressPage:
         studied.show_page(PROGRESS)
         table = studied.progress.answers_table
         assert table.rowCount() == 25
-        marks = [table.item(row, 6).text() for row in range(table.rowCount())]
+        marks = [table.item(row, 7).text() for row in range(table.rowCount())]
         assert marks.count("taken back") == 1
 
     def test_a_row_opens_the_words_history(self, studied) -> None:

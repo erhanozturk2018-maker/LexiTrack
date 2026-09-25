@@ -66,6 +66,19 @@ class Task(StrEnum):
     def level(self) -> Level:
         return _TASK_LEVEL[self]
 
+    @property
+    def label(self) -> str:
+        """What was asked, as a word's history and the answers table say it."""
+        return {
+            "word_to_meaning": "Recall the meaning",
+            "choose_word": "Choose the word among four",
+            "meaning_to_word": "Type the word from its meaning",
+            "situation_to_word": "Type the word for a situation",
+            "context_cloze": "Complete a sentence",
+            "collocation": "Complete a phrase",
+            "production": "Write a sentence with it",
+        }[self.value]
+
 
 _TASK_LEVEL = {
     Task.WORD_TO_MEANING: Level.WORD_TO_MEANING,
@@ -97,6 +110,15 @@ class MemoryResult(StrEnum):
     #: harder retrieval failed. The memory is there; the access is weak.
     RECOGNIZED = "RECOGNIZED"
     FORGOTTEN = "FORGOTTEN"
+
+    @property
+    def label(self) -> str:
+        return {
+            "RECALLED": "Recalled",
+            "RECALLED_EFFORT": "Recalled with effort",
+            "RECOGNIZED": "Recognised only",
+            "FORGOTTEN": "Forgotten",
+        }[self.value]
 
 
 class Depth(StrEnum):
