@@ -16,10 +16,12 @@ itself is the learner's, but never above :data:`HARD_CEILING` — past that
 number a session is too long to finish, and an unfinished session is where
 reviewing stops for good.
 
-**The order** starts with a warm-up of a few of the easiest words (highest
-chance of recall), so a session does not open on failures, then mixes the
-fragile words in, at most one in every few, so they get attention without
-turning the session into a string of misses. Both numbers are settings.
+**The order** starts with a warm-up of a few of the easiest *normal* words
+(highest chance of recall; never an at-risk one), so a session does not open
+on failures, then mixes the fragile words in, at most one in every few, so
+they get attention without turning the session into a string of misses. When
+there are too many fragile words for that, they are spread evenly through the
+session instead of left together at the end. Both numbers are settings.
 """
 
 from __future__ import annotations
@@ -100,23 +102,45 @@ def build(
     kept_others = others[: max(limit - len(kept_fragile), 0)]
     left_over = len(cards) - len(kept_fragile) - len(kept_others)
 
-    # The warm-up: the easiest of what is kept.
-    easiest = sorted(kept_others, key=lambda c: (-chance(c), c.word_id))[: max(warm_up, 0)]
+    # The warm-up: the easiest of the normal words kept — never an at-risk
+    # one. Fewer normal words make a shorter warm-up, not a harder one.
+    normal = [c for c in kept_others if kinds[c.word_id] is Bucket.NORMAL]
+    easiest = sorted(normal, key=lambda c: (-chance(c), c.word_id))[: max(warm_up, 0)]
     easy_ids = {c.word_id for c in easiest}
     rest = [c for c in kept_others if c.word_id not in easy_ids]
 
     ordered: list[SrsCard] = list(easiest)
     step = max(fragile_every, 1)
-    pending_fragile = list(kept_fragile)
-    since_fragile = 0
-    for card in rest:
-        if pending_fragile and since_fragile >= step - 1:
-            ordered.append(pending_fragile.pop(0))
-            since_fragile = 0
-        ordered.append(card)
-        since_fragile += 1
-    if pending_fragile and since_fragile >= step - 1:
-        ordered.append(pending_fragile.pop(0))
-    # Nothing else left to mix them into: they come at the end, together.
-    ordered.extend(pending_fragile)
+    if len(kept_fragile) * (step - 1) <= len(rest):
+        # One fragile word in every `step`, after `step - 1` others.
+        pending_fragile = list(kept_fragile)
+        since_fragile = 0
+        for card in rest:
+            if pending_fragile and since_fragile >= step - 1:
+                ordered.append(pending_fragile.pop(0))
+                since_fragile = 0
+            ordered.append(card)
+            since_fragile += 1
+        ordered.extend(pending_fragile)
+    else:
+        # Too many fragile words to keep one in `step`: spread evenly through
+        # the session rather than left together at the end.
+        ordered += _spread(rest, kept_fragile)
     return Queue(cards=tuple(ordered), buckets=kinds, left_over=left_over)
+
+
+def _spread(others: Sequence[SrsCard], fragile: Sequence[SrsCard]) -> list[SrsCard]:
+    """``others`` and ``fragile`` merged, the fragile ones as evenly apart as
+    their number allows, each list keeping its own order."""
+    total = len(others) + len(fragile)
+    merged: list[SrsCard] = []
+    it_others, it_fragile = iter(others), iter(fragile)
+    placed = 0
+    for position in range(total):
+        due = (position + 1) * len(fragile) // total
+        if due > placed:
+            merged.append(next(it_fragile))
+            placed += 1
+        else:
+            merged.append(next(it_others))
+    return merged

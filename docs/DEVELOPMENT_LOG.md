@@ -1038,3 +1038,10 @@ their languages); `export_dataset` (every enriched word, every language,
 `kind: dataset`, `dataset_version`, re-importable through the preview); and
 quality warnings in the preview (`_quality`: collocations without the word
 or outside 2–5, more than 3 contexts, a requested language left empty).
+
+## 2026-09-26 — Learning plan gaps, step 10: queue edge cases
+
+The warm-up takes normal words only; fragile words too many for one in four
+are spread evenly (`review_queue._spread`) instead of appended together.
+A test's expected order changed with it: three fragile words among seven
+others now read …FnnFnnF instead of …FnnnFnF.

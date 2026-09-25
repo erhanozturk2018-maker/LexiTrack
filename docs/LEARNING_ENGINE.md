@@ -162,12 +162,18 @@ is **fragile** (flagged as hard, relearning, or under 2 days of stability),
 - **Over the limit**, the fragile words are kept first, then the rest by
   lowest chance of recall. What is left waits for another day, and the Today
   card says how many.
-- **The order**: a warm-up of the 3 easiest words kept (highest chance of
-  recall), so a session does not open on a miss; then the fragile words mixed
-  in, at most one in every 4. Both numbers are settings (Advanced).
+- **The order**: a warm-up of the 3 easiest **normal** words kept (highest
+  chance of recall; never an at-risk one — fewer normal words make a shorter
+  warm-up), so a session does not open on a miss; then the fragile words
+  mixed in, at most one in every 4. When there are too many fragile words for
+  that, they are spread evenly through the session rather than left together
+  at the end. Both numbers are settings (Advanced).
 - **Intake** protects today and tomorrow: new words pause when today's due
   reviews already reach the limit, and shrink when today's new words — all
   due tomorrow — would take tomorrow past it. The card says which, and why.
+  Tomorrow is where the load new words add lands (their first review); the
+  days after carry what earlier reviews already scheduled, which the
+  forecast shows but intake does not try to steer.
 
 ### First learning
 

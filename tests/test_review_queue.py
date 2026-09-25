@@ -66,9 +66,9 @@ def test_a_warm_up_of_the_easiest_then_one_fragile_in_every_four() -> None:
     order = [c.word_id for c in queue.cards]
     assert order[:3] == [10, 9, 8], "the three most likely to be remembered"
     kinds = ["F" if queue.buckets[i] is Bucket.FRAGILE else "n" for i in order]
-    # Warm-up, then one fragile after every three others; the last comes as
-    # the others run out.
-    assert "".join(kinds) == "nnnnnnFnnnFnF"
+    # Warm-up, then the fragile words: seven others cannot keep them one in
+    # four, so they are spread evenly rather than bunched at the end.
+    assert "".join(kinds) == "nnnnnnFnnFnnF"
     assert [i for i in order if i > 100] == [103, 102, 101], "most lapses first"
     # Never two fragile words in a row while there is anything to put between.
     assert "FF" not in "".join(kinds)
@@ -78,3 +78,39 @@ def test_with_nothing_to_mix_them_into_the_fragile_come_together() -> None:
     fragile = [card(i, flagged=True) for i in range(1, 4)]
     queue = build(fragile, {}, capacity=250)
     assert [c.word_id for c in queue.cards] == [1, 2, 3]
+
+
+def test_one_in_four_holds_when_there_are_enough_others() -> None:
+    normal = [card(i) for i in range(1, 14)]
+    fragile = [card(100 + i, flagged=True) for i in range(1, 4)]
+    recall = {c.word_id: 0.85 for c in normal} | {c.word_id: 0.5 for c in fragile}
+    queue = build(normal + fragile, recall, capacity=250, warm_up=3, fragile_every=4)
+    kinds = "".join("F" if queue.buckets[c.word_id] is Bucket.FRAGILE else "n"
+                    for c in queue.cards)
+    # Warm-up of three, then a fragile word after every three others.
+    assert kinds == "nnn" + "nnnF" * 3 + "n"
+
+
+def test_many_fragile_words_are_spread_not_left_at_the_end() -> None:
+    normal = [card(i) for i in range(1, 7)]
+    fragile = [card(100 + i, flagged=True) for i in range(1, 10)]
+    recall = {c.word_id: 0.9 for c in normal} | {c.word_id: 0.4 for c in fragile}
+    queue = build(normal + fragile, recall, capacity=250, warm_up=3, fragile_every=4)
+    kinds = "".join("F" if queue.buckets[c.word_id] is Bucket.FRAGILE else "n"
+                    for c in queue.cards)
+    assert kinds.startswith("nnn"), "the warm-up first"
+    tail = kinds[3:]
+    assert "nnn" not in tail and not tail.endswith("FFFFFF"), tail
+    # Nine fragile among twelve after the warm-up: never more than three in a row.
+    assert "FFFF" not in tail
+
+
+def test_the_warm_up_is_normal_words_only() -> None:
+    at_risk = [card(i) for i in range(1, 6)]
+    normal = [card(50)]
+    recall = {c.word_id: 0.7 for c in at_risk} | {50: 0.95}
+    queue = build(at_risk + normal, recall, capacity=250, warm_up=3)
+    first = queue.cards[0]
+    assert first.word_id == 50 and queue.buckets[first.word_id] is Bucket.NORMAL
+    # One normal word: a warm-up of one, and the at-risk words follow in order.
+    assert [c.word_id for c in queue.cards[1:]] == [1, 2, 3, 4, 5]
