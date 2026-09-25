@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from html import escape
 
-from PySide6.QtCore import QElapsedTimer, QEvent, Qt, Signal
+from PySide6.QtCore import QElapsedTimer, QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -64,6 +65,8 @@ REPORT_RATING = {
 }
 
 CARD_WIDTH = 640
+#: The teaching page's height before it scrolls inside the card.
+TEACH_MAX_HEIGHT = 440
 
 
 def _label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
@@ -167,6 +170,8 @@ class ReviewCard(QFrame):
     assessed = Signal(object)
     #: A sentence written for a WRITE step, before its report.
     written_sentence = Signal(str)
+    #: "More about this word" on a new word's page.
+    more_requested = Signal()
     #: Enter after feedback, or on a teaching page.
     continue_requested = Signal()
     undo_requested = Signal()
@@ -379,8 +384,41 @@ class ReviewCard(QFrame):
         face, layout = self._face()
         self.teach_label = _label("", "TeachText", wrap=True)
         self.teach_label.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(self.teach_label)
+        # A full page can be taller than the window: it scrolls inside the
+        # card rather than being cut off, and is only as tall as it needs.
+        self.teach_scroll = QScrollArea()
+        self.teach_scroll.setObjectName("TeachScroll")
+        self.teach_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.teach_scroll.setWidgetResizable(True)
+        self.teach_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.teach_scroll.setWidget(self.teach_label)
+        layout.addWidget(self.teach_scroll)
+        self.more_button = QPushButton("More about this word   M")
+        self.more_button.setObjectName("FooterAction")
+        self.more_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.more_button.setToolTip("Everything stored about it: nuance, usage, register, related")
+        self.more_button.clicked.connect(self.more_requested)
+        self.more_button.hide()
+        layout.addWidget(self.more_button, 0, Qt.AlignmentFlag.AlignLeft)
         return face
+
+    def _refit_teaching(self) -> None:
+        if self.step is not None and self.step.kind is StepKind.TEACH:
+            self._fit_teaching()
+            self._relayout()
+
+    def _fit_teaching(self) -> None:
+        # Measured at the width the text really has, once laid out; the
+        # label's 12 px padding above and below is not in its height-for-width.
+        width = self.teach_scroll.viewport().width()
+        if width < 200:
+            width = CARD_WIDTH - 2 * METRICS.space_6
+        needed = self.teach_label.heightForWidth(width) + 26
+        self.teach_scroll.setFixedHeight(min(max(needed, 60), TEACH_MAX_HEIGHT))
+        self.teach_scroll.verticalScrollBar().setValue(0)
+
+    def set_more(self, available: bool) -> None:
+        self.more_button.setVisible(available)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         if event.type() == QEvent.Type.KeyPress and event.key() in (
@@ -479,6 +517,12 @@ class ReviewCard(QFrame):
             self.feedback_row.show()
             self.waiting = True
         self._relayout()
+        if kind is StepKind.TEACH:
+            self._fit_teaching()
+            self._relayout()
+            # Shown for the first time, the page has its real width only once
+            # the layout has settled: measured again then.
+            QTimer.singleShot(0, self._refit_teaching)
         self._timer.restart()
 
     def show_intervals(self, preview: dict[Rating, int]) -> None:
@@ -667,6 +711,8 @@ def _teaching_html(step: Step) -> str:
     # Content comes from imported files: shown as text, never as markup.
     for title, text in page.sections:
         block(title, escape(text))
+    if page.note:
+        parts.append(f"<p style='margin:0 0 8px 0'><i>{escape(page.note)}</i></p>")
     if page.examples:
         block("In use", "<br>".join(
             f"“{escape(sentence)}”" + (f"<br><i>{escape(translated)}</i>" if translated else "")

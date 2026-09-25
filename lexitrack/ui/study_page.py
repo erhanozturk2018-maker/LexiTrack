@@ -480,6 +480,7 @@ class StudyPage(QWidget):
         card.chosen.connect(self._on_chosen)
         card.assessed.connect(self._on_assessed)
         card.written_sentence.connect(self._on_written)
+        card.more_requested.connect(self._more)
         card.continue_requested.connect(self._continue)
         card.undo_requested.connect(self.undo_last)
         # The card's parts, by the names the page has always had.
@@ -799,6 +800,7 @@ class StudyPage(QWidget):
             self.end_session()
             return
         self.card.show_step(step, intervals=self.flow.intervals())
+        self.card.set_more(self.flow.can_show_more())
         self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
         # A step half answered before the app closed comes back as it stood.
@@ -837,6 +839,10 @@ class StudyPage(QWidget):
 
     def _on_submitted(self, text: str, response_ms: int, hinted: bool) -> None:
         self._show_feedback(self.flow.submit(text, response_ms, hinted))
+
+    def _more(self) -> None:
+        if self.flow.more():
+            self._show_card()
 
     def _on_written(self, sentence: str) -> None:
         self.flow.note_written(sentence)
@@ -911,6 +917,9 @@ class StudyPage(QWidget):
         enter = key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter)
         if self.card.waiting and enter:
             self._continue()
+            return
+        if key == Qt.Key.Key_M and self.card.waiting:
+            self._more()
             return
         step = self.flow.current
         number = _NUMBER_KEYS.get(key)

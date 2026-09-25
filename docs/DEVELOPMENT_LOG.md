@@ -977,3 +977,23 @@ A repair TEACH step carries the level it repairs (`Step.focus`) and
 `teaching_page` makes it short; relearning stays whole. Every follow-up
 page holds back the context its re-ask uses (`Step.hold_back`) — before,
 the page could print the very sentence the next question blanked out.
+
+## 2026-09-26 — Learning plan gaps, step 5: first learning
+
+New `Step.infer` (a context page before teaching), the mnemonic at LIGHT,
+register and related words at DEEP, a SHORT note (`TeachingPage.note`),
+`ReviewFlow.more()` behind *More about this word* (desktop, key M; Telegram
+button), and the introduction page holding back its second question's
+sentence.
+
+**Problems and solutions**
+
+- A full DEEP page was taller than the window and cut off at the bottom:
+  the teaching text now scrolls inside the card past 440 px, sized to its
+  content below that.
+- Sizing it: Qt's height-for-width leaves out the label's padding, and a
+  page shown for the first time has its real width only after layout — so
+  it is measured at the real width, padding added, and again once the
+  layout settles.
+- With one sentence, the guess page took it and the later context question
+  disappeared; that sentence is now reused, blanked, cards later.

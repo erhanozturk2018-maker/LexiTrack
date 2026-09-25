@@ -229,6 +229,7 @@ class BotCore:
             note=note,
             can_undo=flow.can_undo(),
             known_word=known_word,
+            more=flow.can_show_more(),
         )
 
     async def _show(
@@ -311,6 +312,8 @@ class BotCore:
         report = SelfReport(value) if value in SelfReport._value2member_map_ else None
         if kind is StepKind.TEACH and value == "go":
             return flow.proceed() or None
+        if kind is StepKind.TEACH and value == "more":
+            return flow.more() or None
         if kind is StepKind.TYPE and value == "dk" and not flow.awaiting:
             return flow.submit("")
         if kind is StepKind.TYPE and flow.awaiting and report is not None and report.success:

@@ -204,6 +204,7 @@ def step_card(
     note: str | None = None,
     can_undo: bool = False,
     known_word: tuple[int, str] | None = None,
+    more: bool = False,
 ) -> Message:
     """One step of the session, sent as a message of its own.
 
@@ -237,11 +238,15 @@ def step_card(
                 lines.append(f"“{escape(sentence)}”")
                 if translated:
                     lines.append(f"<i>{escape(translated)}</i>")
-        if page.empty:
+        if page.note:
+            lines += ["", f"<i>{escape(page.note)}</i>"]
+        elif page.empty:
             lines += ["", "<i>No more is stored about this word yet.</i>"]
         if step.reason:
             lines += ["", f"<i>{escape(step.reason)}</i>"]
         rows.append((("Continue →", act("go")),))
+        if more:
+            rows.append((("More about this word", act("more")),))
     elif step.kind is StepKind.TYPE and prompt is not None:
         lines += ["", escape(prompt.text)]
         if prompt.detail:

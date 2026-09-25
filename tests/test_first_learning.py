@@ -209,10 +209,17 @@ def test_a_light_word_is_asked_again_from_a_context_after_the_next_group(
     flow.start()
     steps = _kinds(flow)
     arid = [i for i, (_, word) in enumerate(steps) if word == "arid"]
-    assert len(arid) == 3, "taught, asked, asked again"
-    second_group_teaching = [i for i, (kind, _) in enumerate(steps) if kind == "teach"][4]
-    assert arid[2] > second_group_teaching, "the second question waits for the next group"
-    assert flow._steps[arid[2]].prompt.context_id is not None
+    assert len(arid) == 4, "met in a sentence, taught, asked, asked again"
+    assert flow._steps[arid[0]].infer is not None
+    taught_words: list[str] = []
+    for kind, word in steps:
+        if kind == "teach" and word not in taught_words:
+            taught_words.append(word)
+    fifth = taught_words[4]  # the first word of the next group
+    first_of_next_group = next(i for i, (kind, w) in enumerate(steps) if w == fifth)
+    assert arid[3] > first_of_next_group, "the second question waits for the next group"
+    # Its only sentence: met with the word shown, asked blanked cards later.
+    assert flow._steps[arid[3]].prompt.context_id is not None
 
 
 def test_reviews_come_before_new_words(
@@ -242,3 +249,107 @@ def test_leaving_early_keeps_what_was_learned_and_offers_the_rest_again(
     assert summary.learned == 1
     offered = {word.id for word in engine.daily_plan().new_words}
     assert first.id not in offered and len(offered) == len(WORDS)
+
+
+# -- the route: context, guess, meaning, a way to remember it, use ----------------
+
+
+def _rich(database: Database, word: str = "arid", deep: bool = False) -> int:
+    from lexitrack.models.content import DepthHint, Related
+
+    word_id = _ids(database)[word]
+    repo = ContentRepository(database)
+    repo.save_content(WordContent(
+        word_id=word_id, pattern=f"{word} land", collocations=(f"an {word} climate",),
+        register="formal", related=(Related("humid", "opposite"),),
+        depth_hint=DepthHint.DEEP if deep else None,
+    ))
+    repo.save_localization(WordLocalization(
+        word_id=word_id, learner_language="de", core_meaning="trocken",
+        encoding_cue="cue-de", nuance="nuance-de",
+    ))
+    repo.add_contexts([
+        WordContext(word_id=word_id, text=f"The land was {{{{{word}}}}} for years."),
+        WordContext(word_id=word_id, text=f"An {{{{{word}}}}} summer ruined the crops."),
+    ])
+    for context in repo.contexts(word_id):
+        repo.save_translation(context.id, "de", "translation-de")
+    return word_id
+
+
+def _pages(flow: ReviewFlow, word_id: int):
+    return [s for s in flow._steps if s.word.id == word_id and s.kind is StepKind.TEACH]
+
+
+def test_a_light_word_is_met_in_a_sentence_then_taught_with_a_cue(
+    engine: LearningService, database: Database
+) -> None:
+    from lexitrack.services.review_wording import teaching_page
+
+    word_id = _rich(database)
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    flow = ReviewFlow(engine)
+    flow.start()
+    infer, page = _pages(flow, word_id)
+    guess = teaching_page(infer)
+    assert guess.sections == () and len(guess.examples) == 1
+    assert guess.examples[0][1] is None, "no translation: it would give the meaning away"
+    assert "Guess" in guess.note
+    taught = teaching_page(page)
+    titles = [title for title, _ in taught.sections]
+    assert titles[:4] == ["Meaning", "Definition", "To remember", "Pattern"]
+    assert "Register" not in titles, "LIGHT stays light"
+    second = next(s for s in flow._steps
+                  if s.word.id == word_id and s.prompt and s.prompt.context_id)
+    assert page.hold_back == (second.prompt.context_id,)
+    shown = [sentence for sentence, _ in taught.examples]
+    held = next(c for c in page.teaching.contexts if c.id == second.prompt.context_id)
+    assert held.plain not in shown, "the page never shows the sentence asked later"
+
+
+def test_a_deep_word_shows_register_and_related(
+    engine: LearningService, database: Database
+) -> None:
+    from lexitrack.services.review_wording import teaching_page
+
+    word_id = _rich(database, deep=True)
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    flow = ReviewFlow(engine)
+    flow.start()
+    _infer, page = _pages(flow, word_id)
+    titles = [title for title, _ in teaching_page(page).sections]
+    assert {"Nuance", "Register", "Related", "To remember"} <= set(titles)
+    related = dict(teaching_page(page).sections)["Related"]
+    assert related == "humid (opposite)"
+
+
+def test_a_short_word_says_what_is_missing(engine: LearningService) -> None:
+    from lexitrack.services.review_wording import teaching_page
+
+    flow = ReviewFlow(engine)
+    flow.start()
+    page = flow.current
+    assert page.kind is StepKind.TEACH and page.depth is Depth.SHORT
+    assert "Only the definition is stored" in teaching_page(page).note
+    assert not flow.can_show_more() and not flow.more(), "nothing more to show"
+
+
+def test_more_about_this_word_teaches_it_in_full(
+    engine: LearningService, database: Database
+) -> None:
+    word_id = _rich(database)
+    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
+    flow = ReviewFlow(engine)
+    flow.start()
+    while flow.current.word.id != word_id or flow.current.infer is not None:
+        step = flow.current
+        if step.kind is StepKind.TEACH:
+            flow.proceed()
+        else:
+            say(flow, step.prompt.accepted[0])
+    assert flow.current.depth is Depth.LIGHT and flow.can_show_more()
+    number = flow.step_number
+    assert flow.more()
+    assert flow.current.depth is Depth.DEEP and flow._runs[word_id].depth is Depth.DEEP
+    assert flow.step_number == number, "the same page, told more"
+    assert not flow.more(), "already everything"

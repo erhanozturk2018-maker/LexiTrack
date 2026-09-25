@@ -75,6 +75,8 @@ class TeachingPage:
     sections: tuple[tuple[str, str], ...]
     #: (sentence, translation or None), under "In use".
     examples: tuple[tuple[str, str | None], ...]
+    #: A line about the page itself: what is missing, or what to do with it.
+    note: str | None = None
 
     @property
     def empty(self) -> bool:
@@ -101,6 +103,8 @@ def teaching_page(step: Step) -> TeachingPage:
     """
     if step.focus is not None:
         return _repair_page(step)
+    if step.infer is not None:
+        return _infer_page(step)
     depth = step.depth
     usage = depth is not Depth.SHORT
     everything = depth is None or depth is Depth.DEEP
@@ -114,8 +118,11 @@ def teaching_page(step: Step) -> TeachingPage:
         if text:
             sections.append((title, text))
 
+    # The route: the meaning, a way to hold on to it, then how it is used.
     add("Meaning", teaching.core_meaning if teaching else None)
     add("Definition", word.definition)
+    if localization and usage:
+        add("To remember", localization.encoding_cue)
     if content and usage:
         add("Pattern", content.pattern)
         if content.collocations:
@@ -123,13 +130,29 @@ def teaching_page(step: Step) -> TeachingPage:
     if localization and everything:
         add("Nuance", localization.nuance)
         add("How it is used", localization.usage_note)
-        add("To remember", localization.encoding_cue)
         add("Note", localization.notes)
+    if content and everything:
+        add("Register", content.register)
+        if content.related:
+            add("Related", " · ".join(f"{r.word} ({r.relation})" for r in content.related))
     examples: list[tuple[str, str | None]] = []
     if teaching and teaching.contexts and usage:
         for context in _shown_contexts(step)[: 2 if everything else 1]:
             examples.append((context.plain, teaching.translation(context)))
-    return TeachingPage(tuple(sections), tuple(examples))
+    note = None
+    if depth is Depth.SHORT:
+        note = "Only the definition is stored for this word yet; richer content can be added."
+    return TeachingPage(tuple(sections), tuple(examples), note)
+
+
+def _infer_page(step: Step) -> TeachingPage:
+    """A new word met in a sentence, its meaning held back for a guess."""
+    teaching = step.teaching
+    context = next((c for c in teaching.contexts if c.id == step.infer), None) if teaching else None
+    examples = ((context.plain, None),) if context is not None else ()
+    return TeachingPage(
+        (), examples, "What might it mean here? Guess, then continue: the meaning comes next."
+    )
 
 
 def _shown_contexts(step: Step) -> list:

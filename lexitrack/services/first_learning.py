@@ -8,13 +8,15 @@ hand:
 * **SHORT** — nothing is stored beyond the word's definition (or a meaning in
   the learner's language, with nothing else): the word and its meaning, then
   the word from its meaning. Most words start here until content is added.
-* **LIGHT** — content exists and the word is straightforward: its meaning,
-  pattern, collocations and one example, then the word from its meaning, and
-  later from a context if there is one.
+* **LIGHT** — content exists and the word is straightforward: met in a
+  sentence first, its meaning held back to be guessed; then its meaning, the
+  mnemonic, pattern, collocations and one example; then the word from its
+  meaning, and later from a context if there is one.
 * **DEEP** — the content says the word needs more: a ``deep`` depth hint, or
-  an abstract mnemonic (a contrast or a relation). Everything stored — nuance,
-  usage, the mnemonic, two examples — then the word from its meaning, and
-  later a second question in a different form.
+  an abstract mnemonic (a contrast or a relation); or the learner asks for
+  *More about this word*. Everything stored — nuance, usage, register,
+  related words, the mnemonic, two examples — then the word from its meaning,
+  and later a second question in a different form.
 
 **Adaptive**: a miss right after teaching means the word is taught again, one
 depth deeper when there is more to show, and asked again a few cards later —

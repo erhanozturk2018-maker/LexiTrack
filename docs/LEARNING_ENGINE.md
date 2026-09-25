@@ -178,9 +178,17 @@ from its content:
 
 | Depth | When | Taught | Asked |
 | --- | --- | --- | --- |
-| SHORT | nothing stored beyond the definition (or a bare meaning) | the meaning | the word from its meaning |
-| LIGHT | content, and nothing that says the word is hard | + pattern, collocations, one example | + later, from a context if there is one |
-| DEEP | a `deep` hint, or an abstract mnemonic (contrast, relation) | everything, two examples | + later, a second question in another form |
+| SHORT | nothing stored beyond the definition (or a bare meaning) | the meaning, and a line saying richer content is not stored yet | the word from its meaning |
+| LIGHT | content, and nothing that says the word is hard | met in a sentence first (meaning held back, to guess); then the meaning, the mnemonic, pattern, collocations, one example | + later, from a context if there is one |
+| DEEP | a `deep` hint, an abstract mnemonic (contrast, relation), or the learner's **More about this word** | the same start, then everything: nuance, usage, register, related words, two examples | + later, a second question in another form |
+
+The LIGHT and DEEP route is **context → guess the meaning → the meaning → a
+way to remember it → how it is used → retrieval**. The guess page shows the
+sentence without its translation, which would give the meaning away. A page
+never shows the sentence its word's later question blanks out; when a word
+has only one sentence, it is met there with the word shown and asked from it
+blanked, cards later. *Failed before* cannot trigger DEEP at introduction: a
+new word has no record yet; a miss right after teaching deepens it instead.
 
 Words go in groups of four: four taught, then four asked, and the second
 questions of a group after the next group is taught, so every question comes

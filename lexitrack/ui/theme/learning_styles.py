@@ -304,6 +304,7 @@ QPushButton#AnswerButton[result="wrong"] #AnswerTitle {{ color: {p.unknown_text}
 #FeedbackLabel {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
 #FeedbackLabel[tone="good"] {{ color: {p.known_text}; font-weight: 600; }}
 #FeedbackLabel[tone="bad"] {{ color: {p.unknown_text}; }}
+#TeachScroll, #TeachScroll > QWidget#qt_scrollarea_viewport {{ background: transparent; }}
 #ExamplesLabel, #TeachText {{
     font-size: 14px;
     color: {p.text};

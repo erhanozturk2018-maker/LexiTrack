@@ -1284,3 +1284,17 @@ a re-ask leaves out the context that re-ask will use.
 short got a full relearning, and a long page before a quick re-ask turns it
 into reading. Showing the very sentence the next question blanks out made
 the re-ask a copy, not a retrieval.
+
+## 83. A new word is met in context before it is explained
+
+**Decision.** A LIGHT or DEEP new word is first shown in a sentence, its
+meaning held back for the learner to guess, then taught: meaning, the
+mnemonic (now at LIGHT too), pattern and collocations, an example; DEEP adds
+nuance, usage, register and related words. SHORT says that richer content is
+missing. *More about this word* re-teaches a word at DEEP on request.
+
+**Reason.** The route in the learning plan is context → infer → meaning →
+encoding → retrieval; the mnemonic was shown only at DEEP, and register and
+related words were stored but never shown. A guess made before the meaning
+gives the meaning something to confirm or correct, which is what makes it
+stick; the translation is left off the guess page because it is the answer.

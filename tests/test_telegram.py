@@ -850,3 +850,11 @@ class TestWeeklySummary:
         clock.set(self.SUNDAY_EVENING)
         assert Notification.WEEKLY in run(bot.tick()), "counted as done for the week"
         assert not [m for _, m in outbox.sent if "Your week" in m.text]
+
+
+def test_a_new_words_page_offers_more_when_there_is_more() -> None:
+    word = StoredWord(id=1, word="arid", normalized_word="arid", definition="very dry")
+    step = Step(word, StepKind.TEACH)
+    with_more = step_card(step, "s", 3, 1, 4, more=True)
+    assert step_data("s", 3, "more") in FakeOutbox.callbacks(with_more)
+    assert step_data("s", 3, "more") not in FakeOutbox.callbacks(step_card(step, "s", 3, 1, 4))

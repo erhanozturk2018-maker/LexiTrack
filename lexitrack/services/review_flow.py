@@ -60,7 +60,7 @@ from ..models.content import WordTeaching
 from ..models.srs import Channel, Rating
 from ..repositories import AttemptRepository, ContentRepository, WordRepository
 from ..repositories.word_repository import StoredWord
-from .first_learning import choose_depth, deeper, groups, second_question
+from .first_learning import choose_depth, deeper, groups, has_content, second_question
 from .learning_service import AnswerOutcome, LearningService, StudyItem
 from .review_route import (
     MAX_CYCLES,
@@ -128,11 +128,16 @@ class Step:
     #: For TEACH: contexts kept off the page, because the question asked
     #: after it will use them.
     hold_back: tuple[int, ...] = ()
+    #: For a new word's first page: one context, the meaning held back, for
+    #: the learner to guess from before it is taught. The context's id.
+    infer: int | None = None
 
     @property
     def label(self) -> str:
         """What the step asks, in a few words, for the card's header."""
         if self.kind is StepKind.TEACH:
+            if self.infer is not None:
+                return "New word: in context"
             return {
                 Phase.INTRODUCTION: "New word",
                 Phase.RELEARN: "Relearn",
@@ -384,19 +389,82 @@ class ReviewFlow:
                 run = _Run(word=word, teaching=teaching, new=True, depth=choice.depth)
                 self._runs[word.id] = run
                 self._order.append(word.id)
-                taught.append(Step(word, StepKind.TEACH, phase=Phase.INTRODUCTION,
-                                   teaching=teaching, depth=choice.depth, reason=choice.reason))
+                # LIGHT and DEEP start from a context: the word met in use,
+                # its meaning guessed before it is given.
+                infer = self._infer_context(run) if choice.depth is not Depth.SHORT else None
+                if infer is not None:
+                    # Asked later from another sentence when there is one; with
+                    # only this one, it comes back blanked, cards later — still
+                    # a retrieval, since the word is not on screen then.
+                    if any(c.id != infer and c.target for c in teaching.contexts):
+                        run.contexts.add(infer)
+                    taught.append(Step(word, StepKind.TEACH, phase=Phase.INTRODUCTION,
+                                       teaching=teaching, depth=choice.depth, infer=infer,
+                                       reason="Guess what it means from the sentence."))
                 prompt = meaning_prompt(word, teaching)
+                second = None
+                if prompt is not None:
+                    run.sources.add(prompt.source)
+                    second = self._second_prompt(run) if second_question(choice.depth) else None
+                # The page never shows the sentence the second question blanks out.
+                held = (second.context_id,) if second is not None and second.context_id else ()
+                taught.append(Step(word, StepKind.TEACH, phase=Phase.INTRODUCTION,
+                                   teaching=teaching, depth=choice.depth, reason=choice.reason,
+                                   hold_back=held))
                 if prompt is not None:
                     asked.append(self._ask(run, prompt, Role.RETRIEVAL, Phase.INTRODUCTION,
                                            reason=_PRACTICE))
-                    second = self._second_prompt(run) if second_question(choice.depth) else None
                     if second is not None:
                         upcoming.append(self._ask(run, second, Role.RETRIEVAL,
                                                   Phase.INTRODUCTION, reason=_PRACTICE))
             steps += taught + later + asked
             later = upcoming
         return steps + later
+
+    @staticmethod
+    def _infer_context(run: _Run) -> int | None:
+        """A sentence to meet a new word in: the first one that marks it."""
+        for context in run.teaching.contexts:
+            if context.id is not None and context.target and context.kind.value == "sentence":
+                return context.id
+        return None
+
+    def can_show_more(self) -> bool:
+        """Whether "More about this word" would show anything on this page."""
+        step = self.current
+        if (
+            step is None
+            or step.kind is not StepKind.TEACH
+            or step.phase is not Phase.INTRODUCTION
+            or step.infer is not None
+            or step.depth is Depth.DEEP
+        ):
+            return False
+        run = self._runs.get(step.word.id)
+        return run is not None and has_content(run.teaching)
+
+    def more(self) -> bool:
+        """"More about this word" on a new word's page: taught again in full.
+
+        False when there is no more to show (already DEEP, or nothing stored
+        beyond the meaning) or the step on screen is not a new word's page.
+        """
+        step = self.current
+        if (
+            step is None
+            or step.kind is not StepKind.TEACH
+            or step.phase is not Phase.INTRODUCTION
+            or step.infer is not None
+        ):
+            return False
+        run = self._runs.get(step.word.id)
+        if run is None or step.depth is Depth.DEEP or not has_content(run.teaching):
+            return False
+        run.depth = Depth.DEEP
+        self._steps[0] = replace(step, depth=Depth.DEEP,
+                                 reason="Everything stored about it, as you asked.")
+        self._save()
+        return True
 
     def _second_prompt(self, run: _Run) -> Prompt | None:
         """A new word's second question: a context, else its meaning another way."""
@@ -990,6 +1058,7 @@ def _step_to_json(step: Step) -> dict:
         "depth": step.depth.value if step.depth else None,
         "focus": int(step.focus) if step.focus else None,
         "hold_back": list(step.hold_back),
+        "infer": step.infer,
     }
 
 
@@ -1008,6 +1077,7 @@ def _step_from_json(raw: dict, run: _Run, words: dict) -> Step:
         depth=Depth(raw["depth"]) if raw.get("depth") else None,
         focus=Level(raw["focus"]) if raw.get("focus") else None,
         hold_back=tuple(int(i) for i in raw.get("hold_back", [])),
+        infer=raw.get("infer"),
     )
 
 
