@@ -70,7 +70,8 @@ from .review_route import (
     next_probe,
     resolve,
 )
-from .task_selector import available_levels, choose_level, prompt_for
+from .skill_tracker import SkillTracker
+from .task_selector import available_levels, choose_level, lower_levels, prompt_for, repeats
 
 log = logging.getLogger(__name__)
 
@@ -206,6 +207,9 @@ class ReviewFlow:
         self._step_number = 0
         self._content = ContentRepository(engine.database)
         self._attempts = AttemptRepository(engine.database)
+        self._skills = SkillTracker(engine.database)
+        #: The kinds of the last first questions shown, for variety.
+        self._recent_tasks: list[Task] = []
         self._steps: list[Step] = []
         self._runs: dict[int, _Run] = {}
         self._order: list[int] = []
@@ -467,19 +471,46 @@ class ReviewFlow:
         word = run.word
         struggling = run.struggling
         history = self._attempts.for_word(word.id)
+        available = available_levels(word, run.teaching)
         choice = choose_level(
             history,
-            available_levels(word, run.teaching),
+            available,
             self._engine.retrievability(word.id),
+            self._skills.skill(word.id).level,
         )
         if choice is None:
             hide = run.item.hide_meaning if run.item else True
+            self._shown(Task.WORD_TO_MEANING)
             return Step(word, StepKind.RECALL, hide_meaning=hide, is_struggling=struggling,
                         reason="No meaning is stored to ask from, so the word is shown.")
-        prompt = prompt_for(
-            choice.level, word, run.teaching, history, self._attempts.context_uses(word.id)
-        ) or meaning_prompt(word, run.teaching)
-        return self._ask(run, prompt, Role.PRIMARY, Phase.REVIEW, struggling, choice.reason)
+        uses = self._attempts.context_uses(word.id)
+        prompt = prompt_for(choice.level, word, run.teaching, history, uses) or meaning_prompt(
+            word, run.teaching
+        )
+        reason = choice.reason
+        if repeats(self._recent_tasks, prompt.task):
+            other = self._other_kind(run, choice.level, prompt.task, available, history, uses)
+            if other is not None:
+                prompt = other
+                reason = f"{reason} Asked another way: the last two questions were alike."
+        self._shown(prompt.task)
+        return self._ask(run, prompt, Role.PRIMARY, Phase.REVIEW, struggling, reason)
+
+    def _shown(self, task: Task) -> None:
+        self._recent_tasks = [*self._recent_tasks[-1:], task]
+
+    def _other_kind(self, run, level, task, available, history, uses) -> Prompt | None:
+        """A question of another kind, never harder: the other kind of context
+        at level 3, else the hardest lower level whose question differs."""
+        if level is Level.CONTEXT_TO_WORD:
+            prompt = context_prompt(run.word, run.teaching, used=uses, avoid_task=task)
+            if prompt is not None and prompt.task is not task:
+                return prompt
+        for lower in lower_levels(level, available):
+            prompt = prompt_for(lower, run.word, run.teaching, history, uses)
+            if prompt is not None and prompt.task is not task:
+                return prompt
+        return None
 
     def _ask(
         self,

@@ -249,13 +249,23 @@ def context_prompt(
     *,
     exclude: set[int] | frozenset[int] = frozenset(),
     used: dict[int, object] | None = None,
+    avoid_task: Task | None = None,
 ) -> Prompt | None:
-    """The word from a context it fits: the least recently used one not excluded."""
+    """The word from a context it fits: the least recently used one not excluded.
+
+    With ``avoid_task``, only contexts of the other kind (a sentence to
+    complete rather than a situation, or the reverse) are considered.
+    """
     used = used or {}
+    avoid_kind = {
+        Task.CONTEXT_CLOZE: ContextKind.SENTENCE,
+        Task.SITUATION_TO_WORD: ContextKind.SITUATION,
+    }.get(avoid_task)
     candidates = [
         context
         for context in teaching.contexts
         if context.id is not None and context.id not in exclude and context.target
+        and context.kind is not avoid_kind
     ]
     if not candidates:
         return None

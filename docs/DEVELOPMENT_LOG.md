@@ -943,3 +943,12 @@ beside the evidence: Forgotten caps it at recognition, two misses in a row at
 the level drop it one, a success raises it. `WordSkill` gains `level` and
 `regressed`. The engine document said failing never lowered a stage; it now
 describes the fall.
+
+## 2026-09-26 — Learning plan gaps, step 2: the task selector
+
+`choose_level` aims from the skill level (passed in, or read from the
+attempts), takes the highest available level not above the target, and the
+review flow keeps the last two question kinds to ask a third another way
+(`repeats`, `lower_levels`, `context_prompt(avoid_task=…)`). Two tests
+changed meaning with the rule: a miss at a level never reached is now a
+stretch, and a level without content is no longer stepped over upwards.

@@ -102,15 +102,21 @@ that the rating says how well the **memory** held and the attempts say what
 the learner could **do** (`services/review_route.py` for the rules,
 `services/review_flow.py` for the session).
 
-1. **The first question** is chosen from the word's own record by the
-   TaskSelector (`services/task_selector.py`) — no calendar rule. One level
-   harder after a first question answered without effort; the same after a
-   miss or effort; one easier after forgetting; never harder while FSRS gives
-   less than a 75 % chance of recall today; only what the content can ask (a
-   context needs contexts, a collocation collocations, a sentence of one's own
-   an example to compare it with — so a word with no content stays on the
-   short route, the word from its meaning). The context used longest ago
-   comes first and collocations take turns. The reason is shown on the card
+1. **The first question** is chosen by the TaskSelector
+   (`services/task_selector.py`) — no calendar rule. The **target** starts
+   from the word's **skill level** (what it can do now, after any fall) and
+   the last first question moves it: one harder after an answer without
+   effort (Remembered or Instant); the same after a miss or effort; one
+   easier after forgetting; never harder while FSRS gives less than a 75 %
+   chance of recall today. The question is at the **highest level the
+   content can ask that is not above the target** (a context needs contexts,
+   a collocation collocations, a sentence of one's own an example to compare
+   it with) — missing content never makes a question harder, so a word with
+   no content stays on the short route, the word from its meaning. The
+   context used longest ago comes first, collocations take turns, and **no
+   kind of question comes three times in a row** in a session: the third is
+   asked another way — the other kind of context, or a lower level — when
+   the content allows. The reason is shown on the card
    (hover the question's name). The meaning is the one in the learner's
    language when there is one, otherwise the English definition with the word
    and its forms hidden ("showing ___" for *reluctance*).

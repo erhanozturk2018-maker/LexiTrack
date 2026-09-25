@@ -1215,3 +1215,22 @@ says what was once shown, not what the learner can do now, and the task
 selector (decision 79) aims each question from it: a word that has fallen
 must be asked at the level it can actually reach. The two-in-a-row rule
 keeps a single bad day from undoing a level.
+
+## 79. The question aims from skill, and never above its target
+
+**Decision.** The first question's target is the word's current skill level
+(decision 78), moved by the last first question: up one after Remembered or
+Instant, the same after Effortful or a miss, down one after Forgotten, never
+up while recall is below 75 %. The question is at the highest level the
+content can ask that is not above the target. The third first question of
+one kind in a row in a session is asked another way when the content allows
+(the other kind of context, or a lower level), never a harder one.
+
+**Reason.** Replaces aiming from the last level asked and stepping over a
+level with no content. The level last asked is what was *tried*; the skill
+level is what was *shown*, so a failed stretch is not treated as the word's
+level. Stepping up past missing content made a question harder than the
+evidence supported. "Three in a row" is read as the questions the learner
+sees consecutively; where the content offers no other kind (a word with only
+a meaning), the same kind is asked, and the reason says so only when it did
+change something.

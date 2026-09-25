@@ -361,3 +361,41 @@ def test_the_meaning_is_asked_in_the_learners_chosen_language(
         "SELECT COUNT(*) FROM words WHERE normalized_word = 'barn'"
     ).fetchone()[0] == 1
 
+
+
+def test_no_kind_of_question_comes_three_times_in_a_row(
+    engine: LearningService, database: Database, monkeypatch
+) -> None:
+    """Three words that could each be asked by a sentence to complete: the
+    third is asked another way — a situation — never a harder question."""
+    from lexitrack.models.attempt import Level
+    from lexitrack.models.content import ContextKind
+    from lexitrack.models.skill import SkillStage, WordSkill
+    from lexitrack.services.skill_tracker import SkillTracker
+
+    ids = _ids(database)
+    repo = ContentRepository(database)
+    for word in ("arid", "attic", "avenue"):
+        repo.add_contexts([
+            WordContext(word_id=ids[word], text=f"It was {{{{{word}}}}} there."),
+            WordContext(word_id=ids[word], text=f"Somewhere you would call {{{{{word}}}}}.",
+                        kind=ContextKind.SITUATION),
+        ])
+    # Each of them can already do level 3.
+    monkeypatch.setattr(
+        SkillTracker, "skill",
+        lambda self, word_id: WordSkill(word_id, SkillStage.RECALLED,
+                                        level=Level.CONTEXT_TO_WORD),
+    )
+    flow = ReviewFlow(engine)
+    assert flow.start(include_new=False)
+    firsts = {step.word.word: step for step in flow._steps if step.role is Role.PRIMARY}
+    ordered = [firsts[w] for w in ("arid", "attic", "avenue")]
+    tasks = [step.prompt.task for step in ordered]
+    # The queue orders the words; check wherever the three stand together.
+    in_session = [s.prompt.task for s in flow._steps
+                  if s.role is Role.PRIMARY and s.prompt is not None]
+    for first, second, third in zip(in_session, in_session[1:], in_session[2:], strict=False):
+        assert not (first is second is third), in_session
+    assert Task.SITUATION_TO_WORD in tasks
+    assert all(step.prompt.task.level <= Level.CONTEXT_TO_WORD for step in ordered)
