@@ -591,10 +591,22 @@ class TestSettingsDialog:
     def test_saving_reaches_the_engine(self, qapp, engine, loaded) -> None:
         dialog = SettingsDialog(engine, loaded, ThemeManager())
         dialog.new_words.setValue(12)
-        dialog.capacity.setValue(0)
+        dialog.capacity.setValue(120)
+        dialog.warm_up.setValue(5)
+        dialog.fragile_every.setValue(6)
         dialog._save()
         assert engine.settings.new_words_per_day == 12
-        assert engine.settings.review_capacity_per_day == 0
+        assert engine.settings.review_capacity_per_day == 120
+        assert (engine.settings.review_warm_up, engine.settings.fragile_every) == (5, 6)
+
+    def test_no_limit_is_shown_as_the_ceiling_without_being_rewritten(
+        self, qapp, engine, loaded
+    ) -> None:
+        engine.save_settings({Setting.REVIEW_CAPACITY_PER_DAY: 0})
+        dialog = SettingsDialog(engine, loaded, ThemeManager())
+        assert dialog.capacity.value() == 250
+        dialog.reject()
+        assert engine.refresh_settings().review_capacity_per_day == 0
 
     def test_cancel_saves_nothing(self, qapp, engine, loaded) -> None:
         dialog = SettingsDialog(engine, loaded, ThemeManager())

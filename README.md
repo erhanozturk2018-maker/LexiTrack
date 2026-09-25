@@ -412,10 +412,16 @@ revoke it in @BotFather with `/revoke` and paste the new one.
 ### Settings
 
 **Settings** (`Ctrl+,`) groups everything into pages: **Learning** (new words
-a day, the review limit, when a word is offered as known, the day boundary and the
-message hours), **Telegram**, **Appearance**, **Data** (Start with Windows,
-backups, the review history as CSV, starting over), **Advanced** and
-**About**. Each setting has a one-line explanation beside it.
+a day, the review limit, when a word is offered as known, the language words
+are explained in, the day boundary and the message hours), **Telegram**,
+**Appearance**, **Data** (Start with Windows, backups, the review history as
+CSV, starting over), **Advanced** (the scheduler, the session order, the
+simulator) and **About**. Each setting has a one-line explanation beside it.
+
+The review limit is at most 250 a day. When more is due, the most fragile
+words and those you are most likely to have forgotten come first, the rest
+wait, and fewer new words are offered so tomorrow stays under the limit too;
+the Today card says so when it happens.
 
 ![Settings](docs/screenshots/settings.png)
 

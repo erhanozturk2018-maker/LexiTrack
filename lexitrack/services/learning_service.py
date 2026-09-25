@@ -69,6 +69,8 @@ from ..repositories import (
     StoredWord,
     WordRepository,
 )
+from .review_queue import Queue, effective_capacity
+from .review_queue import build as build_queue
 from .srs_scheduler import SrsScheduler
 
 #: How far ahead the Study page looks.
@@ -101,6 +103,8 @@ class DailyPlan:
     #: Words already introduced today, in this or an earlier session.
     introduced_today: tuple[StoredWord, ...] = ()
     due_count: int = 0
+    #: Due words left for another day because the day's limit is reached.
+    due_left_over: int = 0
     reviews_done_today: int = 0
     #: Words in the plan that have never been introduced.
     pool_remaining: int = 0
@@ -339,9 +343,14 @@ class LearningService:
 
         scope = self._plans.word_ids(plan.id)
         introduced_ids = self._cards.introduced_on(today, scope)
-        due = self._due_cards(scope, limit=None)
+        queue = self._queue(scope)
+        due = queue.cards
         done = self._reviews_done_today(today)
-        target, note, paused = self._intake_target(len(introduced_ids), len(due))
+        forecast = self.forecast()
+        tomorrow = forecast[1][1] if len(forecast) > 1 else 0
+        target, note, paused = self._intake_target(
+            len(introduced_ids), len(due) + queue.left_over, tomorrow
+        )
         offered = (
             self._plans.candidate_word_ids(
                 plan.id,
@@ -357,19 +366,20 @@ class LearningService:
             new_words=tuple(self._words_in_order(offered)),
             introduced_today=tuple(self._words_in_order(introduced_ids)),
             due_count=len(due),
+            due_left_over=queue.left_over,
             reviews_done_today=done,
             pool_remaining=self._plans.candidate_count(
                 plan.id, include_not_reviewed=self._settings.new_words_include_not_reviewed
             ),
             new_target=self._settings.new_words_per_day,
-            review_capacity=self._settings.review_capacity_per_day,
-            forecast=self.forecast(),
+            review_capacity=effective_capacity(self._settings.review_capacity_per_day),
+            forecast=forecast,
             intake_note=note,
             intake_paused=paused,
         )
 
     def _intake_target(
-        self, introduced_today: int, due_today: int
+        self, introduced_today: int, due_today: int, due_tomorrow: int = 0
     ) -> tuple[int, str | None, bool]:
         """How many new words to offer now, and why it is not the full count.
 
@@ -385,11 +395,29 @@ class LearningService:
             if settings.new_words_per_day and introduced_today >= settings.new_words_per_day:
                 return 0, f"Today's {settings.new_words_per_day} new words are done.", False
             return 0, None, False
-        capacity = settings.review_capacity_per_day
-        if capacity and due_today >= capacity:
+        capacity = effective_capacity(settings.review_capacity_per_day)
+        if due_today >= capacity:
             return 0, (
                 f"New words are paused: {due_today} reviews are due today, "
                 f"over the {capacity} you set. Clear some and they will come back."
+            ), True
+        # Today's new words are all due tomorrow: they must fit beside the
+        # reviews already due then, or tomorrow starts over the limit.
+        room = capacity - due_tomorrow
+        if room < remaining:
+            if room <= 0:
+                return 0, (
+                    f"New words are paused: {due_tomorrow} reviews are already due "
+                    f"tomorrow, at your limit of {capacity}."
+                ), True
+            already = (
+                f"{due_tomorrow} reviews are already due tomorrow, and more"
+                if due_tomorrow
+                else "all of today's new words come back tomorrow, and more"
+            )
+            return room, (
+                f"{room} new words today, not {remaining}: {already} would pass your "
+                f"limit of {capacity}."
             ), True
         return remaining, None, False
 
@@ -491,22 +519,31 @@ class LearningService:
         return StudyItem(word=word, card=card, hide_meaning=self._settings.hide_meaning_in_study)
 
     def _due_cards(self, scope: Sequence[int], limit: int | None) -> list[SrsCard]:
-        capacity = self._settings.review_capacity_per_day or None
-        effective = min(filter(None, (limit, capacity))) if (limit or capacity) else None
+        cards = list(self._queue(scope).cards)
+        return cards[:limit] if limit else cards
+
+    def _queue(self, scope: Sequence[int]) -> Queue:
+        """Today's reviews, chosen and ordered by services/review_queue.py."""
+        now = self._clock.now_utc()
         cards = self._cards.due_cards(
-            scope,
-            now=self._clock.now_utc(),
-            before_local_date=self._clock.today(),
-            limit=effective,
+            scope, now=now, before_local_date=self._clock.today(), limit=None
         )
-        if self._settings.review_known_words:
-            return cards
-        known = {
-            word.id
-            for word in self._words.get_many([card.word_id for card in cards])
-            if word.status is ReviewStatus.KNOWN
-        }
-        return [card for card in cards if card.word_id not in known]
+        if not self._settings.review_known_words:
+            # Before the limit is applied, so Known words do not take places.
+            known = {
+                word.id
+                for word in self._words.get_many([card.word_id for card in cards])
+                if word.status is ReviewStatus.KNOWN
+            }
+            cards = [card for card in cards if card.word_id not in known]
+        recall = {card.word_id: self._scheduler.retrievability(card, now) for card in cards}
+        return build_queue(
+            cards,
+            recall,
+            self._settings.review_capacity_per_day,
+            warm_up=self._settings.review_warm_up,
+            fragile_every=self._settings.fragile_every,
+        )
 
     def start_session(
         self, channel: Channel = Channel.DESKTOP, chat_id: str | None = None

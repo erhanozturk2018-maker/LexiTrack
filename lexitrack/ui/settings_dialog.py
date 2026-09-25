@@ -52,6 +52,7 @@ from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
 from ..services.optimizer import FitResult, Personaliser
+from ..services.review_queue import HARD_CEILING, effective_capacity
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
 from ..services.vocabulary_service import VocabularyService
 from ..telegram.config import env_file_candidates
@@ -163,11 +164,12 @@ class SettingsDialog(QDialog):
             "Without this, such a list has nothing to offer.",
             self.include_not_reviewed,
         )
-        self.capacity = _spin(0, 1000, " reviews")
-        self.capacity.setSpecialValueText("No limit")
+        self.capacity = _spin(10, HARD_CEILING, " reviews")
         workload.add(
             "Review limit a day",
-            "When a day is already over this, new words pause until it clears.",
+            f"At most {HARD_CEILING}. Over it, the most fragile words and those you are "
+            "most likely to have forgotten come first, and new words shrink so "
+            "tomorrow stays under it too.",
             self.capacity,
         )
         layout.addWidget(workload)
@@ -513,6 +515,22 @@ class SettingsDialog(QDialog):
         )
         box.addWidget(scheduler)
 
+        order = _Group("SESSION ORDER")
+        self.warm_up = _spin(0, 20, " words")
+        order.add(
+            "Start with",
+            "The easiest words due, so a session does not open on a miss.",
+            self.warm_up,
+        )
+        self.fragile_every = _spin(2, 20, "")
+        self.fragile_every.setPrefix("one in every ")
+        order.add(
+            "Hard words at most",
+            "Words that recently failed are mixed in, never more often than this.",
+            self.fragile_every,
+        )
+        box.addWidget(order)
+
         simulation = _Group("SIMULATE A YEAR")
         self.profile_combo = QComboBox()
         for key in sorted(PROFILES):
@@ -569,7 +587,12 @@ class SettingsDialog(QDialog):
         s = self._settings
         self.new_words.setValue(s.new_words_per_day)
         self.include_not_reviewed.setChecked(s.new_words_include_not_reviewed)
-        self.capacity.setValue(s.review_capacity_per_day)
+        # Shown as the limit that applies: a stored "no limit" or a number over
+        # the ceiling is read as the ceiling, and saved as such only if the
+        # user saves.
+        self.capacity.setValue(effective_capacity(s.review_capacity_per_day))
+        self.warm_up.setValue(s.review_warm_up)
+        self.fragile_every.setValue(s.fragile_every)
         self.mastery_days.setValue(int(s.mastery_stability_days))
         self.review_known.setChecked(s.review_known_words)
         self.hide_meaning.setChecked(s.hide_meaning_in_study)
@@ -755,6 +778,8 @@ class SettingsDialog(QDialog):
             Setting.LEECH_CONSECUTIVE: self.leech_consecutive.value(),
             Setting.LEECH_TOTAL_LAPSES: self.leech_total.value(),
             Setting.LEECH_WEAK_STABILITY_DAYS: self.leech_weak.value(),
+            Setting.REVIEW_WARM_UP: self.warm_up.value(),
+            Setting.FRAGILE_EVERY: self.fragile_every.value(),
             Setting.DEVELOPER_MODE: self.developer_mode.isChecked(),
             # Debug logging belongs to Developer mode: leaving Developer mode
             # turns it off, so no file keeps growing behind a hidden switch.

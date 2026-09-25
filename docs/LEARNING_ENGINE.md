@@ -129,6 +129,27 @@ the learner could **do** (`services/review_route.py` for the rules,
 5. **One rating per word per day**, from any client: a second answer the same
    day is recognised as a duplicate and changes nothing.
 
+### The day's queue
+
+`services/review_queue.py` chooses and orders the day's reviews. Each due word
+is **fragile** (flagged as hard, relearning, or under 2 days of stability),
+**at risk** (a settled memory now under an 80 % chance of recall) or
+**normal**.
+
+- **The limit** is the learner's (default 250) but never above **250**, and
+  "no limit" is read as 250: past that a session is too long to finish, and
+  an unfinished session is where reviewing stops. A stored value over the
+  ceiling is read as the ceiling, not rewritten.
+- **Over the limit**, the fragile words are kept first, then the rest by
+  lowest chance of recall. What is left waits for another day, and the Today
+  card says how many.
+- **The order**: a warm-up of the 3 easiest words kept (highest chance of
+  recall), so a session does not open on a miss; then the fragile words mixed
+  in, at most one in every 4. Both numbers are settings (Advanced).
+- **Intake** protects today and tomorrow: new words pause when today's due
+  reviews already reach the limit, and shrink when today's new words — all
+  due tomorrow — would take tomorrow past it. The card says which, and why.
+
 ### First learning
 
 New words are learned in the same session as the day's reviews, after them

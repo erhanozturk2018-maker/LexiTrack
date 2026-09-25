@@ -1061,3 +1061,25 @@ is a 5 → 6 migration rather than an edit of history: it moves any schema 5
 content into `tr` localizations and drops the language-specific columns.
 Schema 1 enrichment files are still read, their fields mapped to `tr`.
 
+---
+
+## 72. A ceiling of 250 reviews, and a queue that keeps the fragile first
+
+**Decision.** A day's reviews are capped at the learner's limit and never
+above 250; "no limit" is read as 250. Over the limit, fragile words are kept
+first, then the least likely to be remembered. The session opens with a
+warm-up of three easy words and mixes fragile words in at most one in four.
+New words shrink when they would take tomorrow over the limit.
+
+**Reason.** An engineering and experience choice, not a research result: a
+queue longer than a learner can finish is abandoned, and a backlog then
+grows faster than it clears. Keeping the least-remembered words means what
+waits is what is most likely to survive the wait. The warm-up and the
+spacing of hard words are user-experience choices, made adjustable because
+they are preferences. Protecting tomorrow follows from new words all falling
+due the next day: intake is the one lever that prevents a pile-up rather
+than reacting to it.
+
+**Not silently changed.** A stored limit above 250 or "no limit" is read as
+250 and shown as 250 in Settings; it is only rewritten if the user saves.
+

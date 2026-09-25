@@ -322,6 +322,24 @@ class TestAnswers:
 
 
 class TestWorkload:
+    def test_over_the_limit_the_day_says_how_many_wait(
+        self, engine: LearningService, clock: FrozenClock
+    ) -> None:
+        engine.introduce()
+        clock.advance_to_day_start(1)
+        engine.save_settings({Setting.REVIEW_CAPACITY_PER_DAY: 10})
+        plan = engine.daily_plan()
+        assert (plan.due_count, plan.due_left_over) == (10, 15)
+        assert plan.review_capacity == 10
+        assert len(engine.review_queue()) == 10
+
+    def test_a_limit_above_the_ceiling_is_read_as_the_ceiling(
+        self, engine: LearningService
+    ) -> None:
+        engine.save_settings({Setting.REVIEW_CAPACITY_PER_DAY: 900})
+        assert engine.daily_plan().review_capacity == 250
+        assert engine.settings.review_capacity_per_day == 900, "stored as the user left it"
+
     def test_intake_pauses_when_the_day_is_already_over_capacity(
         self, engine: LearningService, clock: FrozenClock
     ) -> None:
@@ -348,7 +366,10 @@ class TestWorkload:
         while study(engine, clock):
             pass
         assert engine.daily_plan().due_count == 0
-        assert len(engine.daily_plan().new_words) == 25
+        # Back, but only as many as fit tomorrow beside the limit of 10.
+        plan = engine.daily_plan()
+        assert len(plan.new_words) == 10
+        assert plan.intake_note.startswith("10 new words today, not 25")
 
     def test_a_missed_week_does_not_multiply_the_new_words(
         self, engine: LearningService, clock: FrozenClock

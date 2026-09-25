@@ -29,6 +29,10 @@ DEFAULT_SETTINGS: dict[str, str] = {
     # "not reviewed" rather than "unknown", so this lets those words in too.
     "new_words_include_not_reviewed": "false",
     "review_capacity_per_day": "250",
+    # The session's order: this many of the easiest words first, then at most
+    # one fragile word in every this many (services/review_queue.py).
+    "review_warm_up": "3",
+    "fragile_every": "4",
     # -- the day
     "day_start_hour": "0",
     "timezone": "Europe/Istanbul",
@@ -70,6 +74,8 @@ class Setting(StrEnum):
     NEW_WORDS_PER_DAY = "new_words_per_day"
     NEW_WORDS_INCLUDE_NOT_REVIEWED = "new_words_include_not_reviewed"
     REVIEW_CAPACITY_PER_DAY = "review_capacity_per_day"
+    REVIEW_WARM_UP = "review_warm_up"
+    FRAGILE_EVERY = "fragile_every"
     DAY_START_HOUR = "day_start_hour"
     TIMEZONE = "timezone"
     NOTIFY_HOUR = "notify_hour"
@@ -101,6 +107,8 @@ class LearningSettings:
     new_words_per_day: int = 25
     new_words_include_not_reviewed: bool = False
     review_capacity_per_day: int = 250
+    review_warm_up: int = 3
+    fragile_every: int = 4
     day_start_hour: int = 0
     timezone: str = "Europe/Istanbul"
     notify_hour: int = 6
@@ -152,6 +160,8 @@ class LearningSettings:
             new_words_per_day=max(integer(Setting.NEW_WORDS_PER_DAY), 0),
             new_words_include_not_reviewed=flag(Setting.NEW_WORDS_INCLUDE_NOT_REVIEWED),
             review_capacity_per_day=max(integer(Setting.REVIEW_CAPACITY_PER_DAY), 0),
+            review_warm_up=min(max(integer(Setting.REVIEW_WARM_UP), 0), 20),
+            fragile_every=min(max(integer(Setting.FRAGILE_EVERY), 2), 20),
             day_start_hour=min(max(integer(Setting.DAY_START_HOUR), 0), 23),
             timezone=str(merged[Setting.TIMEZONE]).strip() or "Europe/Istanbul",
             notify_hour=min(max(integer(Setting.NOTIFY_HOUR), 0), 23),

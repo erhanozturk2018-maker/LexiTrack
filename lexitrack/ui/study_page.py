@@ -590,8 +590,15 @@ class StudyPage(QWidget):
 
         # Only the workload valve gets its own line: it is a reason, not a result.
         show_note = bool(plan.intake_note) and (plan.intake_paused or not learned)
-        self.intake_note.setText(plan.intake_note or "")
-        self.intake_note.setVisible(show_note)
+        notes = [plan.intake_note] if show_note and plan.intake_note else []
+        if plan.due_left_over:
+            notes.append(
+                f"{plan.due_left_over} more due words wait for another day: over your "
+                f"limit of {plan.review_capacity}. The most fragile and those you are "
+                "most likely to have forgotten come first."
+            )
+        self.intake_note.setText(" ".join(notes))
+        self.intake_note.setVisible(bool(notes))
         self.pool_label.setText(
             f"{plan.pool_remaining:,} words in the plan are still to come."
         )

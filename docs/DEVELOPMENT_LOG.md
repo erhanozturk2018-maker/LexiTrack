@@ -797,3 +797,21 @@ the hard words. The 30-day numbers left it; Progress has them.
 none until it is learned; runs now carry their word, and a card only when
 there is one.
 
+## 2026-09-25 — Learning Engine V2, phase 7: the queue and the workload
+
+Due words are sorted into fragile, at risk and normal; over the limit (never
+above 250) the fragile and the least remembered are kept; a warm-up of easy
+words opens the session and fragile words come at most one in four; new
+words shrink when tomorrow would overflow. Settings shows the limit that
+applies and the two order settings; the Today card says what waits.
+
+**Problems and solutions**
+
+- Known words were removed from the queue after it was cut at the limit, so
+  a day could come in under its limit; they are now removed first.
+- The FSRS fitting test drew its answers by position in the queue, so a new
+  order changed its data and its verdict. It now draws each answer from the
+  default model's own chance of recall, with a fixed seed — the data the
+  test's claim is actually about.
+- A test's expected order of 13 words was miscounted; the order was right.
+

@@ -8,6 +8,7 @@ statistics after it was taken back.
 from __future__ import annotations
 
 import json
+import random
 from datetime import UTC, datetime
 
 import pytest
@@ -436,12 +437,18 @@ class TestProgressViews:
 
 class TestPersonalising:
     def study_weeks(self, engine: LearningService, clock: FrozenClock, days: int = 12) -> None:
+        rng = random.Random(7)
         engine.introduce()
         for _ in range(days):
             clock.advance_to_day_start(1)
             engine.introduce()
-            for index, item in enumerate(engine.review_queue()):
-                engine.answer(item.word.id, Rating.AGAIN if index % 4 == 0 else Rating.GOOD)
+            # Answers drawn from the default model itself: each review is
+            # remembered with the chance FSRS predicts, from a fixed seed. On
+            # such data the default parameters must predict better than broken
+            # ones, whatever order the queue asks in.
+            for item in engine.review_queue():
+                recalled = rng.random() < (engine.retrievability(item.word.id) or 0.0)
+                engine.answer(item.word.id, Rating.GOOD if recalled else Rating.AGAIN)
 
     def test_readiness_counts_what_the_optimizer_counts(
         self, engine: LearningService, clock: FrozenClock, database: Database
