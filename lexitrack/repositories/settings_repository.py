@@ -116,6 +116,8 @@ class RuntimeRepository:
     TELEGRAM_CHAT_ID = "telegram_chat_id"
     #: The highest Telegram update id already consumed.
     TELEGRAM_OFFSET = "telegram_offset"
+    #: Content batches exported and not yet imported, as JSON.
+    CONTENT_BATCHES = "content_batches"
 
     def __init__(self, database: Database) -> None:
         self._db = database

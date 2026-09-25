@@ -337,6 +337,8 @@ class VocabularyTable(QWidget):
     remove_requested = Signal(list)
     #: "Export selection…" for these word ids.
     export_requested = Signal(list)
+    #: The selection, to send out for content (meanings, examples…).
+    content_requested = Signal(list)
     #: The visible row count changed (after filtering or loading).
     count_changed = Signal(int, int)
 
@@ -533,6 +535,9 @@ class VocabularyTable(QWidget):
         more = QMenu(self.more_button)
         self.export_action = more.addAction(
             "Export Selection…", lambda: self._emit_selection(self.export_requested)
+        )
+        more.addAction(
+            "Export for Content…", lambda: self._emit_selection(self.content_requested)
         )
         self.remove_action = more.addAction(
             "Remove from This List…", lambda: self._emit_selection(self.remove_requested)
@@ -833,6 +838,9 @@ class VocabularyTable(QWidget):
             )
             remove.setShortcut(QKeySequence(Qt.Key.Key_Delete))
         menu.addAction("Export…", lambda: self._emit_selection(self.export_requested))
+        menu.addAction(
+            "Export for Content…", lambda: self._emit_selection(self.content_requested)
+        )
         if len(self.selected_ids()) == 1:
             menu.addSeparator()
             details = menu.addAction("Word Details", lambda: self.show_details(True))

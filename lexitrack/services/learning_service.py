@@ -221,6 +221,11 @@ class LearningService:
         """The database this engine reads and writes, for services built beside it."""
         return self._db
 
+    def plan_word_ids(self) -> list[int]:
+        """The active plan's words, in plan order; empty without a plan."""
+        plan = self.active_plan()
+        return list(self._plans.word_ids(plan.id)) if plan else []
+
     def choice_pool(self, word_id: int, seed: str, size: int = 40) -> list[StoredWord]:
         """Other words from the active plan to choose among, a stable sample."""
         plan = self.active_plan()

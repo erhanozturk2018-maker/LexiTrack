@@ -378,3 +378,49 @@ def test_a_content_file_is_not_imported_as_a_word_list(tmp_path: Path) -> None:
     path = _file(tmp_path, [_entry(1, "reluctant")])
     with pytest.raises(InvalidFileError, match="content file"):
         JsonParser().parse(JsonDocument.open(path))
+
+
+def test_batches_resume_where_the_last_one_stopped(
+    database: Database, words: dict[str, int], tmp_path: Path
+) -> None:
+    service = ContentService(database)
+    ids = [words[w] for w in ("reluctant", "cramped", "apple", "commute")]
+    assert service.next_batch_name() == "batch_001"
+
+    first = service.batch_candidates(ids, 2, ["de"])
+    assert first == ids[:2]
+    path = service.export_batch(first, tmp_path / "b1.json", "batch_001", ["de"])
+    (batch,) = service.open_batches()
+    assert batch.name == "batch_001" and batch.word_ids == tuple(first)
+    assert batch.path == str(path)
+    assert service.next_batch_name() == "batch_002"
+    # The words out in batch 1 are not offered again while it is open.
+    assert service.batch_candidates(ids, 2, ["de"]) == ids[2:]
+
+    # Filling batch 1 closes it; its words are complete and not offered again.
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for item in document["words"]:
+        item["target"]["pattern"] = f"{item['word']} pattern"
+        item["localizations"]["de"]["core_meaning"] = f"{item['word']} (de)"
+        item["contexts"] = [
+            {"kind": "sentence", "text": f"One {{{{{item['word']}}}}} here."},
+            {"kind": "sentence", "text": f"Another {{{{{item['word']}}}}} there."},
+        ]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    service.apply_import(service.preview_import(path))
+    assert service.open_batches() == []
+    assert service.batch_candidates(ids, 4, ["de"]) == ids[2:]
+    # A Spanish speaker still needs them all: complete is per language.
+    assert service.batch_candidates(ids, 4, ["es"]) == ids
+    assert service.next_batch_name() == "batch_002", "batch_001 is recorded as the source"
+
+
+def test_a_batch_that_will_not_come_back_can_be_forgotten(
+    database: Database, words: dict[str, int], tmp_path: Path
+) -> None:
+    service = ContentService(database)
+    ids = [words["apple"]]
+    service.export_batch(ids, tmp_path / "b.json", "batch_001")
+    assert service.batch_candidates(ids, 5) == []
+    service.forget_batch("batch_001")
+    assert service.batch_candidates(ids, 5) == ids

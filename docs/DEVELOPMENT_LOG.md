@@ -815,3 +815,14 @@ applies and the two order settings; the Today card says what waits.
   test's claim is actually about.
 - A test's expected order of 13 words was miscounted; the order was right.
 
+## 2026-09-25 — Learning Engine V2, phase 8: the content workflow in the app
+
+*Word Content…* (Export and backup, the ⋯ menu, Ctrl+K): how much of the
+chosen words has content for a language; the next batch to export — from the
+plan, today's new words, a list, or a table selection (*Export for
+Content…*); the filled file to import, previewed, with conflicts unticked
+until chosen; and the batches still out. Batches are resumable: their words
+wait, importing closes them, forgetting frees them. The settings rows became
+a shared component (`components/settings_rows.py`) so this window looks like
+Settings.
+

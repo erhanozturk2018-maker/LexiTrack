@@ -52,7 +52,7 @@ from ..models.content import (
 )
 from ..models.language import is_determined, language_name, normalize_language
 from ..normalization.word_normalizer import normalize_word
-from ..repositories import ContentRepository, WordRepository
+from ..repositories import ContentRepository, RuntimeRepository, WordRepository
 
 log = logging.getLogger(__name__)
 
@@ -178,6 +178,16 @@ class ContentImportPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenBatch:
+    """A batch exported and not yet imported."""
+
+    name: str
+    word_ids: tuple[int, ...]
+    exported_on: str
+    path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ContentImportResult:
     words: int
     fields_filled: int
@@ -191,6 +201,77 @@ class ContentService:
         self._db = database
         self._content = ContentRepository(database)
         self._words = WordRepository(database)
+        self._runtime = RuntimeRepository(database)
+
+    # -- batches in flight ----------------------------------------------------
+    #
+    # Enrichment is resumable: a batch exported and not yet imported is
+    # remembered, its words are left out of the next batch, and importing it
+    # closes it. A batch that will never come back can be forgotten.
+
+    def open_batches(self) -> list[OpenBatch]:
+        raw = self._runtime.get(RuntimeRepository.CONTENT_BATCHES)
+        try:
+            data = json.loads(raw) if raw else {}
+        except ValueError:
+            data = {}
+        return [
+            OpenBatch(
+                name,
+                tuple(int(i) for i in entry.get("words", [])),
+                str(entry.get("exported_on", "")),
+                entry.get("path"),
+            )
+            for name, entry in sorted(data.items())
+            if isinstance(entry, dict)
+        ]
+
+    def _save_batches(self, batches: list[OpenBatch]) -> None:
+        data = {
+            b.name: {"words": list(b.word_ids), "exported_on": b.exported_on, "path": b.path}
+            for b in batches
+        }
+        self._runtime.set(RuntimeRepository.CONTENT_BATCHES, json.dumps(data))
+
+    def forget_batch(self, name: str) -> None:
+        """Stop waiting for a batch: its words can be exported again."""
+        self._save_batches([b for b in self.open_batches() if b.name != name])
+
+    def next_batch_name(self) -> str:
+        """``batch_001``, ``batch_002``…: one more than any batch seen so far."""
+        seen = [b.name for b in self.open_batches()]
+        seen += [
+            row[0]
+            for row in self._db.connection.execute(
+                "SELECT source FROM word_content WHERE source LIKE 'batch_%' "
+                "UNION SELECT source FROM word_localizations WHERE source LIKE 'batch_%'"
+            )
+            if row[0]
+        ]
+        numbers = [int(name[6:]) for name in seen if name[6:].isdigit()]
+        return f"batch_{max(numbers, default=0) + 1:03d}"
+
+    def batch_candidates(
+        self,
+        word_ids: Sequence[int],
+        size: int,
+        learner_languages: Sequence[str] = (),
+    ) -> list[int]:
+        """The next ``size`` words of ``word_ids``, in order, that still need
+        content for any of ``learner_languages`` and are not in an open batch."""
+        waiting = {i for b in self.open_batches() for i in b.word_ids}
+        candidates = [int(i) for i in word_ids if int(i) not in waiting]
+        languages: list[str | None] = list(_languages(learner_languages)) or [None]
+        chosen: list[int] = []
+        for start in range(0, len(candidates), 500):
+            chunk = candidates[start : start + 500]
+            needing: set[int] = set()
+            for language in languages:
+                needing |= set(self.needing_content(chunk, language))
+            chosen += [i for i in chunk if i in needing]
+            if len(chosen) >= size:
+                break
+        return chosen[:size]
 
     # -- reading -------------------------------------------------------------
 
@@ -283,6 +364,16 @@ class ContentService:
         target.write_text(
             json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
+        batches = [b for b in self.open_batches() if b.name != batch]
+        batches.append(
+            OpenBatch(
+                batch,
+                tuple(entry["word_id"] for entry in document["words"]),
+                datetime.now(UTC).date().isoformat(),
+                str(target),
+            )
+        )
+        self._save_batches(batches)
         log.info("Exported content batch %s with %d words", batch, len(document["words"]))
         return target
 
@@ -370,6 +461,9 @@ class ContentService:
                     self._content.save_translation(context_id, language, text, source)
                     translations += 1
                 words += 1
+        if preview.batch:
+            # Imported: the batch is no longer waiting for its words.
+            self.forget_batch(preview.batch)
         log.info(
             "Imported content from %s: %d words, %d filled, %d replaced, %d contexts, "
             "%d translations",

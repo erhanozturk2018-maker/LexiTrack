@@ -69,6 +69,7 @@ from .components.cards import ModeSwitch
 from .components.sidebar import Sidebar
 from .components.toast import Toast
 from .components.word_history import WordHistoryDialog
+from .content_dialog import ContentDialog
 from .dialogs import confirm
 from .export_dialog import ExportDialog, ExportScope
 from .help_dialog import HelpDialog
@@ -193,6 +194,9 @@ class MainWindow(QMainWindow):
                     self.export, "Ctrl+E", "save pdf csv json print"),
             Command("Export Answer History\u2026", "Every answer you have given, as a CSV file",
                     self.export_history, None, "review log csv spreadsheet"),
+            Command("Word Content\u2026",
+                    "Send words out for meanings and examples; import the filled file",
+                    self.open_content, None, "enrich llm meanings examples batch translate"),
             Command("Back Up Now", "Copy your vocabulary and progress to the backups folder",
                     self.backup_now, None, "backup copy save"),
             Command("Open Backups Folder", "Where the daily copies are kept",
@@ -246,7 +250,8 @@ class MainWindow(QMainWindow):
         menu.clear()
         groups = (
             ("Import\u2026", "New List\u2026", "Export\u2026"),
-            ("Export Answer History\u2026", "Back Up Now", "Open Backups Folder"),
+            ("Word Content\u2026", "Export Answer History\u2026", "Back Up Now",
+             "Open Backups Folder"),
             ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
              "How LexiTrack Works", "Keyboard Shortcuts"),
@@ -296,6 +301,7 @@ class MainWindow(QMainWindow):
         self._progress = ProgressService(self._service.database, self._engine)
         for table in (self.review.table, self.unknown.table):
             table.panel.set_history_source(self._progress.journey)
+            table.content_requested.connect(self.open_content)
 
         self.study = StudyPage(self._engine)
         self.study.history_opener = self.open_word_history
@@ -354,6 +360,7 @@ class MainWindow(QMainWindow):
         self.export_menu = QMenu(self.export_button)
         for title, slot in (
             ("Export Words\u2026", self.export),
+            ("Word Content\u2026", self.open_content),
             ("Export Answer History\u2026", self.export_history),
             (None, None),
             ("Back Up Now", self.backup_now),
@@ -653,6 +660,13 @@ class MainWindow(QMainWindow):
             self._toast("There is nothing to export from Today.")
             return
         ExportDialog(self._service, scopes, parent=self).exec()
+
+    def open_content(self, word_ids: list | None = None) -> None:
+        """Word content: export a batch that needs it, import a filled one."""
+        dialog = ContentDialog(self._service, self._engine, word_ids or None, parent=self)
+        dialog.exec()
+        if dialog.changed:
+            self._on_data_changed()
 
     def _maintenance(self) -> Maintenance:
         return Maintenance(self._service.database, self._engine.clock)

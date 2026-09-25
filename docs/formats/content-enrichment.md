@@ -30,6 +30,19 @@ export a batch of words that need content      content_batch_001.json
 LexiTrack never calls an LLM itself and works fully offline. Which learner
 language a review uses is chosen in *Settings → Learning → Explain words in*.
 
+**In the app:** *Export and backup → Word Content…* (also in the ⋯ menu and
+`Ctrl+K`). It shows how many of your words have content for a language,
+exports the next batch — from your study plan, today's new words, a list, or
+the words selected in a table (*More → Export for Content…*) — and imports a
+filled file after showing what it would change, with each conflicting field
+unticked until you tick it.
+
+**Resumable:** a batch exported and not yet imported is listed as *waiting*,
+and its words are left out of the next batch; importing it closes it. A batch
+that will never come back can be forgotten, and its words are offered again.
+To redo one word, select it in a table, export it, edit it, import it, and
+tick the fields to replace.
+
 ---
 
 ## The file (schema 2)

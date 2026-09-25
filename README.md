@@ -510,6 +510,17 @@ defaults and choose where to save.
   <img src="docs/screenshots/export-pdf.png" alt="A page of an exported PDF" width="560">
 </p>
 
+### Word content
+
+Meanings in your own language, how a word is used, examples and memory cues
+are added in batches, from any tool you like — an LLM, a dictionary, your own
+notes. **Export and backup → Word Content…** writes the next batch of words
+that still need content to a file, with instructions for whoever fills it
+in; the filled file comes back through the same window, which shows what it
+would change and replaces nothing you already have unless you tick it.
+LexiTrack itself never calls an LLM. The format is in
+[docs/formats/content-enrichment.md](docs/formats/content-enrichment.md).
+
 ### Search and commands
 
 **Ctrl+K**, or **Search** at the top of the sidebar, finds a command (with what it
