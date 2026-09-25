@@ -1030,3 +1030,11 @@ lists its milestones (first recalled, from a sentence, used, after a long
 gap) and how often it was forgotten. The history still called the stability
 line "Known" and said "21 needed": after step 7 that line is long-term
 memory, and it is labelled so.
+
+## 2026-09-26 — Learning plan gaps, step 9: content at full scale
+
+*All your words* as a batch scope; `resend_batch` (open batches now keep
+their languages); `export_dataset` (every enriched word, every language,
+`kind: dataset`, `dataset_version`, re-importable through the preview); and
+quality warnings in the preview (`_quality`: collocations without the word
+or outside 2–5, more than 3 contexts, a requested language left empty).

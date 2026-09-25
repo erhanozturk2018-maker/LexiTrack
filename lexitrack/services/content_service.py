@@ -185,6 +185,8 @@ class OpenBatch:
     word_ids: tuple[int, ...]
     exported_on: str
     path: str | None = None
+    #: The learner languages it asked for, so it can be sent again the same.
+    languages: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +223,7 @@ class ContentService:
                 tuple(int(i) for i in entry.get("words", [])),
                 str(entry.get("exported_on", "")),
                 entry.get("path"),
+                tuple(str(code) for code in entry.get("languages", [])),
             )
             for name, entry in sorted(data.items())
             if isinstance(entry, dict)
@@ -228,7 +231,8 @@ class ContentService:
 
     def _save_batches(self, batches: list[OpenBatch]) -> None:
         data = {
-            b.name: {"words": list(b.word_ids), "exported_on": b.exported_on, "path": b.path}
+            b.name: {"words": list(b.word_ids), "exported_on": b.exported_on, "path": b.path,
+                     "languages": list(b.languages)}
             for b in batches
         }
         self._runtime.set(RuntimeRepository.CONTENT_BATCHES, json.dumps(data))
@@ -371,11 +375,54 @@ class ContentService:
                 tuple(entry["word_id"] for entry in document["words"]),
                 datetime.now(UTC).date().isoformat(),
                 str(target),
+                tuple(document["learner_languages"]),
             )
         )
         self._save_batches(batches)
         log.info("Exported content batch %s with %d words", batch, len(document["words"]))
         return target
+
+    def resend_batch(self, name: str, path: Path | str) -> Path:
+        """Write an open batch's file again — the same words, languages and
+        name — when the first file was lost or came back unusable."""
+        batch = next((b for b in self.open_batches() if b.name == name), None)
+        if batch is None:
+            raise InvalidFileError(f"No batch called {name} is waiting.")
+        return self.export_batch(batch.word_ids, path, name, batch.languages)
+
+    def all_word_ids(self) -> list[int]:
+        """Every word in the vocabulary: the whole set, for enriching all of it."""
+        return self._words.all_ids()
+
+    def words_with_content(self) -> list[int]:
+        """Words that have any teaching content, in any language."""
+        rows = self._db.connection.execute(
+            "SELECT word_id FROM word_content UNION SELECT word_id FROM word_localizations "
+            "UNION SELECT word_id FROM word_contexts ORDER BY 1"
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def export_dataset(self, path: Path | str) -> tuple[Path, int]:
+        """Every enriched word's content, in every language it has, as one file.
+
+        The batch format with ``"kind": "dataset"`` and a ``dataset_version``
+        (when it was taken), so it can be kept, compared and imported again —
+        the preview shows what it would change, as for any batch. No batch is
+        opened by it. Returns the path and the number of words.
+        """
+        ids = self.words_with_content()
+        languages = self._content.learner_languages()
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        document = self.build_batch(ids, f"dataset_{stamp}", languages)
+        document["kind"] = "dataset"
+        document["dataset_version"] = stamp
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        log.info("Exported the content of %d words to %s", len(ids), target)
+        return target, len(ids)
 
     # -- import --------------------------------------------------------------
 
@@ -401,11 +448,12 @@ class ContentService:
             raise InvalidFileError(f"{source.name} has no \"words\" list.")
 
         preview = ContentImportPreview(path=source, batch=_text(root.get("batch")))
+        requested = _languages(root.get("learner_languages") or [])
         seen: set[int] = set()
         languages: set[str] = set()
         for index, item in enumerate(items, start=1):
             try:
-                plan = self._plan(item if version >= 2 else _from_v1(item), index)
+                plan = self._plan(item if version >= 2 else _from_v1(item), index, requested)
             except _Rejected as problem:
                 preview.rejected.append(str(problem))
                 continue
@@ -487,7 +535,7 @@ class ContentService:
 
     # -- one entry -------------------------------------------------------------
 
-    def _plan(self, item: Any, index: int) -> WordPlan:
+    def _plan(self, item: Any, index: int, requested: Sequence[str] = ()) -> WordPlan:
         if not isinstance(item, dict):
             raise _Rejected(f"Entry {index} is not an object")
         try:
@@ -548,6 +596,7 @@ class ContentService:
             placeholder = WordContext(word_id=word_id, text=context.text)
             existing[key] = placeholder
             plan.new_contexts.append((context, texts))
+        plan.warnings += _quality(stored.word, item, requested)
         return plan
 
     @staticmethod
@@ -568,6 +617,49 @@ class _Rejected(Exception):
 
 
 # -- reading and writing the JSON shape ------------------------------------------
+
+
+#: What a useful entry looks like: a few natural collocations, a few contexts.
+COLLOCATIONS_RANGE = (2, 5)
+CONTEXTS_MAX = 3
+
+
+def _quality(word: str, item: dict, requested: Sequence[str]) -> list[str]:
+    """Warnings about what a filled entry says, beyond whether it can be read.
+
+    Nothing is rejected for these — they are for the person checking the file:
+    a collocation that does not contain the word, too few or too many of
+    them, more contexts than are useful, and a requested language left empty.
+    """
+    warnings: list[str] = []
+    own = set(normalize_word(word).split())
+    target = item.get("target") or {}
+    collocations = [c for c in (target.get("collocations") or []) if isinstance(c, str)]
+    for collocation in collocations:
+        tokens = set(normalize_word(collocation).split())
+        if not (own & tokens) and not any(t.startswith(tuple(own)) for t in tokens):
+            warnings.append(f"collocation “{collocation}” does not contain the word")
+    low, high = COLLOCATIONS_RANGE
+    if collocations and not low <= len(collocations) <= high:
+        warnings.append(f"{len(collocations)} collocations; {low}–{high} common ones are enough")
+    contexts = [c for c in (item.get("contexts") or []) if isinstance(c, dict)]
+    if len(contexts) > CONTEXTS_MAX:
+        warnings.append(f"{len(contexts)} contexts; 1–{CONTEXTS_MAX} varied ones are enough")
+    blocks = item.get("localizations") or {}
+    for code in requested:
+        block = blocks.get(code) if isinstance(blocks, dict) else None
+        if not isinstance(block, dict) or not _text(block.get("core_meaning")):
+            warnings.append(f"no meaning in {language_name(code)}")
+        missing = sum(
+            1 for c in contexts
+            if not _text((c.get("translations") or {}).get(code))
+        )
+        if missing:
+            warnings.append(
+                f"{missing} context{'s' if missing != 1 else ''} not translated into "
+                f"{language_name(code)}"
+            )
+    return warnings
 
 
 def _learner_language(value: Any) -> str | None:

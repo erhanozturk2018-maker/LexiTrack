@@ -424,3 +424,67 @@ def test_a_batch_that_will_not_come_back_can_be_forgotten(
     assert service.batch_candidates(ids, 5) == []
     service.forget_batch("batch_001")
     assert service.batch_candidates(ids, 5) == ids
+
+
+# -- the whole vocabulary: quality, sending again, one versioned file -------------
+
+
+def test_the_preview_warns_about_what_an_entry_says(
+    words: dict[str, int], tmp_path: Path, database: Database
+) -> None:
+    content = ContentService(database)
+    entry_ = _entry(
+        words["reluctant"], "reluctant",
+        localizations={"de": {"nuance": "only a nuance"}},
+        collocations=["a reluctant hero", "make a decision", "b", "c", "d", "e"],
+    )
+    entry_["contexts"] = [
+        {"text": f"Sentence {n} with {{{{reluctant}}}}.", "translations": {}} for n in range(4)
+    ]
+    root = _file(tmp_path, [entry_])
+    document = json.loads(root.read_text(encoding="utf-8"))
+    document["learner_languages"] = ["de"]
+    root.write_text(json.dumps(document), encoding="utf-8")
+    (plan,) = content.preview_import(root).plans
+    text = " | ".join(plan.warnings)
+    assert "collocation “make a decision” does not contain the word" in text
+    assert "“a reluctant hero”" not in text
+    assert "6 collocations; 2–5" in text
+    assert "4 contexts; 1–3" in text
+    assert "no meaning in German" in text
+    assert "4 contexts not translated into German" in text
+    assert plan.fills, "warnings never reject: the entry is still imported"
+
+
+def test_a_batch_is_sent_again_the_same(
+    words: dict[str, int], tmp_path: Path, database: Database
+) -> None:
+    content = ContentService(database)
+    ids = list(words.values())[:2]
+    content.export_batch(ids, tmp_path / "first.json", "batch_007", ["de", "es"])
+    content.resend_batch("batch_007", tmp_path / "again.json")
+    (batch,) = content.open_batches()
+    assert batch.name == "batch_007" and batch.word_ids == tuple(ids)
+    assert batch.languages == ("de", "es")
+    again = json.loads((tmp_path / "again.json").read_text(encoding="utf-8"))
+    assert again["batch"] == "batch_007" and again["learner_languages"] == ["de", "es"]
+    with pytest.raises(InvalidFileError):
+        content.resend_batch("batch_999", tmp_path / "x.json")
+
+
+def test_all_content_leaves_as_one_versioned_file_and_comes_back_unchanged(
+    words: dict[str, int], tmp_path: Path, database: Database
+) -> None:
+    content = ContentService(database)
+    assert len(content.all_word_ids()) == len(words)
+    repo = ContentRepository(database)
+    repo.save_content(WordContent(word_id=words["reluctant"], pattern="reluctant to do sth"))
+    repo.save_localization(WordLocalization(word_id=words["reluctant"], learner_language="de",
+                                            core_meaning="widerwillig"))
+    target, count = content.export_dataset(tmp_path / "all.json")
+    document = json.loads(target.read_text(encoding="utf-8"))
+    assert count == 1 and document["kind"] == "dataset" and document["dataset_version"]
+    assert document["learner_languages"] == ["de"]
+    assert content.open_batches() == [], "a dataset is not a batch waiting to come back"
+    preview = content.preview_import(target)
+    assert preview.fill_count == 0 and preview.conflict_count == 0, "nothing to change"

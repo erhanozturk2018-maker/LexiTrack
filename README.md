@@ -586,7 +586,10 @@ are added in batches, from any tool you like — an LLM, a dictionary, your own
 notes. **Export and backup → Word Content…** writes the next batch of words
 that still need content to a file, with instructions for whoever fills it
 in; the filled file comes back through the same window, which shows what it
-would change and replaces nothing you already have unless you tick it.
+would change and replaces nothing you already have unless you tick it, with
+warnings about entries worth a second look. Batches can cover **all your
+words**, a waiting batch can be **sent again**, and **Export all** keeps every
+word's content as one versioned file that imports back the same way.
 LexiTrack itself never calls an LLM. The format is in
 [docs/formats/content-enrichment.md](docs/formats/content-enrichment.md).
 

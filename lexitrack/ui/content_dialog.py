@@ -44,7 +44,7 @@ from .components.settings_rows import CONTROL_WIDTH, SettingsGroup, note, page, 
 from .dialogs import error_label, show_error
 from .theme.palette import METRICS
 
-_PLAN, _NEW, _SELECTION = "plan", "new", "selection"
+_PLAN, _NEW, _SELECTION, _ALL = "plan", "new", "selection", "all"
 
 
 class ContentDialog(QDialog):
@@ -98,6 +98,7 @@ class ContentDialog(QDialog):
             self.source.addItem(f"The {len(self._selection)} words chosen", _SELECTION)
         self.source.addItem("Your study plan", _PLAN)
         self.source.addItem("Today's new words", _NEW)
+        self.source.addItem("All your words", _ALL)
         for lst in self._service.lists():
             self.source.addItem(lst.name, lst.id)
         self.source.currentIndexChanged.connect(self._refresh)
@@ -138,6 +139,15 @@ class ContentDialog(QDialog):
             import_button,
         )
         layout.addWidget(take_in)
+
+        everything = SettingsGroup("ALL CONTENT")
+        self.dataset_button = QPushButton("Export all…")
+        self.dataset_button.clicked.connect(self._export_dataset)
+        self.dataset_hint = QLabel("")
+        self.dataset_hint.setObjectName("SettingHint")
+        self.dataset_hint.setWordWrap(True)
+        everything.add("Every enriched word", self.dataset_hint, self.dataset_button)
+        layout.addWidget(everything)
 
         self.open_group = SettingsGroup("WAITING FOR")
         self._open_rows = QVBoxLayout()
@@ -180,6 +190,8 @@ class ContentDialog(QDialog):
             return [word.id for word in self._engine.daily_plan().new_words]
         if choice == _PLAN:
             return self._engine.plan_word_ids()
+        if choice == _ALL:
+            return self._content.all_word_ids()
         return [word.id for word in self._service.list_words(int(choice))]
 
     def _refresh(self) -> None:
@@ -197,6 +209,12 @@ class ContentDialog(QDialog):
             f"{counts[ContentStatus.NONE]:,} with nothing yet, {pair}."
         )
         self.status_scope.setText(f"{len(ids):,} words")
+        enriched = len(self._content.words_with_content())
+        self.dataset_hint.setText(
+            f"{enriched:,} words have content. One file with all of it, in every "
+            "language, dated as a version; it imports back through the same preview."
+        )
+        self.dataset_button.setEnabled(bool(enriched))
 
         candidates = self._content.batch_candidates(ids, self.size.value(), languages)
         self._candidates = candidates
@@ -235,6 +253,11 @@ class ContentDialog(QDialog):
             label.setObjectName("SettingTitle")
             label.setToolTip(batch.path or "")
             line.addWidget(label, 1)
+            again = QPushButton("Send again…")
+            again.setProperty("variant", "ghost")
+            again.setToolTip("Write its file again: the same words, languages and name")
+            again.clicked.connect(lambda _c=False, n=batch.name: self._resend(n))
+            line.addWidget(again)
             forget = QPushButton("Forget")
             forget.setProperty("variant", "ghost")
             forget.setToolTip("It will not come back: offer its words again")
@@ -289,6 +312,40 @@ class ContentDialog(QDialog):
     def _forget(self, name: str) -> None:
         self._content.forget_batch(name)
         self._refresh()
+
+    def _resend(self, name: str) -> None:
+        default = paths.exports_dir() / f"content_{name}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Send Batch Again", str(default), "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            self._content.resend_batch(name, path)
+        except (OSError, LexiTrackError) as exc:
+            show_error(self.error, f"The batch could not be written: {exc}")
+            return
+        show_error(self.error, None)
+        self._refresh()
+        self.export_summary.setText(f"{name} written again to {Path(path).name}.")
+
+    def _export_dataset(self) -> None:
+        default = paths.exports_dir() / "lexitrack-content.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export All Content", str(default), "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            target, count = self._content.export_dataset(path)
+        except (OSError, LexiTrackError) as exc:
+            show_error(self.error, f"The content could not be written: {exc}")
+            return
+        show_error(self.error, None)
+        self.export_summary.setText(
+            f"The content of {count:,} words written to {target.name}. It imports back "
+            "like any batch, through the same preview."
+        )
 
 
 class ContentImportDialog(QDialog):

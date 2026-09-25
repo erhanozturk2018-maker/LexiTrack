@@ -180,6 +180,28 @@ that word, edit it, import it, and choose to replace the fields you want.
 A content file is not a word list. Opening one with *Import words* is
 refused with a message that says so.
 
+**Quality warnings.** Beyond what can be read, the preview warns — without
+rejecting anything — about what an entry says: a collocation that does not
+contain the word, fewer than 2 or more than 5 collocations, more than 3
+contexts, and, for each learner language the file asks for
+(`learner_languages`), a missing meaning or contexts left untranslated.
+
+## The whole vocabulary
+
+- **All your words** is a scope of *Word Content*: batches are taken from
+  every word, so the full vocabulary (thousands of words) is enriched batch
+  by batch — at most 500 words each — resuming where the last one stopped,
+  since a word with content or out in a batch is not offered again.
+- **Send again** writes a waiting batch's file anew — the same words, name
+  and languages — when the first file was lost or came back unusable. The
+  batch stays open until its filled file is imported, or it is forgotten.
+- **Export all** writes every enriched word's content, in every learner
+  language stored, to one file: this format with `"kind": "dataset"` and a
+  `dataset_version` (the time it was taken, `YYYYMMDD-HHMMSS`). It is not a
+  batch — nothing waits for it — and it imports back through the same
+  preview, so a dataset can be kept, compared, edited and restored. Each
+  localization still counts its own `content_version`.
+
 ## Schema 1 files
 
 Schema 1 had a single learner language, written for Turkish-speaking
