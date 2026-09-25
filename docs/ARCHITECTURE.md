@@ -404,6 +404,33 @@ written in the order given, so ordering (A → Z, CEFR, list order) is applied b
 the caller. `ExportContent.group_by_level` asks the PDF exporter for a heading
 wherever the CEFR level changes.
 
+### The study flow
+
+`StudyFlow` (`services/study_flow.py`) is a review session as a state machine
+with no widgets: the queue, the card on screen, whether its meaning is
+revealed, how many were answered, and what Undo would take back. The Today
+page shows it and passes on key presses; it holds no session state of its own
+(a test reads the page's source to keep it that way). Every answer still goes
+through `LearningService.answer` and every Undo through `undo_last_answer`:
+the flow decides what to show next, never what an answer means.
+
+After every step the flow writes its state to `review_sessions.flow_state` as
+versioned JSON (`version`, `route`, `kind`, the queue as word ids, `index`,
+`revealed`, `answered`, `last_answer`), and clears it when the session ends.
+`StudyFlow.restore` rebuilds an open session from it; a state written by a
+newer version is not guessed at. Route V1 is the desktop's review exactly as
+it was; route V2 is built on this object.
+
+### Content
+
+`ContentService` (`services/content_service.py`) reads a word's teaching
+content and moves it in and out in batches: `build_batch` / `export_batch`
+write the words that need content with an instructions prompt,
+`preview_import` validates a filled file and reports fills, conflicts, new and
+duplicate contexts and rejected entries, and `apply_import` writes it in one
+transaction, replacing a conflicting field only when told to. The format is
+in `docs/formats/content-enrichment.md`.
+
 ### Notes
 
 `StoredWord.note` is a short note about a word — a sense (*bank*: money), a

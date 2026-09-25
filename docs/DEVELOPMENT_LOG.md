@@ -684,3 +684,12 @@ page, Progress and an export centre with the V2 phases that change them.
 **Verification:** full suite and lint clean; every page rendered in both
 themes, at the default size, folded (880 px) and wide (1720 px); README
 screenshots regenerated.
+
+## 2026-09-25 — Learning Engine V2, phase 2: the session leaves the page
+
+The review session lived in the Today page: queue, position, reveal, count,
+Undo. It moved, unchanged, into `StudyFlow`, a state machine with no widgets
+that saves itself on the session row after every step and can be restored.
+The page's existing tests passed without a change, which is the check that
+behaviour is the same; new tests cover the flow alone, its saved state,
+restoring it, and a guard that the page holds no session state again.

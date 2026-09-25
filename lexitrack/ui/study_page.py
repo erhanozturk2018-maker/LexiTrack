@@ -48,7 +48,8 @@ from PySide6.QtWidgets import (
 
 from ..models.srs import Rating
 from ..models.word_entry import CEFR_ORDER
-from ..services.learning_service import DailyPlan, LearningService, StudyItem
+from ..services.learning_service import DailyPlan, LearningService
+from ..services.study_flow import StudyFlow
 from .components.cards import StatTile, repolish
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
 from .theme import current_palette
@@ -252,17 +253,11 @@ class StudyPage(QWidget):
     def __init__(self, engine: LearningService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._engine = engine
-        self._queue: list[StudyItem] = []
-        self._index = 0
-        self._session_id: str | None = None
-        self._revealed = False
-        self._answered = 0
+        #: The session itself — queue, position, reveal, Undo — lives in the
+        #: flow; this page only shows it and passes on what the user does.
+        self.flow = StudyFlow(engine)
         self._plan: DailyPlan | None = None
         self._primary: str | None = None
-        # The last answer, for Undo: which word and which button, and the
-        # session it belongs to even after that session has ended.
-        self._last_session_id: str | None = None
-        self._last_answer: tuple[str, Rating] | None = None
         self._setup_pool = 0
         #: Opens a word's history; set by the main window.
         self.history_opener = None
@@ -698,7 +693,7 @@ class StudyPage(QWidget):
 
     def refresh(self) -> None:
         """Re-read everything from the service. Called whenever shown."""
-        if self._session_id is not None:
+        if self.flow.active:
             return
         self._engine.refresh_settings()
         plan = self._engine.daily_plan()
@@ -966,15 +961,9 @@ class StudyPage(QWidget):
     # -- the session -------------------------------------------------------
 
     def start_session(self) -> None:
-        self._queue = self._engine.review_queue()
-        if not self._queue:
+        if not self.flow.start():
             self.refresh()
             return
-        self._session_id = self._engine.start_session().id
-        self._last_session_id = self._session_id
-        self._last_answer = None
-        self._index = 0
-        self._answered = 0
         plan = self._engine.active_plan()
         self.session_title.setText(plan.name if plan else "Today")
         self._stack.setCurrentWidget(self._pages[SESSION])
@@ -982,41 +971,32 @@ class StudyPage(QWidget):
         self.setFocus()
 
     def end_session(self) -> None:
-        if self._session_id is not None:
-            session_id = self._session_id
-            self._engine.finish_session(session_id)
-            self._session_id = None
-            if self._answered:
-                word = "word" if self._answered == 1 else "words"
-                text = f"{self._answered} {word} reviewed."
-                if self._engine.can_undo(session_id):
-                    # The last card of a session is where a slip is most
-                    # likely and least visible: the page has moved on.
-                    self.notify_undo.emit(text, self.undo_last)
-                else:
-                    self.notify.emit(text)
-                self.data_changed.emit()
-        self._queue = []
+        summary = self.flow.finish()
+        if summary is not None and summary.answered:
+            word = "word" if summary.answered == 1 else "words"
+            text = f"{summary.answered} {word} reviewed."
+            if summary.can_undo:
+                # The last card of a session is where a slip is most
+                # likely and least visible: the page has moved on.
+                self.notify_undo.emit(text, self.undo_last)
+            else:
+                self.notify.emit(text)
+            self.data_changed.emit()
         self.refresh()
 
     @property
     def in_session(self) -> bool:
-        return self._session_id is not None
-
-    def _current(self) -> StudyItem | None:
-        if 0 <= self._index < len(self._queue):
-            return self._queue[self._index]
-        return None
+        return self.flow.active
 
     def _show_card(self) -> None:
-        item = self._current()
+        item = self.flow.current
         if item is None:
             self.end_session()
             return
         word = item.word
-        total = len(self._queue)
-        self.session_progress.setText(f"{self._index + 1} / {total}")
-        self.session_line.set_share(self._index / total if total else 0)
+        total = self.flow.total
+        self.session_progress.setText(f"{self.flow.position + 1} / {total}")
+        self.session_line.set_share(self.flow.position / total if total else 0)
         self.session_flag.setVisible(item.is_struggling)
 
         self.word_label.setText(word.word)
@@ -1024,40 +1004,25 @@ class StudyPage(QWidget):
         self.meta_label.setText(meta)
         self.meta_label.setVisible(bool(meta))
 
-        self._revealed = not item.hide_meaning
         self._apply_reveal(word.definition, word.note)
-        self._show_intervals(self._engine.preview_intervals(word.id))
+        self._show_intervals(self.flow.intervals())
         self._show_undo()
 
     def _show_undo(self) -> None:
-        last = self._last_answer
-        possible = (
-            last is not None
-            and self._session_id is not None
-            and self._engine.can_undo(self._session_id)
-        )
+        possible = self.flow.can_undo()
         if possible:
-            word, rating = last
+            word, rating = self.flow.last_answer
             self.undo_button.setText(f"\u21b6 Undo {rating.label} on \u201c{word}\u201d")
         self.undo_button.setVisible(possible)
 
     def undo_last(self) -> None:
         """Take back the last answer: in a session, show that card again."""
-        session_id = self._session_id or self._last_session_id
-        if session_id is None:
-            return
-        word = self._engine.undo_last_answer(session_id)
+        word = self.flow.undo()
         if word is None:
             return
-        self._last_answer = None
         self.notify.emit(f"Took back your answer to \u201c{word.word}\u201d.")
         self.data_changed.emit()
         if self.in_session:
-            self._index = max(self._index - 1, 0)
-            self._answered = max(self._answered - 1, 0)
-            item = self._engine.study_item(word.id)
-            if item is not None and self._index < len(self._queue):
-                self._queue[self._index] = item
             self._show_card()
         else:
             self.refresh()
@@ -1081,7 +1046,7 @@ class StudyPage(QWidget):
         self.answer_hint.setVisible(uniform)
 
     def _apply_reveal(self, definition: str | None, note: str | None) -> None:
-        shown = self._revealed
+        shown = self.flow.revealed
         self.reveal_button.setVisible(not shown)
         self.definition_label.setVisible(shown)
         self.note_label.setVisible(shown and bool(note))
@@ -1090,24 +1055,18 @@ class StudyPage(QWidget):
             self.note_label.setText(note or "")
 
     def _reveal(self) -> None:
-        item = self._current()
-        if item is None or self._revealed:
-            return
-        self._revealed = True
-        self._apply_reveal(item.word.definition, item.word.note)
+        if self.flow.reveal():
+            item = self.flow.current
+            self._apply_reveal(item.word.definition, item.word.note)
 
     def _answer(self, rating: Rating) -> None:
-        item = self._current()
-        if item is None:
+        if self.flow.current is None:
             return
-        outcome = self._engine.answer(item.word.id, rating, session_id=self._session_id)
-        if outcome is not None and not outcome.duplicate:
-            self._answered += 1
-            self._last_answer = (item.word.word, rating)
-            if outcome.marked_known:
-                self.notify.emit(f"“{outcome.word.word}” is now marked as known.")
-        self._index += 1
-        if self._index >= len(self._queue):
+        result = self.flow.answer(rating)
+        outcome = result.outcome
+        if outcome is not None and not outcome.duplicate and outcome.marked_known:
+            self.notify.emit(f"“{outcome.word.word}” is now marked as known.")
+        if result.finished:
             self.end_session()
             return
         self._show_card()
@@ -1127,7 +1086,7 @@ class StudyPage(QWidget):
             self.undo_last()
             return
         if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self._revealed:
+            if self.flow.revealed:
                 self._answer(Rating.GOOD)
             else:
                 self._reveal()

@@ -505,6 +505,10 @@ class LearningService:
     def finish_session(self, session_id: str) -> ReviewSession:
         return self._sessions.finish(session_id, self._clock.now_utc())
 
+    def save_flow_state(self, session_id: str, state: str | None) -> None:
+        """Store where a session's flow stands (see ``services/study_flow.py``)."""
+        self._sessions.set_flow_state(session_id, state)
+
     def close_stale_sessions(self) -> int:
         """Close sessions left open on an earlier day. Called at startup."""
         return self._sessions.finish_stale(self._clock.today(), self._clock.now_utc())
