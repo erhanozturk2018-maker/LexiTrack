@@ -174,8 +174,9 @@ class SettingsDialog(QDialog):
         known = _Group("WORDS YOU KNOW")
         self.mastery_days = _spin(1, 365, " days")
         known.add(
-            "Count as known after",
-            "Once LexiTrack expects you to remember a word this long, it marks it known.",
+            "Offer as known after",
+            "Once LexiTrack expects you to remember a word this long, it offers to mark "
+            "it Known. It never marks a word Known by itself.",
             self.mastery_days,
         )
         self.review_known = _switch()

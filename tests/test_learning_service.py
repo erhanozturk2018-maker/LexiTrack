@@ -17,7 +17,7 @@ from lexitrack.database.connection import Database
 from lexitrack.models.settings import Setting
 from lexitrack.models.source import Source
 from lexitrack.models.srs import CardState, Channel, Rating
-from lexitrack.models.user_word_state import ReviewStatus
+from lexitrack.models.user_word_state import ReviewStatus, StatusCause
 from lexitrack.repositories import (
     ListRepository,
     SourceRepository,
@@ -387,10 +387,10 @@ class TestWorkload:
 
 
 class TestMastery:
-    def test_a_word_becomes_known_once_it_is_stable_enough(
+    def test_a_stable_word_is_suggested_as_known_never_marked(
         self, engine: LearningService, database: Database, clock: FrozenClock
     ) -> None:
-        """Mastery is derived from the schedule, never typed in."""
+        """Long-term memory is derived from the schedule; Known is the user's word."""
         engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 10})
         engine.introduce()
         word_id = None
@@ -400,28 +400,29 @@ class TestMastery:
             clock.advance_to_day_start(1)
             for item in engine.review_queue():
                 outcome = engine.answer(item.word.id, Rating.EASY)
-                if outcome and outcome.marked_known:
+                if outcome and outcome.suggest_known:
                     word_id = outcome.word.id
         assert word_id is not None
-        assert WordRepository(database).get(word_id).status is ReviewStatus.KNOWN
+        words = WordRepository(database)
+        assert words.get(word_id).status is ReviewStatus.UNKNOWN
+        assert word_id in {word.id for word in engine.known_suggestions()}
 
-    def test_mastery_is_reported_once_not_on_every_later_answer(
-        self, engine: LearningService, clock: FrozenClock
+        assert engine.confirm_known([word_id]) == 1
+        assert words.get(word_id).status is ReviewStatus.KNOWN
+        event = StateRepository(database).events_for_word(word_id)[-1]
+        assert event.cause is StatusCause.MASTERY
+        assert word_id not in {word.id for word in engine.known_suggestions()}
+
+    def test_only_suggested_words_can_be_confirmed(
+        self, engine: LearningService, database: Database, clock: FrozenClock
     ) -> None:
-        engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 5})
-        engine.introduce()
-        marks = 0
-        word_id = None
-        for _ in range(10):
-            clock.advance_to_day_start(1)
-            queue = engine.review_queue()
-            if word_id is None and queue:
-                word_id = queue[0].word.id
-            for item in queue:
-                outcome = engine.answer(item.word.id, Rating.EASY)
-                if outcome and outcome.word.id == word_id and outcome.marked_known:
-                    marks += 1
-        assert marks == 1
+        """A stale suggestion cannot record a word as learned that is not."""
+        introduced = [word.id for word in engine.introduce().introduced]
+        clock.advance_to_day_start(1)
+        engine.answer(introduced[0], Rating.GOOD)
+        assert engine.known_suggestions() == []
+        assert engine.confirm_known(introduced[:1]) == 0
+        assert WordRepository(database).get(introduced[0]).status is ReviewStatus.UNKNOWN
 
     def test_a_manual_known_archives_the_card_when_known_words_are_not_reviewed(
         self, engine: LearningService, clock: FrozenClock

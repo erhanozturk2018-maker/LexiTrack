@@ -83,6 +83,11 @@ def answer_all(engine: LearningService, rating: Rating, session_id: str | None =
     return done
 
 
+def confirm_suggested(engine: LearningService) -> int:
+    """Say yes to every "mark Known?" suggestion, as the user would."""
+    return engine.confirm_known([word.id for word in engine.known_suggestions()])
+
+
 class TestStatusEvents:
     def test_a_change_is_recorded_with_its_cause(self, database: Database, words) -> None:
         state = StateRepository(database)
@@ -126,7 +131,10 @@ class TestMastery:
         clock.advance_to_day_start(1)
         answer_all(engine, Rating.EASY)  # day 1: 8 days of stability
         clock.advance_to_day_start(8)
-        answer_all(engine, Rating.EASY)  # day 9: past 21, Known
+        answer_all(engine, Rating.EASY)  # day 9: past 21, suggested
+        events = StateRepository(database).all_events()
+        assert not [event for event in events if event.cause is StatusCause.MASTERY]
+        assert confirm_suggested(engine) == 5
         known = [
             event
             for event in StateRepository(database).all_events()
@@ -145,6 +153,7 @@ class TestMastery:
         answer_all(engine, Rating.EASY)
         clock.advance_to_day_start(8)
         answer_all(engine, Rating.EASY)
+        confirm_suggested(engine)
         conn = database.connection
         mastered = conn.execute(
             "SELECT COUNT(*) FROM word_status_events WHERE cause = 'mastery'"
@@ -269,7 +278,7 @@ class TestUndo:
         assert engine.session(session.id).current_word_id == item.word.id
         assert SessionRepository(database).claim_update(key), "the word can be answered again"
 
-    def test_undoing_the_answer_that_made_a_word_known_takes_that_back_too(
+    def test_undoing_the_answer_that_reached_long_term_memory_takes_back_the_suggestion(
         self, engine: LearningService, clock: FrozenClock, database: Database
     ) -> None:
         engine.introduce()
@@ -277,13 +286,17 @@ class TestUndo:
         answer_all(engine, Rating.EASY)
         clock.advance_to_day_start(8)
         queue = engine.review_queue()
-        engine.answer(queue[0].word.id, Rating.EASY)
-        state = StateRepository(database)
-        assert state.get(queue[0].word.id).status is ReviewStatus.KNOWN
+        outcome = engine.answer(queue[0].word.id, Rating.EASY)
+        assert outcome.suggest_known
+        assert queue[0].word.id in {word.id for word in engine.known_suggestions()}
         engine.undo_last_answer()
+        assert queue[0].word.id not in {word.id for word in engine.known_suggestions()}
+        state = StateRepository(database)
         assert state.get(queue[0].word.id).status is ReviewStatus.UNKNOWN
-        causes = [event.cause for event in state.events_for_word(queue[0].word.id)]
-        assert causes[-2:] == [StatusCause.MASTERY, StatusCause.UNDO]
+        assert not [
+            event for event in state.events_for_word(queue[0].word.id)
+            if event.cause in (StatusCause.MASTERY, StatusCause.UNDO)
+        ], "the status was never touched, so there is nothing to take back"
 
     def test_a_word_answered_again_elsewhere_cannot_be_undone_here(
         self, engine: LearningService, clock: FrozenClock, database: Database
@@ -309,6 +322,7 @@ class TestJourney:
         answer_all(engine, Rating.EASY)
         clock.advance_to_day_start(8)
         answer_all(engine, Rating.EASY)
+        confirm_suggested(engine)
         journey = ProgressService(database, engine).journey(words[0])
         kinds = [step.kind for step in journey.steps]
         assert kinds[0] == "introduced"
@@ -318,7 +332,7 @@ class TestJourney:
         assert journey.plan_name == "Test plan"
         assert journey.group is Group.LEARNED
         assert journey.known_on == clock.today()
-        assert kinds[-1] == "status", "Known comes after the answer that made it"
+        assert kinds[-1] == "status", "Known comes after the answer that suggested it"
 
     def test_an_answer_taken_back_is_shown_and_not_counted(
         self, engine: LearningService, clock: FrozenClock, database: Database, words
@@ -351,7 +365,8 @@ class TestProgressViews:
         clock.advance_to_day_start(1)
         answer_all(engine, Rating.EASY)
         clock.advance_to_day_start(8)
-        answer_all(engine, Rating.EASY)  # the first five: learned here
+        answer_all(engine, Rating.EASY)
+        confirm_suggested(engine)  # the first five: learned here
         engine.introduce()
         engine.mark_known([words[5]])  # introduced today, then Known by hand
         StateRepository(database).set_status(words[-1], ReviewStatus.KNOWN)  # never studied

@@ -16,9 +16,11 @@ The rules implemented here, in order of how much trouble they save:
   finite evening and an endless one.
 * **Intake pauses when the review load is already over capacity.** Adding 25
   more words to a day that is already too big does not make tomorrow better.
-* **Mastery is derived, never typed in.** When a word's stability passes the
-  threshold it becomes Known by itself; the user can still say so by hand, and
-  that archives the card instead of deleting it.
+* **Long-term memory is derived; Known is the user's.** When a word's
+  stability passes the threshold the answer says so and the word is offered as
+  Known (:meth:`known_suggestions`). Only the user marks it (:meth:`confirm_known`,
+  recorded as learned here, or by hand), and that archives the card instead of
+  deleting it.
 
 The service owns no Qt and no network code. It is given a clock, so a test can
 run a year of study in a second, and it never sleeps or polls.
@@ -152,8 +154,9 @@ class AnswerOutcome:
     duplicate: bool = False
     became_struggling: bool = False
     reached_mastery: bool = False
-    #: True when the word's status became Known as a result.
-    marked_known: bool = False
+    #: True when the word is in long-term memory and not yet Known: the
+    #: caller offers to mark it Known. The engine never does it itself.
+    suggest_known: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +166,6 @@ class _LastAnswer:
     word_id: int
     card_before: SrsCard
     log_id: int
-    status_before: ReviewStatus
-    marked_known: bool
     session_id: str | None
     update_key: str | None
     answered_at: datetime
@@ -556,10 +557,10 @@ class LearningService:
         now = self._clock.now_utc()
         today = self._clock.today()
         result = self._scheduler.review(card, rating, now)
-        marked_known = False
-        # One answer is one event: the card, its log, the attempt, the
-        # session count and any status change are written together or not at
-        # all, and Undo takes all of them back.
+        # One answer is one event: the card, its log, the attempt and the
+        # session count are written together or not at all, and Undo takes
+        # all of them back. The word's status is not part of it: reaching
+        # long-term memory is reported, and only the user marks a word Known.
         with self._db.transaction():
             self._cards.save(result.card)
             log_id = self._cards.log(
@@ -585,23 +586,10 @@ class LearningService:
             self._attempts.add(_v1_attempt(word.id, rating, now, today, session_id, log_id))
             if session_id:
                 self._sessions.update(session_id, done_increment=1, clear_current=True)
-
-            if result.reached_mastery and word.status is not ReviewStatus.KNOWN:
-                plan = self.active_plan()
-                self._state.set_status(
-                    word.id,
-                    ReviewStatus.KNOWN,
-                    cause=StatusCause.MASTERY,
-                    plan_id=plan.id if plan else card.origin_plan_id,
-                    at=now,
-                )
-                marked_known = True
         self._last_answer = _LastAnswer(
             word_id=word.id,
             card_before=card,
             log_id=log_id,
-            status_before=word.status,
-            marked_known=marked_known,
             session_id=session_id,
             update_key=update_key,
             answered_at=now,
@@ -616,7 +604,7 @@ class LearningService:
             interval_days=self._clock.days_between(now, result.card.due_at),
             became_struggling=result.became_struggling,
             reached_mastery=result.reached_mastery,
-            marked_known=marked_known,
+            suggest_known=result.reached_mastery and word.status is not ReviewStatus.KNOWN,
         )
 
     # -- undo --------------------------------------------------------------
@@ -642,10 +630,6 @@ class LearningService:
             self._cards.save(last.card_before)
             self._cards.mark_undone(last.log_id, now)
             self._attempts.mark_undone_for_log(last.log_id, now)
-            if last.marked_known:
-                self._state.set_status(
-                    last.word_id, last.status_before, cause=StatusCause.UNDO, at=now
-                )
             if last.session_id:
                 self._sessions.update(
                     last.session_id, done_increment=-1, current_word_id=last.word_id
@@ -683,7 +667,9 @@ class LearningService:
 
     # -- status --------------------------------------------------------------
 
-    def mark_known(self, word_ids: Sequence[int]) -> int:
+    def mark_known(
+        self, word_ids: Sequence[int], cause: StatusCause = StatusCause.MANUAL
+    ) -> int:
         """The user declares words Known by hand.
 
         The card is archived rather than deleted, so resetting the status
@@ -694,12 +680,50 @@ class LearningService:
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         if not ids:
             return 0
+        plan = self.active_plan() if cause is StatusCause.MASTERY else None
         changed = self._state.set_status_many(
-            ids, ReviewStatus.KNOWN, cause=StatusCause.MANUAL, at=self._clock.now_utc()
+            ids,
+            ReviewStatus.KNOWN,
+            cause=cause,
+            plan_id=plan.id if plan else None,
+            at=self._clock.now_utc(),
         )
         if not self._settings.review_known_words:
             self._cards.set_state(ids, CardState.ARCHIVED)
         return changed
+
+    def known_suggestions(self) -> list[StoredWord]:
+        """Words in long-term memory that are not Known yet, most stable first.
+
+        Long-term means the card's stability has passed the threshold in
+        Settings (21 days by default): FSRS expects the word to be remembered
+        at least that long. The engine only suggests; :meth:`confirm_known`
+        is the user saying yes.
+        """
+        threshold = self._settings.mastery_stability_days
+        cards = [
+            card
+            for card in self._cards.all_cards()
+            if card.stability is not None
+            and card.stability >= threshold
+            and card.state is not CardState.ARCHIVED
+        ]
+        cards.sort(key=lambda card: card.stability or 0, reverse=True)
+        words = self._words_in_order([card.word_id for card in cards])
+        return [word for word in words if word.status is not ReviewStatus.KNOWN]
+
+    def confirm_known(self, word_ids: Sequence[int]) -> int:
+        """Mark suggested words Known, recorded as learned here (cause MASTERY).
+
+        Only words that are still suggested are marked, so a stale list — a
+        word forgotten since, say — cannot record a word as learned that the
+        schedule no longer believes is.
+        """
+        suggested = {word.id for word in self.known_suggestions()}
+        return self.mark_known(
+            [word_id for word_id in word_ids if int(word_id) in suggested],
+            cause=StatusCause.MASTERY,
+        )
 
     def resume(self, word_ids: Sequence[int]) -> int:
         """Bring archived cards back into the schedule."""

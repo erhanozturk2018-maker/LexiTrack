@@ -238,7 +238,7 @@ class ProgressPage(QWidget):
         panel_layout.addWidget(
             _label(
                 "How long each word is expected to be remembered, from its last answer. "
-                "A word counts as Known once that passes the threshold in Settings.",
+                "Past the threshold in Settings, a word is offered to you as Known.",
                 "Faint",
                 wrap=True,
             )

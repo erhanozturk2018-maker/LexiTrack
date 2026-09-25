@@ -49,11 +49,14 @@ follows from it. With the default settings:
 | 0 | Studied the new words and confirmed | — | Tomorrow |
 | 1 | Good | 2 days | Day 3 |
 | 3 | Good | 11 days | Day 14 |
-| 14 | Good | 46 days | Marked **Known** |
+| 14 | Good | 46 days | In long-term memory: **Mark Known?** |
 
-A word becomes Known when that number passes 21 days — three Goods, or two
-Easys, but never on the day you first study it. Answering Easy every time gets
-there on day 9; Hard alone never does, because it barely moves the number.
+A word is in **long-term memory** when that number passes 21 days — three
+Goods, or two Easys, but never on the day you first study it. Answering Easy
+every time gets there on day 9; Hard alone never does, because it barely moves
+the number. LexiTrack then offers to mark it Known; it never does so itself,
+because Known is your judgement, and until you say yes the word keeps coming
+back.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not

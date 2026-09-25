@@ -247,6 +247,8 @@ class StudyPage(QWidget):
     notify = Signal(str)
     #: A message whose Undo button calls the given function.
     notify_undo = Signal(str, object)
+    #: A message with one action: ``(label, callback)``.
+    notify_action = Signal(str, object)
     #: The user wants today's words (or the hard ones) as a file.
     export_requested = Signal()
 
@@ -1064,12 +1066,23 @@ class StudyPage(QWidget):
             return
         result = self.flow.answer(rating)
         outcome = result.outcome
-        if outcome is not None and not outcome.duplicate and outcome.marked_known:
-            self.notify.emit(f"“{outcome.word.word}” is now marked as known.")
+        if outcome is not None and not outcome.duplicate and outcome.suggest_known:
+            self._suggest_known(outcome.word)
         if result.finished:
             self.end_session()
             return
         self._show_card()
+
+    def _suggest_known(self, word) -> None:
+        """The word reached long-term memory: offer, never decide, Known."""
+        def confirm() -> None:
+            if self._engine.confirm_known([word.id]):
+                self.notify.emit(f"“{word.word}” is marked Known.")
+                self.data_changed.emit()
+
+        self.notify_action.emit(
+            f"“{word.word}” is in long-term memory.", ("Mark Known", confirm)
+        )
 
     # -- keyboard ----------------------------------------------------------
 

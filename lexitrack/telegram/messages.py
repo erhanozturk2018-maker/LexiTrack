@@ -222,8 +222,8 @@ def answer_line(outcome: AnswerOutcome) -> str:
     mark = _RATING_MARK[outcome.rating]
     when = "tomorrow" if outcome.interval_days <= 1 else f"in {outcome.interval_days} days"
     text = f"{mark} {outcome.word.word}: {outcome.rating.label} — back {when}"
-    if outcome.marked_known:
-        text += " · now known"
+    if outcome.suggest_known:
+        text += " · in long-term memory"
     elif outcome.became_struggling:
         text += " · flagged as hard"
     return text

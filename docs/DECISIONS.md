@@ -1013,3 +1013,25 @@ tests that name them are untouched.
 made to fit it (the word column absorbs the difference) rather than scroll
 sideways; the details panel hides its buttons while the selection bar, which
 carries the same actions, floats over them.
+
+---
+
+## 70. Long-term memory is suggested as Known; only the user marks it
+
+**Decision.** When a word's stability passes the threshold (21 days by
+default), the answer reports it and the word is offered as Known — a toast
+with *Mark Known* now, a list on Progress later. The engine no longer changes
+the status itself. Confirming records the change with cause `mastery`, so
+*learned here* still means "reached long-term memory", now with the user's
+agreement. Words made Known automatically before this are left as they are.
+
+**Reason.** Memory, skill and status are three things (V2): FSRS predicts
+retention of a word-to-meaning link, which is not the same as the user's
+judgement that they know the word — and V2 will ask harder questions than
+V1 did. A status the user did not set was also the one thing in the app they
+could not trace back to a decision of theirs.
+
+**Trade-off.** One more click per learned word, and words the user never
+confirms keep being reviewed. That is intended: an unconfirmed word is one the
+user has not called known.
+

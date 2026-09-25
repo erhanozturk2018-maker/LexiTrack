@@ -81,7 +81,7 @@ def status_sentence(step: JourneyStep) -> str:
     to = step.status_to
     cause = step.cause
     if cause is StatusCause.MASTERY:
-        text = "Counted as Known by the schedule"
+        text = "Marked Known after reaching long-term memory"
     elif cause is StatusCause.UNDO:
         text = f"Back to {_status_word(to)}: an answer was taken back"
     elif cause is StatusCause.SORTING:
@@ -131,11 +131,11 @@ def why_sentence(journey: WordJourney) -> str:
 
 
 class StabilityChart(QWidget):
-    """Stability after each answer, against the line that makes a word Known.
+    """Stability after each answer, against the line of long-term memory.
 
     A step line, because stability only changes when an answer is given, with
     a dot per answer in that answer's colour. The dashed line is the mastery
-    threshold; a word counts as Known on the answer that first crosses it.
+    threshold; from the answer that first crosses it, the word is offered as Known.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:

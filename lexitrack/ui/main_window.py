@@ -310,6 +310,9 @@ class MainWindow(QMainWindow):
         self.study.notify_undo.connect(
             lambda text, undo: self._toast_widget.show_message(text, undo=undo)
         )
+        self.study.notify_action.connect(
+            lambda text, action: self._toast_widget.show_message(text, action=action)
+        )
         self.study.export_requested.connect(self.export_study)
 
         self._page_widgets = {
