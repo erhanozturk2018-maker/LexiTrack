@@ -31,9 +31,14 @@ its icons; hover over one for its name.
 1. **Learn the new words.** Study them however suits you, then press
    **I studied these**. That is not an answer: the first real question comes
    tomorrow.
-2. **Review.** Words come one at a time. Press **Space** to see the meaning,
-   then answer **1** Again, **2** Hard, **3** Good or **4** Easy. Pressed the
-   wrong one? **Ctrl+Z** takes back your last answer.
+2. **Review.** Words come one at a time, and you **type** them from their
+   meaning, or later from a sentence with a gap. **Enter** checks; **Ctrl+H**
+   shows the first letter; **Enter** with nothing typed means you don't know.
+   Missed it? The answer stays hidden and an easier question follows, down to
+   picking the word among four (**1**–**4**). A word you forgot is shown again
+   and asked once more later, which never changes its schedule. A word with no
+   meaning stored is reviewed as before: **Space**, then **1**–**4**.
+   **Ctrl+Z** takes back the last word, with every question about it.
 
 On your phone the Telegram bot does the same, if you set it up in
 *Settings → Telegram*.
@@ -42,7 +47,11 @@ On your phone the Telegram bot does the same, if you set it up in
 
 The four answers do not move a word along a fixed track; they change one
 number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. With the default settings:
+follows from it. For a word with a meaning to ask from you do not pick the
+answer: your review decides it — **Good** when you recalled the word, **Easy**
+when at once, **Hard** with a hint, a slip, slowly, or when you could only
+pick it out among four, **Again** when not even that. With the default
+settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |

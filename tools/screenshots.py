@@ -180,6 +180,20 @@ def main() -> int:
     return 0
 
 
+#: Definitions for sample words that have none, for the review card screenshot.
+SAMPLE_DEFINITIONS = {
+    "for": "intended to be given to or used by someone",
+    "banana": "a long curved fruit with a yellow skin",
+    "accident": "something bad that happens by chance",
+    "carrot": "a long orange vegetable that grows under the ground",
+    "horse": "a large animal that people ride",
+    "ticket": "a piece of paper that lets you travel or enter a place",
+    "scientist": "a person who studies the natural world",
+    "dad": "an informal word for father",
+    "play": "to do things for fun, as children do",
+}
+
+
 def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
     """Study, a review card, the plan window and Settings, from a week of use."""
     engine.create_plan("Oxford 3000", list_ids=[list_id])
@@ -195,6 +209,17 @@ def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
             engine.answer(item.word.id, Rating.AGAIN if index % 6 == 0 else Rating.GOOD)
     clock.advance_to_day_start(1)
     clock.advance(hours=4)
+    # A definition for the sample's words that have none, so the review card
+    # is shown asking the V2 way: the word from its meaning.
+    connection = window._service.database.connection
+    for item in engine.review_queue():
+        definition = SAMPLE_DEFINITIONS.get(item.word.normalized_word)
+        if definition:
+            connection.execute(
+                "UPDATE word_sources SET definition = ? WHERE word_id = ? "
+                "AND (definition IS NULL OR definition = '')",
+                (definition, item.word.id),
+            )
 
     for name in (ThemeName.LIGHT, ThemeName.DARK):
         theme.apply(name)

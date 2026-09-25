@@ -265,11 +265,27 @@ has one button for the next thing to do:
    level; hover over one for its meaning. Study them however suits you — the
    list can be copied with meanings or exported as a PDF — then press
    **I studied these 25**. They are asked for the first time tomorrow.
-2. **Review.** Words due today come one at a time. Press **Space** to see the
-   meaning, then answer **1** Again, **2** Hard, **3** Good or **4** Easy. Each
-   button shows when the word would come back. **Esc** stops and keeps
-   everything answered so far. Pressed the wrong one? **Ctrl+Z**, or the
-   *Undo* under the card, takes back your last answer and shows the card again.
+2. **Review.** Words due today come one at a time, and you **type** them: from
+   their meaning (the Turkish one if the word has one, otherwise its English
+   definition, with the word itself hidden), and once you can do that, from a
+   sentence or a phrase with a gap. **Enter** checks it; small slips are
+   accepted. **Ctrl+H** shows the first letter; **Enter** with nothing typed
+   means you don't know.
+
+   Missed it? The answer stays hidden and you get an easier question — the
+   word from its meaning, then the word among four (keys **1**–**4**). Then the
+   card says what happened and when the word comes back, and **Enter** moves
+   on. A word you forgot, or could only pick out, is shown again in full and
+   asked once more a few cards later, in a different way. That practice
+   never changes its schedule.
+
+   A word with no meaning stored is reviewed as before: **Space** shows the
+   meaning, then **1** Again, **2** Hard, **3** Good or **4** Easy.
+
+   **Esc** stops and keeps everything answered so far. **Ctrl+Z**, or the
+   *Undo* under the card, takes back the last word — its answer and every
+   question about it — and asks it again. The full rules are in
+   [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md#review-route-v2).
 
 ![A review card](docs/screenshots/study-session.png)
 
@@ -282,7 +298,11 @@ the month. Click a learned or hard word for its history.
 
 The four answers do not move a word along a fixed track; they change one
 number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. With the default settings:
+follows from it. For a word with a meaning to ask from you do not pick the
+answer: your review decides it — **Good** when you recalled the word, **Easy**
+when at once, **Hard** with a hint, a slip, slowly, or when you could only
+pick it out among four, **Again** when not even that. With the default
+settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |
@@ -489,8 +509,10 @@ key in one place, with a filter.
 
 | Where | Key | Action |
 | --- | --- | --- |
-| Today's session | `Space` | Show the meaning; once it shows, answer Good |
-| | `1` / `2` / `3` / `4` | Again / Hard / Good / Easy |
+| Today's session | `Enter` | Check the word you typed; empty: I don't know; after the result: next |
+| | `Ctrl+H` | Show the first letter |
+| | `1` / `2` / `3` / `4` | Choose among four; for a word with no meaning, Again / Hard / Good / Easy |
+| | `Space` | For a word with no meaning: show it, then answer Good |
 | | `Esc` | Stop and keep what you answered |
 | | `Ctrl+Z` | Take back your last answer |
 | Flashcards | `K` | I Know |

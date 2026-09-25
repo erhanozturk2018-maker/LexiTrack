@@ -9,9 +9,11 @@ The page has three faces and shows exactly one of them:
    thing to do), then sections whose titles sit outside their cards — the
    new words as chips grouped by level, the week as seven day tiles, the
    words you find hard, and the last thirty days as stat tiles.
-3. **A review session** — the same card as Review's flashcards: the word,
-   a chip for context, four answers inside the card with their keys, and
-   the count in the card's corner.
+3. **A review session** — one card (``components/review_card.py``) that
+   asks what :class:`~lexitrack.services.review_flow.ReviewFlow` says is
+   next: type the word from its meaning or a context, choose it among four,
+   see it taught again — or, for a word with nothing to ask from, the V1
+   card with four answers.
 
 Two decisions worth knowing:
 
@@ -31,7 +33,7 @@ from collections import OrderedDict
 from datetime import date
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QKeySequence, QPainter
+from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -49,21 +51,12 @@ from PySide6.QtWidgets import (
 from ..models.srs import Rating
 from ..models.word_entry import CEFR_ORDER
 from ..services.learning_service import DailyPlan, LearningService
-from ..services.study_flow import StudyFlow
+from ..services.review_flow import Feedback, ReviewFlow, StepKind
 from .components.cards import StatTile, repolish
 from .components.chips import ChipFlow, DayProgress, WeekStrip, chip
-from .theme import current_palette
+from .components.review_card import ReviewCard, interval_text
 from .theme.palette import METRICS
 from .widgets import PageColumn
-
-#: Which button style each answer gets. Amber for "not yet", green for
-#: "solid", and Easy the solid green: the flashcards' own colour language.
-_ANSWER_STYLE: dict[Rating, tuple[str, str | None]] = {
-    Rating.AGAIN: ("1", "unknown"),
-    Rating.HARD: ("2", None),
-    Rating.GOOD: ("3", "known"),
-    Rating.EASY: ("4", "known-solid"),
-}
 
 EMPTY, DAY, SESSION = "empty", "day", "session"
 
@@ -156,82 +149,6 @@ class _Step(QWidget):
         self.setAccessibleName(f"{text}. {meta}")
 
 
-class _SessionProgress(QWidget):
-    """The thin line along the top edge of the session card."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._share = 0.0
-        self.setFixedHeight(4)
-
-    def set_share(self, share: float) -> None:
-        self._share = min(max(share, 0.0), 1.0)
-        self.update()
-
-    def paintEvent(self, _event) -> None:  # noqa: N802
-        palette = current_palette()
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        radius = self.height() / 2
-        painter.setBrush(QColor(palette.surface_sunken))
-        painter.drawRoundedRect(self.rect(), radius, radius)
-        width = round(self.width() * self._share)
-        if width:
-            painter.setBrush(QColor(palette.accent))
-            painter.drawRoundedRect(0, 0, width, self.height(), radius, radius)
-        painter.end()
-
-
-class _AnswerButton(QPushButton):
-    """An answer: its key, its name and when the word comes back.
-
-    Built from labels inside the button because a QPushButton cannot mix type
-    sizes in its own text, and the key and the interval must be smaller and
-    quieter than the answer itself.
-    """
-
-    def __init__(self, rating: Rating, key: str, variant: str | None) -> None:
-        super().__init__()
-        self.rating = rating
-        self.setObjectName("AnswerButton")
-        if variant:
-            self.setProperty("variant", variant)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"{rating.label} ({key})")
-        self.setAccessibleName(rating.label)
-        self.setFixedHeight(60)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(1)
-        layout.addStretch(1)
-        top = QHBoxLayout()
-        top.setSpacing(6)
-        top.addStretch(1)
-        self.key = _label(key, "AnswerKey")
-        self.key.setFixedHeight(18)
-        self.key.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.title = _label(rating.label, "AnswerTitle")
-        top.addWidget(self.key, 0, Qt.AlignmentFlag.AlignVCenter)
-        top.addWidget(self.title, 0, Qt.AlignmentFlag.AlignVCenter)
-        top.addStretch(1)
-        layout.addLayout(top)
-        self.sub = _label("", "AnswerSub")
-        self.sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.sub)
-        layout.addStretch(1)
-        for child in (self.key, self.title, self.sub):
-            child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-    def set_interval(self, text: str) -> None:
-        self.sub.setText(text)
-        self.sub.setVisible(bool(text))
-
-    def text(self) -> str:  # noqa: D102 - what a reader of the button sees
-        interval = self.sub.text() if not self.sub.isHidden() else ""
-        return f"{self.rating.label}\n{interval}" if interval else self.rating.label
-
-
 class StudyPage(QWidget):
     """Today's work, and the review session that clears it."""
 
@@ -257,7 +174,7 @@ class StudyPage(QWidget):
         self._engine = engine
         #: The session itself — queue, position, reveal, Undo — lives in the
         #: flow; this page only shows it and passes on what the user does.
-        self.flow = StudyFlow(engine)
+        self.flow = ReviewFlow(engine)
         self._plan: DailyPlan | None = None
         self._primary: str | None = None
         self._setup_pool = 0
@@ -603,88 +520,27 @@ class StudyPage(QWidget):
         bar.addWidget(end_button, 0, Qt.AlignmentFlag.AlignTop)
         outer.addLayout(bar)
 
-        card = QFrame()
-        card.setObjectName("SessionCard")
-        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        card.setFixedWidth(600)
-        card_outer = QVBoxLayout(card)
-        card_outer.setContentsMargins(0, 0, 0, 0)
-        card_outer.setSpacing(0)
-
-        body = QVBoxLayout()
-        body.setContentsMargins(m.space_6, m.space_5, m.space_6, m.space_4)
-        body.setSpacing(m.space_3)
-        self.session_line = _SessionProgress()
-        body.addWidget(self.session_line)
-        top = QHBoxLayout()
-        self.session_flag = chip("Hard for you", tone="hard")
-        self.session_flag.setToolTip("You have missed this word several times")
-        top.addWidget(self.session_flag)
-        top.addStretch(1)
-        body.addLayout(top)
-        body.addSpacing(m.space_3)
-
-        self.word_label = _label("", "WordLabel", wrap=True)
-        self.word_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.addWidget(self.word_label)
-        self.meta_label = _label("", "MetaLabel")
-        self.meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body.addWidget(self.meta_label)
-
-        meaning = QVBoxLayout()
-        meaning.setSpacing(m.space_1)
-        self.reveal_button = QPushButton("Show meaning   Space")
-        self.reveal_button.setProperty("variant", "ghost")
-        self.reveal_button.setToolTip("Space")
-        self.reveal_button.clicked.connect(self._reveal)
-        meaning.addWidget(self.reveal_button, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.definition_label = _label("", "DefinitionLabel", wrap=True)
-        self.definition_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        meaning.addWidget(self.definition_label)
-        self.note_label = _label("", "SenseLabel", wrap=True)
-        self.note_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        meaning.addWidget(self.note_label)
-        holder = QWidget()
-        holder.setObjectName("PanelBody")
-        holder.setLayout(meaning)
-        # Room for a two-line meaning is reserved, so revealing it does not
-        # push the answer buttons down under the pointer.
-        holder.setMinimumHeight(64)
-        body.addWidget(holder)
-        body.addSpacing(m.space_2)
-
-        answers = QHBoxLayout()
-        answers.setSpacing(m.space_2)
-        self.answer_buttons: dict[Rating, _AnswerButton] = {}
-        for rating in Rating:
-            key, variant = _ANSWER_STYLE[rating]
-            button = _AnswerButton(rating, key, variant)
-            button.clicked.connect(lambda _checked=False, r=rating: self._answer(r))
-            answers.addWidget(button, 1)
-            self.answer_buttons[rating] = button
-        body.addLayout(answers)
-
-        footer = QHBoxLayout()
-        self.session_progress = _label("", "CardFooter")
-        self.answer_hint = _label("", "CardFooter")
-        self.answer_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        escape_hint = _label("Esc to stop", "CardFooter")
-        # Names the answer it would take back, so a slip is recognised
-        # before it is undone rather than after.
-        self.undo_button = QPushButton("")
-        self.undo_button.setObjectName("FooterAction")
-        self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.undo_button.setToolTip("Take back your last answer (Ctrl+Z)")
-        self.undo_button.clicked.connect(self.undo_last)
-        self.undo_button.hide()
-        footer.addWidget(self.session_progress)
-        footer.addWidget(self.undo_button)
-        footer.addStretch(1)
-        footer.addWidget(self.answer_hint)
-        footer.addStretch(1)
-        footer.addWidget(escape_hint)
-        body.addLayout(footer)
-        card_outer.addLayout(body)
+        card = ReviewCard()
+        self.card = card
+        card.submitted.connect(self._on_submitted)
+        card.chosen.connect(self._on_chosen)
+        card.graded.connect(self._on_graded)
+        card.rated.connect(self._answer)
+        card.reveal_requested.connect(self._reveal)
+        card.continue_requested.connect(self._continue)
+        card.undo_requested.connect(self.undo_last)
+        # The card's parts, by the names the page has always had.
+        self.session_line = card.session_line
+        self.session_flag = card.session_flag
+        self.word_label = card.word_label
+        self.meta_label = card.meta_label
+        self.reveal_button = card.reveal_button
+        self.definition_label = card.definition_label
+        self.note_label = card.note_label
+        self.answer_buttons = card.answer_buttons
+        self.answer_hint = card.answer_hint
+        self.undo_button = card.undo_button
+        self.session_progress = card.session_progress
 
         outer.addStretch(1)
         outer.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -970,7 +826,6 @@ class StudyPage(QWidget):
         self.session_title.setText(plan.name if plan else "Today")
         self._stack.setCurrentWidget(self._pages[SESSION])
         self._show_card()
-        self.setFocus()
 
     def end_session(self) -> None:
         summary = self.flow.finish()
@@ -991,34 +846,26 @@ class StudyPage(QWidget):
         return self.flow.active
 
     def _show_card(self) -> None:
-        item = self.flow.current
-        if item is None:
+        step = self.flow.current
+        if step is None:
             self.end_session()
             return
-        word = item.word
-        total = self.flow.total
-        self.session_progress.setText(f"{self.flow.position + 1} / {total}")
-        self.session_line.set_share(self.flow.position / total if total else 0)
-        self.session_flag.setVisible(item.is_struggling)
-
-        self.word_label.setText(word.word)
-        meta = " · ".join(part for part in (word.part_of_speech, word.cefr_level) if part)
-        self.meta_label.setText(meta)
-        self.meta_label.setVisible(bool(meta))
-
-        self._apply_reveal(word.definition, word.note)
-        self._show_intervals(self.flow.intervals())
+        self.card.show_step(step, revealed=self.flow.revealed, intervals=self.flow.intervals())
+        self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
+        if step.kind not in (StepKind.TYPE, StepKind.WRITE):
+            self.setFocus()
 
     def _show_undo(self) -> None:
         possible = self.flow.can_undo()
+        text = None
         if possible:
             word, rating = self.flow.last_answer
-            self.undo_button.setText(f"\u21b6 Undo {rating.label} on \u201c{word}\u201d")
-        self.undo_button.setVisible(possible)
+            text = f"\u21b6 Undo {rating.label} on \u201c{word}\u201d"
+        self.card.set_undo(text)
 
     def undo_last(self) -> None:
-        """Take back the last answer: in a session, show that card again."""
+        """Take back the last answer: in a session, show that word again."""
         word = self.flow.undo()
         if word is None:
             return
@@ -1030,45 +877,52 @@ class StudyPage(QWidget):
             self.refresh()
 
     def _show_intervals(self, preview: dict[Rating, int]) -> None:
-        """Label the answers with when the word would come back.
-
-        Early on, every answer lands tomorrow — the learning step is a day, and
-        a card with almost no stability cannot be pushed further out. Saying
-        "tomorrow" four times looks like a bug, so then the buttons carry only
-        their names and the card's footer says it once. Compared as the words
-        the user reads, not as raw days: 0 and 1 are the same sentence.
-        """
-        labels = {rating: _interval(preview.get(rating)) for rating in Rating}
-        uniform = len(set(labels.values())) <= 1
-        for rating, button in self.answer_buttons.items():
-            button.set_interval("" if uniform else labels[rating])
-        self.answer_hint.setText(
-            f"Every answer brings it back {labels[Rating.GOOD]}" if uniform else ""
-        )
-        self.answer_hint.setVisible(uniform)
-
-    def _apply_reveal(self, definition: str | None, note: str | None) -> None:
-        shown = self.flow.revealed
-        self.reveal_button.setVisible(not shown)
-        self.definition_label.setVisible(shown)
-        self.note_label.setVisible(shown and bool(note))
-        if shown:
-            self.definition_label.setText(definition or "No definition stored for this word.")
-            self.note_label.setText(note or "")
+        self.card.show_intervals(preview)
 
     def _reveal(self) -> None:
         if self.flow.reveal():
-            item = self.flow.current
-            self._apply_reveal(item.word.definition, item.word.note)
+            self.card.show_meaning(True)
 
     def _answer(self, rating: Rating) -> None:
-        if self.flow.current is None:
+        """A V1 answer to a word with nothing to ask from: no pause after it."""
+        step = self.flow.current
+        if step is None or step.kind is not StepKind.RECALL:
             return
-        result = self.flow.answer(rating)
-        outcome = result.outcome
+        feedback = self.flow.rate(rating)
+        self._after_rating(feedback)
+        if feedback.finished:
+            self.end_session()
+            return
+        self._show_card()
+
+    def _on_submitted(self, text: str, response_ms: int, hinted: bool) -> None:
+        self._show_feedback(self.flow.submit(text, response_ms, hinted))
+
+    def _on_chosen(self, index: int, response_ms: int) -> None:
+        self._show_feedback(self.flow.choose(index, response_ms))
+
+    def _on_graded(self, used_well: bool, effortful: bool) -> None:
+        self._show_feedback(self.flow.grade(used_well, effortful))
+
+    def _show_feedback(self, feedback: Feedback) -> None:
+        self._after_rating(feedback)
+        self.card.show_feedback(feedback)
+        self.card.set_progress(self.flow.position, self.flow.total)
+        self._show_undo()
+
+    def _after_rating(self, feedback: Feedback) -> None:
+        outcome = feedback.outcome
         if outcome is not None and not outcome.duplicate and outcome.suggest_known:
             self._suggest_known(outcome.word)
-        if result.finished:
+
+    def _continue(self) -> None:
+        """Enter after feedback or a teaching page: on to the next step."""
+        if not self.card.waiting:
+            return
+        step = self.flow.current
+        if step is not None and step.kind is StepKind.TEACH and self.card.step is step:
+            self.flow.proceed()
+        if self.flow.current is None:
             self.end_session()
             return
         self._show_card()
@@ -1087,7 +941,7 @@ class StudyPage(QWidget):
     # -- keyboard ----------------------------------------------------------
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Numbers answer, Space reveals, Escape leaves — during a session only."""
+        """The session's keys: they depend on what the card is asking."""
         if not self.in_session:
             super().keyPressEvent(event)
             return
@@ -1098,22 +952,39 @@ class StudyPage(QWidget):
         if event.matches(QKeySequence.StandardKey.Undo):
             self.undo_last()
             return
-        if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if self.flow.revealed:
-                self._answer(Rating.GOOD)
-            else:
-                self._reveal()
+        enter = key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if self.card.waiting and enter:
+            self._continue()
             return
-        ratings = {
-            Qt.Key.Key_1: Rating.AGAIN,
-            Qt.Key.Key_2: Rating.HARD,
-            Qt.Key.Key_3: Rating.GOOD,
-            Qt.Key.Key_4: Rating.EASY,
-        }
-        if key in ratings:
-            self._answer(ratings[key])
-            return
+        step = self.flow.current
+        number = _NUMBER_KEYS.get(key)
+        if step is not None and step.kind is StepKind.RECALL:
+            if enter:
+                if self.flow.revealed:
+                    self._answer(Rating.GOOD)
+                else:
+                    self._reveal()
+                return
+            if number is not None:
+                self._answer(Rating(number + 1))
+                return
+        if step is not None and number is not None and not self.card.waiting:
+            if step.kind is StepKind.CHOOSE:
+                self.card.choose(number)
+                return
+            if step.kind is StepKind.WRITE:
+                self.card.grade(number)
+                return
         super().keyPressEvent(event)
+
+
+#: Keys 1–4, as indexes 0–3.
+_NUMBER_KEYS = {
+    Qt.Key.Key_1: 0,
+    Qt.Key.Key_2: 1,
+    Qt.Key.Key_3: 2,
+    Qt.Key.Key_4: 3,
+}
 
 
 def _meaning(word) -> str:
@@ -1142,15 +1013,5 @@ def _pretty_date(local_date: str) -> str:
     return f"{day.strftime('%A')} {day.day} {day.strftime('%B')}"
 
 
-def _interval(days: int | None) -> str:
-    """The interval under an answer button, in the shortest honest words."""
-    if days is None:
-        return "–"
-    if days <= 1:
-        return "tomorrow"
-    if days < 30:
-        return f"{days} days"
-    if days < 365:
-        return f"{round(days / 30)} months"
-    years = days / 365
-    return "1 year" if round(years) == 1 else f"{years:.1f} years"
+#: The interval wording, shared with the card.
+_interval = interval_text

@@ -242,4 +242,69 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     border-radius: {m.radius_md}px;
 }}
 #SummaryText {{ font-size: 13px; color: {p.text}; background: transparent; }}
+/* ------------------------------------------------------- review card, V2 */
+
+#TaskLabel {{
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.7px;
+    color: {p.text_faint};
+    background: transparent;
+}}
+/* The question: a meaning, a sentence with a gap, a phrase. Large enough to
+   be the thing on screen, smaller than a word on its own. */
+#PromptLabel {{
+    font-family: {DISPLAY_FONT_STACK};
+    font-size: 24px;
+    font-weight: 500;
+    color: {p.text};
+    background: transparent;
+}}
+#PromptDetail {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
+QLineEdit#AnswerInput {{
+    font-size: 22px;
+    padding: 10px 14px;
+    border-radius: {m.radius_md}px;
+    border: 1px solid {p.border_strong};
+    min-height: 30px;
+}}
+QLineEdit#AnswerInput:focus {{ border: 2px solid {p.focus_ring}; }}
+QLineEdit#AnswerInput[result="right"], QLineEdit#AnswerInput[result="near"] {{
+    border: 2px solid {p.known};
+    background-color: {p.known_soft};
+    color: {p.known_text};
+}}
+QLineEdit#AnswerInput[result="wrong"] {{
+    border: 2px solid {p.unknown};
+    background-color: {p.unknown_soft};
+    color: {p.unknown_text};
+}}
+QLineEdit#SentenceInput {{ font-size: 16px; padding: 10px 12px; }}
+#HintLabel {{
+    font-family: {DISPLAY_FONT_STACK};
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: {p.text_muted};
+    background: transparent;
+}}
+QPushButton#AnswerButton[result="right"] {{
+    background-color: {p.known_soft};
+    border: 2px solid {p.known};
+}}
+QPushButton#AnswerButton[result="wrong"] {{
+    background-color: {p.unknown_soft};
+    border: 2px solid {p.unknown};
+}}
+QPushButton#AnswerButton[result="right"] #AnswerTitle {{ color: {p.known_text}; }}
+QPushButton#AnswerButton[result="wrong"] #AnswerTitle {{ color: {p.unknown_text}; }}
+#FeedbackLabel {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
+#FeedbackLabel[tone="good"] {{ color: {p.known_text}; font-weight: 600; }}
+#FeedbackLabel[tone="bad"] {{ color: {p.unknown_text}; }}
+#ExamplesLabel, #TeachText {{
+    font-size: 14px;
+    color: {p.text};
+    background-color: {p.surface_sunken};
+    border-radius: {m.radius_md}px;
+    padding: 12px 14px;
+}}
 """

@@ -65,8 +65,12 @@ TABLE_KEYS: Section = (
 STUDY_KEYS: Section = (
     "Today's session",
     (
-        ("Space", "Show the meaning; once it is showing, answer Good"),
-        ("1 / 2 / 3 / 4", "Again / Hard / Good / Easy"),
+        ("Enter", "Check the word you typed; with nothing typed, I don't know; "
+                  "after the result, go on"),
+        ("Ctrl+H", "Show the first letter (the answer then counts as effortful)"),
+        ("1 / 2 / 3 / 4", "Choose among four; for a word with no meaning, "
+                          "Again / Hard / Good / Easy"),
+        ("Space", "For a word with no meaning: show it, then answer Good"),
         ("Esc", "End the session and keep what you answered"),
         ("Ctrl+Z", "Take back your last answer"),
     ),

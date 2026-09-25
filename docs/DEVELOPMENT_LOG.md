@@ -705,3 +705,39 @@ clears attempts with the logs they belonged to.
 
 Old answers are not copied into attempts: the tracker reads them from the log
 as recognition, the only thing they measured.
+
+## 2026-09-25 — Learning Engine V2, phase 4: review route V2
+
+Decided with the user first: L2–L3 answers are **typed** and checked, a
+sentence (L5) is written and self-graded, and reaching long-term memory
+**suggests** Known instead of marking it (decision 70, its own commit).
+
+Built in layers, each tested before the next: the rules
+(`review_route`), the engine (`review`, `record_practice`, one rating per
+word per day for every client), the session (`ReviewFlow`), and the card
+(`components/review_card.py`). Telegram still reviews the V1 way until
+phase 12.
+
+**Problems and solutions**
+
+- Planned probe order was contaminated: after "meaning → type the word"
+  fails, a "word shown, meaning hidden" probe asks about a meaning just
+  read. The level 1 probe is choosing the word among four instead; the word
+  is never shown before it.
+- 405 of 6,825 definitions contain their own word ("showing reluctance");
+  prompts hide the word's forms.
+- Two slips were accepted from nine letters, which let "relxxtant" pass for
+  *reluctant*; two now needs eleven letters.
+- Enter in the answer box reached the page after submitting and moved past
+  the feedback it had just produced; the box takes Enter itself.
+- A successful probe was shown with a plain ✓, as if recalled; after a
+  probe the line now says what the memory result says.
+- The choice buttons were drawn 6 px taller than laid out (a stylesheet
+  minimum overriding the fixed height) and cut off by the footer; a label
+  kept a previous answer's colour because only its button was repolished.
+- A new test module set the offscreen platform for the whole run and broke
+  a layout test elsewhere; it no longer does.
+
+**Verification:** full suite and lint clean; every face of the card
+rendered in both themes; README screenshot regenerated.
+
