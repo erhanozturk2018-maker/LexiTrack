@@ -116,6 +116,56 @@ class ContentRepository:
             translations=translations,
         )
 
+    def teachings(
+        self, word_ids: Iterable[int], learner_language: str | None = None
+    ) -> dict[int, WordTeaching]:
+        """``teaching`` for many words at once (an export); every id is present."""
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        found: dict[int, WordTeaching] = {}
+        conn = self._db.connection
+        for start in range(0, len(ids), _CHUNK):
+            chunk = ids[start : start + _CHUNK]
+            marks = ",".join("?" * len(chunk))
+            contents = {
+                int(row["word_id"]): _to_content(row)
+                for row in conn.execute(
+                    f"SELECT * FROM word_content WHERE word_id IN ({marks})", chunk
+                )
+            }
+            contexts: dict[int, list[WordContext]] = {}
+            for row in conn.execute(
+                f"SELECT * FROM word_contexts WHERE word_id IN ({marks}) ORDER BY word_id, id",
+                chunk,
+            ):
+                contexts.setdefault(int(row["word_id"]), []).append(_to_context(row))
+            localizations: dict[int, WordLocalization] = {}
+            translations: dict[int, str] = {}
+            if learner_language:
+                localizations = {
+                    int(row["word_id"]): _to_localization(row)
+                    for row in conn.execute(
+                        f"SELECT * FROM word_localizations "
+                        f"WHERE learner_language = ? AND word_id IN ({marks})",
+                        [learner_language, *chunk],
+                    )
+                }
+                translations = self.translations(
+                    (c.id for group in contexts.values() for c in group if c.id is not None),
+                    learner_language,
+                )
+            for word_id in chunk:
+                own = tuple(contexts.get(word_id, ()))
+                found[word_id] = WordTeaching(
+                    content=contents.get(word_id),
+                    contexts=own,
+                    learner_language=learner_language or None,
+                    localization=localizations.get(word_id),
+                    translations={
+                        c.id: translations[c.id] for c in own if c.id in translations
+                    },
+                )
+        return found
+
     def statuses(
         self, word_ids: Iterable[int], learner_language: str | None = None
     ) -> dict[int, ContentStatus]:

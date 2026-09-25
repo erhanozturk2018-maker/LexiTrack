@@ -3,12 +3,13 @@
 One window instead of scattered menu items. What is in it answers four
 questions:
 
-* **Which words?** Any set — a list or all of them, by status, by level, by
-  where they are in learning — as a PDF, CSV or JSON file, previewed before
-  it is saved (the Export dialog).
+* **Which words?** Any set — one list, several or all of them, by status, by
+  level, by where they are in learning, by how much teaching content they
+  have — as a PDF, CSV or JSON file, previewed before it is saved, with the
+  columns chosen there (the Export dialog).
 * **Word content** — batches out to be enriched, filled files back in.
 * **Learning data** — every answer and every attempt, as CSV, to look at in a
-  spreadsheet.
+  spreadsheet: all of it, or the last so many days.
 * **Backup** — a copy now, the daily copies, and the portable ``.lexitrack``
   file with everything; and restoring from either, after saving a copy of
   what is there.
@@ -16,10 +17,11 @@ questions:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,6 +29,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -34,7 +37,9 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..core.errors import LexiTrackError
+from ..models.content import ContentStatus
 from ..models.user_word_state import ReviewStatus
+from ..models.vocabulary_list import VocabularyList
 from ..models.word_entry import CEFR_ORDER
 from ..services import portable
 from ..services.learning_service import LearningService
@@ -54,6 +59,100 @@ def _hint(text: str = "") -> QLabel:
     label.setObjectName("SettingHint")
     label.setWordWrap(True)
     return label
+
+
+class _StayOpenMenu(QMenu):
+    """A menu whose ticks toggle without closing it, so several can be picked."""
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        action = self.activeAction()
+        if action is not None and action.isEnabled() and action.isCheckable():
+            action.trigger()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        action = self.activeAction()
+        if event.key() == Qt.Key.Key_Space and action is not None and action.isCheckable():
+            action.trigger()
+            return
+        super().keyPressEvent(event)
+
+
+class ListPicker(QComboBox):
+    """Every list, one, or several: a combo box whose drop-down has ticks."""
+
+    changed = Signal()
+
+    def __init__(self, lists: Sequence[VocabularyList], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.addItem("All lists")
+        self._menu = _StayOpenMenu(self)
+        self._all = self._menu.addAction("All lists")
+        self._all.setCheckable(True)
+        self._all.setChecked(True)
+        self._all.toggled.connect(self._on_all)
+        self._menu.addSeparator()
+        self._actions = []
+        for lst in lists:
+            action = self._menu.addAction(lst.name)
+            action.setCheckable(True)
+            action.setData(lst.id)
+            action.toggled.connect(self._on_list)
+            self._actions.append(action)
+
+    def selected(self) -> tuple[int, ...]:
+        """The ticked lists' ids; empty for every list."""
+        return tuple(a.data() for a in self._actions if a.isChecked())
+
+    def select(self, list_ids: Sequence[int]) -> None:
+        for action in self._actions:
+            action.blockSignals(True)
+            action.setChecked(action.data() in list_ids)
+            action.blockSignals(False)
+        self._on_list()
+
+    def showPopup(self) -> None:  # noqa: N802
+        self._menu.setMinimumWidth(self.width())
+        self._menu.popup(self.mapToGlobal(QPoint(0, self.height())))
+
+    def hidePopup(self) -> None:  # noqa: N802
+        self._menu.hide()
+        super().hidePopup()
+
+    def _on_all(self, checked: bool) -> None:
+        if checked:
+            self.select(())
+        elif not self.selected():
+            # "All" is what nothing ticked means: it cannot be unticked alone.
+            self._set_all(True)
+
+    def _on_list(self, _checked: bool = False) -> None:
+        chosen = [a for a in self._actions if a.isChecked()]
+        self._set_all(not chosen)
+        if not chosen:
+            text = "All lists"
+        elif len(chosen) == 1:
+            text = chosen[0].text()
+        else:
+            text = f"{len(chosen)} lists"
+        self.setItemText(0, text)
+        self.changed.emit()
+
+    def _set_all(self, checked: bool) -> None:
+        self._all.blockSignals(True)
+        self._all.setChecked(checked)
+        self._all.blockSignals(False)
+
+
+#: The learning data's periods: a label, and how many days back (None: all).
+_PERIODS: tuple[tuple[str, int | None], ...] = (
+    ("All time", None),
+    ("Last 7 days", 7),
+    ("Last 30 days", 30),
+    ("Last 90 days", 90),
+    ("Last year", 365),
+)
 
 
 class ExportCenter(QDialog):
@@ -90,10 +189,10 @@ class ExportCenter(QDialog):
         )
 
         words = SettingsGroup("WORDS")
-        self.from_list = QComboBox()
-        self.from_list.addItem("All lists", None)
-        for lst in self._service.lists():
-            self.from_list.addItem(lst.name, lst.id)
+        self.from_list = ListPicker(self._service.lists())
+        self.from_list.setFixedWidth(_WIDE)
+        self.from_list.changed.connect(self._refresh_words)
+        words.add("From", "Every list, one, or several: tick them.", self.from_list)
         self.status = QComboBox()
         self.status.addItem("Any", None)
         for status, name in (
@@ -109,11 +208,19 @@ class ExportCenter(QDialog):
         self.state = QComboBox()
         for state in LearningState:
             self.state.addItem(state.label, state)
+        self.content = QComboBox()
+        self.content.addItem("Any", None)
+        for status, name in (
+            (ContentStatus.COMPLETE, "Complete"),
+            (ContentStatus.PARTIAL, "Partial"),
+            (ContentStatus.NONE, "None yet"),
+        ):
+            self.content.addItem(name, status)
         for combo, title, hint in (
-            (self.from_list, "From", "One list, or every list."),
             (self.status, "Status", "Known, Unknown or not yet sorted."),
             (self.level, "Level", "CEFR level, where the word has one."),
             (self.state, "Learning", "Where the word is in your study plan."),
+            (self.content, "Content", "Meanings and examples: how much the word has."),
         ):
             combo.setFixedWidth(_WIDE)
             combo.currentIndexChanged.connect(self._refresh_words)
@@ -137,6 +244,11 @@ class ExportCenter(QDialog):
             layout.addWidget(content)
 
         data = SettingsGroup("LEARNING DATA")
+        self.period = QComboBox()
+        for label, days in _PERIODS:
+            self.period.addItem(label, days)
+        self.period.setFixedWidth(_WIDE)
+        data.add("Period", "The days the two files below cover.", self.period)
         answers = QPushButton("Export…")
         answers.clicked.connect(self._export_answers)
         data.add(
@@ -219,11 +331,13 @@ class ExportCenter(QDialog):
         # Qt hands enum values back as plain strings: turned back into enums
         # here, or "any" would compare unequal to LearningState.ANY.
         status = self.status.currentData()
+        content = self.content.currentData()
         return WordFilter(
-            list_id=self.from_list.currentData(),
+            lists=self.from_list.selected(),
             status=ReviewStatus(status) if status else None,
             cefr=self.level.currentData(),
             state=LearningState(self.state.currentData() or LearningState.ANY),
+            content=ContentStatus(content) if content else None,
         )
 
     def _refresh_words(self) -> None:
@@ -238,7 +352,7 @@ class ExportCenter(QDialog):
     def _export_words(self) -> None:
         ids = [word.id for word in self._words]
         parts = [self.from_list.currentText()]
-        for combo in (self.status, self.level, self.state):
+        for combo in (self.status, self.level, self.state, self.content):
             if combo.currentData() not in (None, LearningState.ANY):
                 parts.append(combo.currentText())
         label = f"{' · '.join(parts)} ({len(ids):,})"
@@ -256,16 +370,23 @@ class ExportCenter(QDialog):
         path, _ = QFileDialog.getSaveFileName(self, title, str(default), "CSV files (*.csv)")
         return Path(path) if path else None
 
+    def _since(self) -> date | None:
+        """The first learning day of the chosen period, or None for all of it."""
+        days = self.period.currentData()
+        if not days:
+            return None
+        return date.fromisoformat(self._engine.clock.today()) - timedelta(days=days - 1)
+
     def _export_answers(self) -> None:
         path = self._save_csv("Export Every Answer", "answers")
         if path:
-            rows = self._maintenance.export_review_log(path)
+            rows = self._maintenance.export_review_log(path, since=self._since())
             self._say(f"{rows:,} answers written to {path.name}.")
 
     def _export_attempts(self) -> None:
         path = self._save_csv("Export Every Attempt", "attempts")
         if path:
-            rows = self._maintenance.export_attempts(path)
+            rows = self._maintenance.export_attempts(path, since=self._since())
             self._say(f"{rows:,} attempts written to {path.name}.")
 
     # -- backup --------------------------------------------------------------------

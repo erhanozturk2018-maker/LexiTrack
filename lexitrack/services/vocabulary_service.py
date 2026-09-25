@@ -26,7 +26,9 @@ from ..normalization.word_normalizer import display_form, normalize_word
 from ..parsers.base import ParserInfo
 from ..parsers.registry import AUTO, ParserRegistry
 from ..repositories.card_repository import CardRepository
+from ..repositories.content_repository import ContentRepository
 from ..repositories.list_repository import ListRepository
+from ..repositories.settings_repository import SettingsRepository
 from ..repositories.source_repository import SourceRepository
 from ..repositories.state_repository import StateRepository
 from ..repositories.word_repository import (
@@ -64,7 +66,12 @@ class VocabularyService:
         self._import = ImportService(
             self._db, self._registry, self._words, self._sources, self._lists
         )
-        self._export = ExportService(self._words, self._lists)
+        self._export = ExportService(
+            self._words,
+            self._lists,
+            ContentRepository(self._db),
+            lambda: SettingsRepository(self._db).load().learner_language,
+        )
 
     @property
     def database(self) -> Database:
@@ -317,6 +324,14 @@ class VocabularyService:
     ) -> ExportContent:
         context = self._lists.get(list_id) if list_id is not None else None
         return self._export.selection_content(word_ids, context)
+
+    def export_learner_language(self) -> str | None:
+        """The language exported meanings and translations are in, if one is chosen."""
+        return self._export.learner_language()
+
+    def export_with_teaching(self, words: Sequence[StoredWord]) -> int:
+        """How many of ``words`` have teaching content to export."""
+        return self._export.with_teaching(words)
 
     def export(self, content: ExportContent, path: Path | str, file_format: ExportFormat) -> Path:
         return self._export.write(content, Path(path), ExportFormat(file_format))

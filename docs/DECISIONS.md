@@ -1107,3 +1107,27 @@ migrations that already exist.
 **Left out.** Runtime state and Telegram bookkeeping belong to one machine;
 the bot token was never in the database. PDF and CSV stay reading formats.
 
+## 74. Teaching content in word exports; scheduling never
+
+**Decision.** A PDF or CSV word export shows the columns the learner ticks:
+the dictionary's fields and the teaching content — meaning and nuance in the
+learner's language, pattern, collocations, examples and their translations.
+The default is the three dictionary columns, the sheet LexiTrack always
+printed. With any teaching column the PDF becomes a list of entries rather
+than a table. No scheduling data — cards, intervals, due dates, reviews — is
+ever a column. JSON stays the importable word list, dictionary fields only.
+
+**Reason.** A printed sheet is for studying, and the teaching content is what
+is worth studying from; the schedule is the program's bookkeeping, private to
+it and meaningless on paper, and it already leaves through the learning-data
+CSVs and the backup. Meanings, patterns and several examples do not fit in
+table cells, so entries replace the table only when they are needed. Keeping
+JSON to the dictionary fields keeps its promise of importing back exactly;
+content has its own round-trip format.
+
+**Fonts.** The sheet is set in Bitstream Vera, shipped with ReportLab and
+embedded, so it looks the same everywhere and covers the Latin alphabets —
+Helvetica, the PDF built-in used before, cannot set ş, ğ or ı. Text Vera
+cannot set (Cyrillic, Greek) switches the whole sheet to a system font that
+has it (Arial, Segoe UI, DejaVu or Noto); with none installed the export is
+still written and the log says which characters are missing.

@@ -503,9 +503,19 @@ Words, or export them.
 current list, its unknown words, your selection or all unknown words
 elsewhere. The window shows the file before you save it — the real first page
 of the PDF, or the first lines of the CSV or JSON — and follows any change
-you make: format, and order (A → Z, CEFR level, or as in the list). A PDF in
-CEFR order starts each level with a heading. Press **Enter** to keep the
-defaults and choose where to save.
+you make: format, order (A → Z, CEFR level, or as in the list) and columns. A
+PDF in CEFR order starts each level with a heading. Press **Enter** to keep
+the defaults and choose where to save.
+
+**Columns** are ticked one by one: part of speech, CEFR level and the
+definition, and the teaching content — the meaning and the nuance in the
+language words are explained in, the pattern, collocations, examples and
+their translations. With teaching content, a PDF lists each word as an entry
+with its fields under small labels and the word in bold in its examples; the
+summary says how many of the words have content, so a sheet of dashes is no
+surprise. Nothing about scheduling is ever in a word export. A JSON word list
+always holds every dictionary field — it is the file that imports back — and
+teaching content leaves through **Word Content** instead.
 
 ![Export with a live preview](docs/screenshots/export-preview.png)
 
@@ -518,13 +528,15 @@ defaults and choose where to save.
 **Export and backup** in the sidebar gathers every way out of LexiTrack, and
 back in:
 
-- **Words**, chosen by list, status, CEFR level and where they are in your
-  plan (not started, in progress, hard for you, in long-term memory), as PDF,
+- **Words**, chosen by list (every list, one, or several ticked), status,
+  CEFR level, where they are in your plan (not started, in progress, hard for
+  you, in long-term memory) and how much teaching content they have, as PDF,
   CSV or JSON through the preview above.
 - **Word content** — the batches described below.
-- **Learning data** as CSV: every answer, with its rating, what it showed
-  about the memory and the schedule it produced; and every attempt — task,
-  level, success, effort and time — the record your skills are read from.
+- **Learning data** as CSV, for all time or the last 7, 30, 90 or 365 days:
+  every answer, with its rating, what it showed about the memory and the
+  schedule it produced; and every attempt — task, level, success, effort and
+  time — the record your skills are read from.
 - **Backups**: the daily copy (and *Back up now*); **everything in one file**,
   a `.lexitrack` file with words, lists, statuses, plans, cards, every review
   and attempt, content in every language and settings, as readable JSON in a

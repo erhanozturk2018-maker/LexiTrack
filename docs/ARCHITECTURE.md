@@ -72,7 +72,7 @@ the bot counts a session's ratings for its summary.
 | `repositories` | All SQL: words, sources, lists, review state; plans, cards and review logs, sessions and Telegram keys, settings and runtime state |
 | `services` | Imports, free review sessions, exports, the `VocabularyService` facade; the learning engine (`LearningService`, `SrsScheduler`, `WorkloadSimulator`); the record (`ProgressService`) and fitting (`Personaliser`); backups and maintenance |
 | `telegram` | The bot: configuration from `.env`, messages as data, when to speak, `BotCore`, the polling runtime |
-| `exporters` | PDF, CSV and JSON writers |
+| `exporters` | PDF, CSV and JSON writers; `sheet.py`: the columns of a PDF or CSV and the teaching content they read |
 | `ui` | Pages (Study, Progress, Home, Review, Unknown Words), dialogs, a word's history, the in-app help, shared components, the tray, single instance, the Telegram controller, theme system |
 
 ---

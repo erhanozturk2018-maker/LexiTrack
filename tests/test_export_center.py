@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,9 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from lexitrack.database.connection import Database
+from lexitrack.models.content import ContentStatus, WordContent, WordContext
 from lexitrack.models.user_word_state import ReviewStatus
+from lexitrack.repositories import ContentRepository
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.vocabulary_service import VocabularyService
 from lexitrack.services.word_filter import LearningState, WordFilter, filter_words
@@ -51,7 +54,9 @@ def test_filters_narrow_together(setup) -> None:
         return {w.word for w in filter_words(service, engine, WordFilter(**kwargs))}
 
     assert names() == {"apple", "bridge", "candle", "dagger"}
-    assert names(list_id=first) == {"apple", "bridge", "candle"}
+    assert names(lists=(first,)) == {"apple", "bridge", "candle"}
+    second = next(lst.id for lst in service.lists() if lst.name == "Second")
+    assert names(lists=(first, second)) == names()
     assert names(status=ReviewStatus.UNKNOWN) == {"apple", "bridge", "dagger"}
     assert names(status=ReviewStatus.UNKNOWN, cefr="a2") == {"bridge"}
     engine.introduce([words["apple"]])
@@ -114,3 +119,56 @@ def test_answers_and_attempts_export(setup, qtbot, tmp_path: Path, monkeypatch) 
     assert target.exists() and "answers written" in center.message.text()
     center._export_attempts()
     assert "attempts written" in center.message.text()
+
+
+def test_content_narrows_by_how_much_a_word_has(setup, database: Database) -> None:
+    service, engine, words, _first = setup
+    repo = ContentRepository(database)
+    repo.save_content(WordContent(word_id=words["apple"], pattern="an apple of sth"))
+    repo.add_contexts([WordContext(word_id=words["apple"], text=f"{n} {{{{apple}}}}.")
+                       for n in ("One", "Two")])
+    repo.save_content(WordContent(word_id=words["bridge"], pattern="bridge the gap"))
+
+    def names(status: ContentStatus) -> set[str]:
+        return {w.word for w in filter_words(service, engine, WordFilter(content=status))}
+
+    # No learner language: a pattern and two contexts make it complete.
+    assert names(ContentStatus.COMPLETE) == {"apple"}
+    assert names(ContentStatus.PARTIAL) == {"bridge"}
+    assert names(ContentStatus.NONE) == {"candle", "dagger"}
+
+
+def test_several_lists_are_picked_in_one_drop_down(setup, qtbot) -> None:
+    service, engine, _words, first = setup
+    center = ExportCenter(service, engine)
+    qtbot.addWidget(center)
+    picker = center.from_list
+    second = next(lst.id for lst in service.lists() if lst.name == "Second")
+    picker.select([first])
+    assert picker.currentText() == "First" and center.words_count.text().startswith("3 words")
+    picker.select([first, second])
+    assert picker.currentText() == "2 lists" and picker.selected() == (first, second)
+    assert center.words_count.text().startswith("4 words")
+    # Ticking "All lists" clears the rest; unticking it alone changes nothing.
+    picker._all.setChecked(True)
+    assert picker.selected() == () and picker.currentText() == "All lists"
+    picker._all.setChecked(False)
+    assert picker._all.isChecked()
+
+
+def test_learning_data_covers_the_chosen_period(
+    setup, qtbot, tmp_path: Path, monkeypatch
+) -> None:
+    service, engine, _words, _first = setup
+    center = ExportCenter(service, engine)
+    qtbot.addWidget(center)
+    calls = []
+    monkeypatch.setattr(center._maintenance, "export_review_log",
+                        lambda path, since=None: calls.append(since) or 0)
+    monkeypatch.setattr(module.QFileDialog, "getSaveFileName",
+                        lambda *a, **k: (str(tmp_path / "a.csv"), ""))
+    center._export_answers()
+    center.period.setCurrentIndex(center.period.findData(7))
+    center._export_answers()
+    today = date.fromisoformat(engine.clock.today())
+    assert calls == [None, today - timedelta(days=6)]

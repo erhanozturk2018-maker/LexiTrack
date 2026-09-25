@@ -844,3 +844,23 @@ memory result and the route); the daily copy; a portable `.lexitrack` file
   deferred to the end of the transaction and a `foreign_key_check` runs
   before commit, so a file with broken references changes nothing.
 
+## 2026-09-25 — Learning Engine V2, phase 10: teaching content in exports
+
+Word exports take columns: the dictionary's three, and the teaching content
+in the learner's language (`exporters/sheet.py`), read for all words at once
+(`ContentRepository.teachings`). The PDF sets teaching content as entries,
+examples with the word in bold and translations beneath; the CSV adds a cell
+per field. The export dialog ticks columns and says how many words have
+content; the export centre picks several lists, filters by content, and
+limits learning data to a period.
+
+**Problems and solutions**
+
+- Helvetica cannot set Turkish letters; the sheet is now set in the Vera
+  fonts ReportLab ships, embedded, with a system font taken only for scripts
+  Vera lacks.
+- The entry labels sat 6 pt left of the word: a table as wide as the frame
+  overhangs its padding, so the entry's fields take the same cell inset as
+  the word table.
+- The columns block drew on the window colour inside the white settings
+  column; it now takes the transparent panel style.

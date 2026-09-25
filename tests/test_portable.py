@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -184,3 +185,8 @@ def test_attempts_export_as_csv(
     assert maintenance.export_review_log(tmp_path / "r.csv") == 10
     header = (tmp_path / "r.csv").read_text(encoding="utf-8-sig").splitlines()[0]
     assert header.endswith("memory_result,route")
+    tomorrow = date.fromisoformat(clock.today()) + timedelta(days=1)
+    assert maintenance.export_review_log(tmp_path / "r2.csv", since=tomorrow) == 0
+    assert maintenance.export_attempts(tmp_path / "a2.csv", since=tomorrow) == 0
+    today = date.fromisoformat(clock.today())
+    assert maintenance.export_attempts(tmp_path / "a3.csv", since=today) == 10

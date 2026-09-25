@@ -15,6 +15,12 @@ apply.
 Ordering is applied here, to the words handed to the export service, so every
 format honours it: a JSON file exported "by CEFR level" imports back in that
 order.
+
+A PDF or CSV holds the columns ticked under COLUMNS: the dictionary's fields
+and the teaching content. The fields that exist only in the language words
+are explained in are unavailable until one is chosen in Settings; a JSON word
+list always holds the dictionary fields whole, so the columns do not apply to
+it.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -48,9 +55,16 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..core.errors import LexiTrackError
+from ..models.language import language_name
 from ..models.word_entry import CEFR_ORDER
 from ..repositories.word_repository import StoredWord
-from ..services.export_service import ExportContent, ExportFormat
+from ..services.export_service import (
+    DEFAULT_COLUMNS,
+    DICTIONARY_COLUMNS,
+    ExportColumn,
+    ExportContent,
+    ExportFormat,
+)
 from ..services.vocabulary_service import VocabularyService
 from .components.toast import notify
 from .dialogs import error_label, show_error
@@ -70,6 +84,7 @@ PREVIEW_LINES = 40
 _SETTINGS_FORMAT = "export/format"
 _SETTINGS_ORDER = "export/order"
 _SETTINGS_REMEMBER = "export/remember"
+_SETTINGS_COLUMNS = "export/columns"
 
 
 class ExportOrder(StrEnum):
@@ -120,6 +135,7 @@ class ExportDialog(QDialog):
         self._service = service
         self._scopes = list(scopes)
         self._contents: dict[int, ExportContent] = {}
+        self._teaching_counts: dict[tuple[int, int], int] = {}
         self._settings = QSettings()
         self._preview_dir = Path(tempfile.mkdtemp(prefix="lexitrack-preview-"))
         self._preview_timer = QTimer(self)
@@ -129,8 +145,9 @@ class ExportDialog(QDialog):
         self.written: Path | None = None
         #: Once a format is chosen (now or remembered), switching scope keeps it.
         self._format_chosen = False
+        self._language = service.export_learner_language()
         self.setWindowTitle("Export")
-        self.setMinimumSize(820, 600)
+        self.setMinimumSize(860, 680)
         self._build()
         self._restore_settings()
         self._schedule_preview()
@@ -204,9 +221,36 @@ class ExportDialog(QDialog):
             column.addWidget(radio)
         self._order_group.idToggled.connect(self._on_setting)
 
+        column.addSpacing(m.space_3)
+        column.addWidget(_section("COLUMNS"))
+        self.columns_box = QWidget()
+        self.columns_box.setObjectName("PanelBody")
+        grid = QGridLayout(self.columns_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(m.space_3)
+        grid.setVerticalSpacing(m.space_1)
+        self._column_boxes: dict[ExportColumn, QCheckBox] = {}
+        teaching = [column for column in ExportColumn if column not in DICTIONARY_COLUMNS]
+        for index, choice in enumerate(DICTIONARY_COLUMNS):
+            self._add_column(grid, choice, index // 2, index % 2)
+        self.teaching_label = QLabel(
+            f"Teaching content, in {language_name(self._language)}"
+            if self._language
+            else "Teaching content"
+        )
+        self.teaching_label.setObjectName("Faint")
+        grid.addWidget(self.teaching_label, 2, 0, 1, 2)
+        for index, choice in enumerate(teaching):
+            self._add_column(grid, choice, 3 + index // 2, index % 2)
+        column.addWidget(self.columns_box)
+        self.columns_hint = QLabel()
+        self.columns_hint.setObjectName("Faint")
+        self.columns_hint.setWordWrap(True)
+        column.addWidget(self.columns_hint)
+
         column.addStretch(1)
         self.remember = QCheckBox("Remember these settings")
-        self.remember.setToolTip("Start the next export with this format and order")
+        self.remember.setToolTip("Start the next export with this format, order and columns")
         column.addWidget(self.remember)
 
         outer.addWidget(settings)
@@ -271,9 +315,29 @@ class ExportDialog(QDialog):
             self._format_chosen = True
         if remember:
             order = _enum(ExportOrder, self._settings.value(_SETTINGS_ORDER), order)
+        columns = DEFAULT_COLUMNS
+        stored_columns = self._settings.value(_SETTINGS_COLUMNS)
+        if remember and isinstance(stored_columns, str):
+            columns = tuple(
+                ExportColumn(value) for value in stored_columns.split(",")
+                if value in ExportColumn._value2member_map_
+            )
+        for choice, box in self._column_boxes.items():
+            box.setChecked(choice in columns)
         self._format_buttons[file_format].setChecked(True)
         self._order_buttons[order].setChecked(True)
         self._update_hint()
+
+    def _add_column(self, grid: QGridLayout, choice: ExportColumn, row: int, col: int) -> None:
+        box = QCheckBox(choice.label)
+        if choice.needs_language and not self._language:
+            box.setEnabled(False)
+            box.setToolTip(
+                "Choose the language words are explained in, under Settings → Learning."
+            )
+        box.toggled.connect(self._on_columns)
+        self._column_boxes[choice] = box
+        grid.addWidget(box, row, col)
 
     # -- state -------------------------------------------------------------
 
@@ -282,6 +346,22 @@ class ExportDialog(QDialog):
 
     def selected_order(self) -> ExportOrder:
         return list(ExportOrder)[self._order_group.checkedId()]
+
+    def selected_columns(self) -> tuple[ExportColumn, ...]:
+        return tuple(
+            choice for choice, box in self._column_boxes.items()
+            if box.isChecked() and box.isEnabled()
+        )
+
+    def _on_columns(self, _checked: bool) -> None:
+        # A translation hangs under its example: without examples there is
+        # nothing to translate.
+        translations = self._column_boxes.get(ExportColumn.TRANSLATIONS)
+        examples = self._column_boxes.get(ExportColumn.EXAMPLES)
+        if translations is not None and examples is not None and self._language:
+            translations.setEnabled(examples.isChecked())
+            translations.setToolTip("" if examples.isChecked() else "Tick Examples first.")
+        self._schedule_preview()
 
     def _on_scope(self, index: int, checked: bool) -> None:
         if not checked:
@@ -299,8 +379,20 @@ class ExportDialog(QDialog):
             self._schedule_preview()
 
     def _update_hint(self) -> None:
-        if self._format_group.checkedId() >= 0:
-            self.format_hint.setText(FORMAT_HINTS[self.selected_format()])
+        if self._format_group.checkedId() < 0:
+            return
+        file_format = self.selected_format()
+        self.format_hint.setText(FORMAT_HINTS[file_format])
+        # A JSON word list is the importable file: always every dictionary field.
+        self.columns_box.setEnabled(file_format is not ExportFormat.JSON)
+        self.columns_hint.setText(
+            "A JSON word list always holds every dictionary field. Teaching content "
+            "goes out through Word Content."
+            if file_format is ExportFormat.JSON
+            else "" if self._language
+            else "Meanings and translations need a language: Settings → Learning."
+        )
+        self.columns_hint.setVisible(bool(self.columns_hint.text()))
 
     def _content(self) -> ExportContent:
         """The selected scope's words, in the selected order."""
@@ -314,6 +406,7 @@ class ExportDialog(QDialog):
             words=order_words(content.words, order),
             # A PDF in level order gets a heading for each level.
             group_by_level=order is ExportOrder.CEFR,
+            columns=self.selected_columns(),
         )
 
     # -- preview -----------------------------------------------------------
@@ -330,10 +423,16 @@ class ExportDialog(QDialog):
             return
         count = len(content.words)
         file_format = self.selected_format()
-        self.summary.setText(
+        summary = (
             f"{count:,} {'word' if count == 1 else 'words'}  ·  "
             f"{self.selected_order().label}  ·  {file_format.value.upper()}"
         )
+        if file_format is not ExportFormat.JSON and any(
+            choice.is_teaching for choice in content.columns
+        ):
+            # Said plainly, so a sheet of dashes is not a surprise.
+            summary += f"  ·  {self._with_teaching(content):,} with teaching content"
+        self.summary.setText(summary)
         self.save_button.setEnabled(count > 0)
         if not count:
             self.text_view.setPlainText("There are no words to export in that selection.")
@@ -358,6 +457,12 @@ class ExportDialog(QDialog):
                 shown.append("…")
             self.text_view.setPlainText("\n".join(shown))
             self.preview_stack.setCurrentWidget(self.text_view)
+
+    def _with_teaching(self, content: ExportContent) -> int:
+        key = (self._scope_group.checkedId(), len(content.words))
+        if key not in self._teaching_counts:
+            self._teaching_counts[key] = self._service.export_with_teaching(content.words)
+        return self._teaching_counts[key]
 
     def _render_first_page(self, pdf: Path) -> QPixmap:
         width = max(self.preview_stack.width() - 40, 320)
@@ -425,6 +530,9 @@ class ExportDialog(QDialog):
         if remember:
             self._settings.setValue(_SETTINGS_FORMAT, self.selected_format().value)
             self._settings.setValue(_SETTINGS_ORDER, self.selected_order().value)
+            self._settings.setValue(
+                _SETTINGS_COLUMNS, ",".join(choice.value for choice in self.selected_columns())
+            )
 
     def done(self, result: int) -> None:
         self._preview_timer.stop()

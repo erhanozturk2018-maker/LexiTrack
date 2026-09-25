@@ -31,7 +31,7 @@ import csv
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from ..core import paths
@@ -241,8 +241,11 @@ class Maintenance:
 
     # -- the review log ------------------------------------------------------
 
-    def export_review_log(self, path: Path | str) -> int:
-        """Write every review as a CSV row. Returns the number of rows."""
+    def export_review_log(self, path: Path | str, since: date | None = None) -> int:
+        """Write every review as a CSV row. Returns the number of rows.
+
+        With ``since``, only the reviews of that learning day and after.
+        """
         rows = self._db.connection.execute(
             """
             SELECT r.reviewed_on, r.reviewed_at, w.display_word AS word, r.rating,
@@ -252,8 +255,10 @@ class Maintenance:
                    r.memory_result, r.route_version
             FROM review_logs r
             JOIN words w ON w.id = r.word_id
+            WHERE r.reviewed_on >= ?
             ORDER BY r.reviewed_at, r.id
-            """
+            """,
+            (since.isoformat() if since else "",),
         ).fetchall()
         labels = {1: "Again", 2: "Hard", 3: "Good", 4: "Easy"}
         target = Path(path)
@@ -283,8 +288,11 @@ class Maintenance:
                 )
         return len(rows)
 
-    def export_attempts(self, path: Path | str) -> int:
-        """Write every learning attempt — the skill record — as a CSV row."""
+    def export_attempts(self, path: Path | str, since: date | None = None) -> int:
+        """Write every learning attempt — the skill record — as a CSV row.
+
+        With ``since``, only the attempts of that learning day and after.
+        """
         rows = self._db.connection.execute(
             """
             SELECT a.on_day, a.at, w.display_word AS word, a.phase, a.role, a.task,
@@ -292,8 +300,10 @@ class Maintenance:
                    a.depth, a.route_version, a.review_log_id, a.session_id, a.undone_at
             FROM learning_attempts a
             JOIN words w ON w.id = a.word_id
+            WHERE a.on_day >= ?
             ORDER BY a.at, a.id
-            """
+            """,
+            (since.isoformat() if since else "",),
         ).fetchall()
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
