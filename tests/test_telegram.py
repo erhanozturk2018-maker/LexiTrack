@@ -858,3 +858,14 @@ def test_a_new_words_page_offers_more_when_there_is_more() -> None:
     with_more = step_card(step, "s", 3, 1, 4, more=True)
     assert step_data("s", 3, "more") in FakeOutbox.callbacks(with_more)
     assert step_data("s", 3, "more") not in FakeOutbox.callbacks(step_card(step, "s", 3, 1, 4))
+
+
+def test_a_written_sentence_is_checked_against_the_pattern_and_collocations() -> None:
+    from lexitrack.models.content import WordContent, WordTeaching
+
+    word = StoredWord(id=1, word="reluctant", normalized_word="reluctant", definition="unwilling")
+    teaching = WordTeaching(WordContent(word_id=1, pattern="reluctant to do sth",
+                                        collocations=("a reluctant hero", "reluctantly agree")))
+    check = write_check(Step(word, StepKind.WRITE, teaching=teaching), "I was reluctant.", "s", 2)
+    assert "☐ Pattern: reluctant to do sth" in check.text
+    assert "☐ Goes with: a reluctant hero · reluctantly agree" in check.text

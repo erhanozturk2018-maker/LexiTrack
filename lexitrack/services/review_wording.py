@@ -183,3 +183,17 @@ def _repair_page(step: Step) -> TeachingPage:
         shown = _shown_contexts(step)[:1]
         examples = tuple((c.plain, teaching.translation(c)) for c in shown)
     return TeachingPage(tuple(sections), examples)
+
+
+def write_checklist(step: Step) -> list[tuple[str, str]]:
+    """What a sentence of one's own is checked against (level 5): the word's
+    pattern and its collocations, as (title, text). The learner grades
+    themselves; this is the reference, not a test."""
+    teaching = step.teaching
+    content = teaching.content if teaching else None
+    items: list[tuple[str, str]] = []
+    if content and content.pattern:
+        items.append(("Pattern", content.pattern))
+    if content and content.collocations:
+        items.append(("Goes with", " · ".join(content.collocations)))
+    return items

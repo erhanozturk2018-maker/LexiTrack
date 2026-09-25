@@ -214,12 +214,15 @@ taken, a hint (the first letter and the shape) and a slip are kept as
 telemetry beside the report and never override it. An empty answer is
 Forgot.
 
-**Level 5** (a sentence) cannot be checked by the app: you write one, see
-example sentences, and grade it yourself.
+**Level 5** (a sentence) cannot be checked by the app: you write one, then
+check it against the word's **pattern** and **collocations** — a checklist,
+not a test — and example sentences, and report how it went (Forgot,
+Effortful, Remembered, Instant).
 
 **No meaning to ask from** — no definition and no meaning in the learner's
-language — means the
-word is reviewed the V1 way: shown, revealed, rated by you (route `v1`).
+language — means the word is shown and you report whether you knew it
+before anything else is shown; it is recorded as a word-to-meaning
+retrieval (route `v2`).
 
 **Undo** takes back the last rated word whole: its rating, its probes and any
 practice after it, and asks it again from the first question.

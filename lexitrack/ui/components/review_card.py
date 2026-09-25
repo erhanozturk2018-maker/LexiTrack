@@ -40,7 +40,12 @@ from ...models.attempt import SUCCESS_REPORTS, Phase, SelfReport
 from ...models.srs import Rating
 from ...services.review_flow import Feedback, Step, StepKind
 from ...services.review_route import examples, hint_for
-from ...services.review_wording import feedback_text, interval_text, teaching_page
+from ...services.review_wording import (
+    feedback_text,
+    interval_text,
+    teaching_page,
+    write_checklist,
+)
 from ..theme import current_palette
 from ..theme.palette import METRICS
 from .cards import repolish
@@ -599,10 +604,18 @@ class ReviewCard(QFrame):
         self.written = True
         self.write_input.setEnabled(False)
         shown = examples(step.teaching) if step.teaching else []
-        lines = [f"“{context.plain}”" for context in shown]
+        lines = []
         meaning = step.prompt.detail if step.prompt else None
         if meaning:
-            lines.insert(0, f"Meaning: {meaning}")
+            lines.append(f"Meaning: {meaning}")
+        # The reference the learner grades themselves against (level 5).
+        checklist = write_checklist(step)
+        if checklist:
+            lines.append("Check your sentence against:")
+            lines += [f"☐ {title}: {text}" for title, text in checklist]
+        if shown:
+            lines.append("Examples:")
+            lines += [f"“{context.plain}”" for context in shown]
         fallback = "Compare it with how you have seen it used."
         self.examples_label.setText("\n".join(lines) or fallback)
         self.examples_label.show()

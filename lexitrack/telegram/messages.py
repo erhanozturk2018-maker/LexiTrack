@@ -44,7 +44,7 @@ from ..models.attempt import SUCCESS_REPORTS, SelfReport
 from ..models.srs import Rating
 from ..services.learning_service import AnswerOutcome, DailyPlan
 from ..services.review_flow import Step, StepKind
-from ..services.review_wording import teaching_page, when_text
+from ..services.review_wording import teaching_page, when_text, write_checklist
 
 #: One row of buttons: ``(label, callback data)`` pairs.
 ButtonRow = tuple[tuple[str, str], ...]
@@ -310,6 +310,11 @@ def write_check(step: Step, sentence: str, session_id: str, number: int) -> Mess
         "<b>Yours</b>",
         f"“{escape(sentence)}”",
     ]
+    checklist = write_checklist(step)
+    if checklist:
+        lines += ["", "<b>Check it against</b>"] + [
+            f"☐ {escape(title)}: {escape(text)}" for title, text in checklist
+        ]
     teaching = step.teaching
     examples = [context.plain for context in teaching.contexts[:2]] if teaching else []
     if examples:

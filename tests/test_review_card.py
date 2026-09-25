@@ -176,3 +176,25 @@ def test_a_session_left_open_is_resumed_as_it_stood(qtbot, page) -> None:
     assert other.card.answer_input.text() == first.prompt.answer
     qtbot.keyClick(other, Qt.Key.Key_3)
     assert other.flow.answered == 1
+
+
+def test_the_sentence_check_lists_the_pattern_and_collocations(qtbot) -> None:
+    from lexitrack.models.content import WordContent, WordTeaching
+    from lexitrack.repositories.word_repository import StoredWord
+    from lexitrack.services.review_flow import Step
+    from lexitrack.services.review_route import production_prompt
+    from lexitrack.ui.components.review_card import ReviewCard
+
+    word = StoredWord(id=1, word="reluctant", normalized_word="reluctant", definition="unwilling")
+    teaching = WordTeaching(WordContent(word_id=1, pattern="reluctant to do sth",
+                                        collocations=("a reluctant hero",)))
+    card = ReviewCard()
+    qtbot.addWidget(card)
+    card.show_step(Step(word, StepKind.WRITE, prompt=production_prompt(word, teaching),
+                        teaching=teaching))
+    card.write_input.setText("She was reluctant to go.")
+    card._written()
+    text = card.examples_label.text()
+    assert "Check your sentence against:" in text
+    assert "☐ Pattern: reluctant to do sth" in text and "☐ Goes with: a reluctant hero" in text
+    assert not card.grade_row.isHidden()

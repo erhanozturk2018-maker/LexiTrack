@@ -997,3 +997,10 @@ sentence.
   layout settles.
 - With one sentence, the guess page took it and the later context question
   disappeared; that sentence is now reused, blanked, cards later.
+
+## 2026-09-26 — Learning plan gaps, step 6: the sentence checklist
+
+`review_wording.write_checklist` gives the word's pattern and collocations;
+the desktop's sentence check and the bot's `write_check` list them as a
+checklist before the examples. The engine document still described the old
+show-and-rate review for words with no meaning; corrected.
