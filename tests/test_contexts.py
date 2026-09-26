@@ -357,6 +357,8 @@ def test_the_status_counts_words_with_contexts(
         ("child", "The children played outside.", "children"),
         ("study", "She studies at night.", "studies"),
         ("stop", "He stopped the car.", "stopped"),
+        ("fuel", "The news fuelled his anger.", "fuelled"),
+        ("travel", "We travelled all night.", "travelled"),
         ("(be) able to", "She is able to swim.", "able to"),
         ("well-known", "A well-known writer.", "well-known"),
     ],

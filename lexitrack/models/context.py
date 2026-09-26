@@ -170,6 +170,9 @@ def _forms(token: str) -> set[str]:
     ):
         double = base + base[-1]
         forms |= {double + "ed", double + "ing", double + "er", double + "est"}
+    # British English doubles a final l after a vowel: travel -> travelled.
+    if base.endswith("l") and len(base) >= 3 and base[-2] in _VOWELS:
+        forms |= {base + "led", base + "ling", base + "ler"}
     if base.endswith("c"):
         forms |= {base + "ked", base + "king"}
     if base.endswith("le"):
