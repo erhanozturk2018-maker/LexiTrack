@@ -57,6 +57,10 @@ RATING_STYLE: dict[Rating, str | None] = {
 LETTERS = "ABCD"
 
 CARD_WIDTH = 640
+#: The width of the card's content, inside its margins.
+_INNER_WIDTH = CARD_WIDTH - 2 * METRICS.space_6
+#: Qt's QWIDGETSIZE_MAX: no maximum height.
+_NO_LIMIT = 16777215
 
 
 def _label(text: str, name: str | None = None, wrap: bool = False) -> QLabel:
@@ -157,7 +161,14 @@ class AnswerButton(QPushButton):
         if self._wrap and width:
             # The key, the gaps and the margins beside the text.
             text_width = width - 24 - 10 - 26
-            self.setFixedHeight(max(52, self.title.heightForWidth(text_width) + 22))
+            text_height = self.title.heightForWidth(text_width)
+            self.setFixedHeight(max(52, text_height + 22))
+            # The key beside the first line; beside the text when it is one line.
+            one_line = text_height <= self.title.fontMetrics().lineSpacing() + 2
+            self.layout().setAlignment(
+                self.key,
+                Qt.AlignmentFlag.AlignVCenter if one_line else Qt.AlignmentFlag.AlignTop,
+            )
 
     def set_interval(self, text: str) -> None:
         self.sub.setText(text)
@@ -399,6 +410,7 @@ class ReviewCard(QFrame):
             title = "Context" if len(step.contexts) == 1 else "Contexts"
             parts.append(_block(title, items))
         self.teach_label.setText("".join(parts))
+        _fit(self.teach_label, _INNER_WIDTH)
 
     def _show_question(self, step: Step) -> None:
         question = step.question
@@ -413,15 +425,16 @@ class ReviewCard(QFrame):
             self.prompt_label.setText(escape(question.prompt))
             self.prompt_detail.setText("Which word is it?")
         repolish(self.prompt_label)
+        _fit(self.prompt_label, _INNER_WIDTH)
+        _fit(self.prompt_detail, _INNER_WIDTH)
         self.word_grid.setVisible(not context)
         self.definition_list.setVisible(context)
-        width = CARD_WIDTH - 2 * METRICS.space_6
         buttons = self.option_buttons
         for index, button in enumerate(buttons):
             visible = index < len(question.options)
             button.setVisible(visible)
             if visible:
-                button.set_title(question.options[index].text, width if context else None)
+                button.set_title(question.options[index].text, _INNER_WIDTH if context else None)
                 button.setEnabled(True)
                 self._set_result(button, None)
         self.setFocus()
@@ -493,6 +506,9 @@ class ReviewCard(QFrame):
         )
         self.result_note.setText(text.note or "")
         self.result_note.setVisible(bool(text.note))
+        panel_width = _INNER_WIDTH - 2 * METRICS.space_4
+        _fit(self.result_lines, panel_width)
+        _fit(self.result_note, panel_width)
         self.result_panel.show()
         self.rating = feedback.awaiting
         self.waiting = not feedback.awaiting
@@ -542,6 +558,20 @@ class ReviewCard(QFrame):
         parent = self.parentWidget()
         if parent is not None and parent.layout() is not None:
             parent.layout().activate()
+
+
+def _fit(label: QLabel, width: int) -> None:
+    """Make a wrapped label exactly as tall as its text at the card's width.
+
+    Left to itself, Qt sizes a wrapped label from a narrow hint: a prompt that
+    wrapped to two lines squeezed the options under it until they overlapped,
+    and a short one got room for three lines. The card's width is fixed, so
+    the right height is known. The last question's height is cleared first:
+    Qt clamps what the label measures to it.
+    """
+    label.setMinimumHeight(0)
+    label.setMaximumHeight(_NO_LIMIT)
+    label.setFixedHeight(label.heightForWidth(width))
 
 
 def _block(title: str, html: str) -> str:

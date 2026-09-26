@@ -31,6 +31,7 @@ from lexitrack.repositories import (
 )
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.review_flow import StepKind
+from lexitrack.ui.components.review_card import _INNER_WIDTH, AnswerButton, ReviewCard, _fit
 from lexitrack.ui.study_page import StudyPage
 from lexitrack.ui.theme import ThemeManager, ThemeName
 
@@ -227,3 +228,28 @@ def test_escape_ends_the_session_and_undo_takes_back_the_answer(qtbot, page) -> 
     assert all(log.undone_at for log in _logs(page, step.word.id))
     qtbot.keyClick(page, Qt.Key.Key_Escape)
     assert not page.in_session
+
+
+# -- layout ------------------------------------------------------------------------------
+
+
+def test_a_prompt_is_as_tall_as_its_text_even_after_a_longer_one(qapp) -> None:
+    """Qt clamps a label's measured height to the one it was given before:
+    a one-line prompt after a two-line one kept two lines' room."""
+    card = ReviewCard()
+    label = card.prompt_label
+    label.setText("a long definition that goes on " * 12)
+    _fit(label, _INNER_WIDTH)
+    tall = label.height()
+    label.setText("short")
+    _fit(label, _INNER_WIDTH)
+    assert label.height() < tall
+    assert label.height() == label.heightForWidth(_INNER_WIDTH)
+
+
+def test_a_one_line_definition_option_centres_its_key(qapp) -> None:
+    button = AnswerButton("", "A", None, wrap=True)
+    button.set_title("to pay attention", _INNER_WIDTH)
+    assert button.layout().itemAt(0).alignment() & Qt.AlignmentFlag.AlignVCenter
+    button.set_title("a very long definition that needs more than one line " * 4, _INNER_WIDTH)
+    assert button.layout().itemAt(0).alignment() & Qt.AlignmentFlag.AlignTop
