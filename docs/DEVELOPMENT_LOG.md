@@ -1079,3 +1079,32 @@ UI and exports.
   answer with its attempt.
 - The offscreen Qt platform draws no text without `QT_QPA_FONTDIR`; the
   screenshot tool is run with it pointed at the system fonts.
+
+## 2026-09-26 — The vocabulary's definitions and contexts
+
+Every word's definition was checked against the senses it is learned in and
+rewritten where it missed a sense or named the word itself (1,271 of 6,825;
+1,264 differed from what the database had). Each word got one context per
+sense: 8,883 sentences, 1 to 5 a word. They were written by hand in batches
+of 200, outside the repository, and checked by script: every sentence must
+contain the word (`find_word`) and no definition may contain it. The
+resulting file is imported like any contexts file (docs/formats/contexts.md);
+it is personal content and stays out of the repository.
+
+**Problems and solutions**
+
+- `find_word` missed British doubled-l forms (fuelled, travelled); `_forms`
+  now adds them.
+- A nationality ("from Australia") or a phrase ("a bag of": "the amount a
+  bag holds") can only be defined by naming the word or its root. These
+  definitions describe the thing instead (the country by its capital, the
+  container by its shape), so Definition → Word still asks something.
+- A wrapped QLabel is sized from a narrow hint, and its measured height is
+  clamped to the minimum and maximum it was given before: a two-line prompt
+  squeezed the review card's options until they overlapped, and a one-line
+  prompt after it kept two lines' room. The card's width is fixed, so
+  `review_card._fit` clears the old height and fixes the label to its text's.
+- A QScrollArea does not honour its widget's wrapped-label heights: shrinking
+  the word panel's viewport (to keep content above the selection bar)
+  squeezed its labels together instead of scrolling. Left as it was; the bar
+  can cover the panel's last line when a word has many contexts.
