@@ -133,12 +133,6 @@ class ReviewWidget(QWidget):
         self._definition_label.setWordWrap(True)
         card_layout.addWidget(self._definition_label)
 
-        self._note_label = QLabel()
-        self._note_label.setObjectName("NoteLabel")
-        self._note_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._note_label.setWordWrap(True)
-        card_layout.addWidget(self._note_label)
-
         card_layout.addStretch(1)
 
         # -- answers
@@ -224,7 +218,6 @@ class ReviewWidget(QWidget):
 
         self._set_optional(self._meta_label, _format_meta(word))
         self._set_optional(self._definition_label, word.definition)
-        self._set_optional(self._note_label, word.note)
 
         self._back_button.setEnabled(can_go_back)
         self._next_button.setVisible(item.is_history)

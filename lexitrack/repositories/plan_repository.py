@@ -62,7 +62,10 @@ SELECT
     MIN(lw.position)                   AS word_position,
     (SELECT ws.cefr_level FROM word_sources ws
       WHERE ws.word_id = w.id AND ws.cefr_level IS NOT NULL
-      ORDER BY ws.source_id LIMIT 1)   AS cefr_rank
+      ORDER BY ws.source_id LIMIT 1)   AS cefr_rank,
+    EXISTS (SELECT 1 FROM word_sources ws
+      WHERE ws.word_id = w.id AND trim(COALESCE(ws.definition, '')) <> '')
+                                       AS has_definition
 FROM ({scope}) AS scope
 JOIN list_words lw ON lw.list_id = scope.list_id
 JOIN words w       ON w.id = lw.word_id
@@ -88,7 +91,10 @@ def _outlook_sql(words: str, include_not_reviewed: bool) -> str:
         COALESCE(SUM(status = 'not_reviewed'), 0)         AS not_reviewed,
         COALESCE(SUM(c.word_id IS NOT NULL AND status != 'known'), 0) AS in_progress,
         COALESCE(SUM(c.word_id IS NOT NULL AND status = 'known'), 0)  AS learned_here,
-        COALESCE(SUM(c.word_id IS NULL AND status IN {allowed}), 0)  AS to_introduce
+        COALESCE(SUM(c.word_id IS NULL AND status IN {allowed} AND has_definition), 0)
+                                                          AS to_introduce,
+        COALESCE(SUM(c.word_id IS NULL AND status IN {allowed} AND NOT has_definition), 0)
+                                                          AS without_definition
     FROM ({words}) AS plan_words
     LEFT JOIN srs_cards c ON c.word_id = plan_words.word_id
     """
@@ -269,6 +275,7 @@ class PlanRepository:
         Unknown words come first. ``include_not_reviewed`` also offers words
         that have never been answered at all, which is what a freshly imported
         list consists of; without it such a plan would have nothing to study.
+        A word with no definition is not offered: both questions need one.
         """
         if limit is not None and limit <= 0:
             return []
@@ -276,6 +283,7 @@ class PlanRepository:
         sql = f"""
         SELECT word_id FROM ({_PLAN_WORDS}) AS plan_words
         WHERE status IN {allowed}
+          AND has_definition
           AND word_id NOT IN (SELECT word_id FROM srs_cards)
         ORDER BY status = 'unknown' DESC,
                  {_CEFR_RANK}, list_position, word_position, word_id

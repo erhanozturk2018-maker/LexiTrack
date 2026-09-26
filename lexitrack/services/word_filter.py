@@ -1,8 +1,8 @@
 """Choosing words by what they are: for exports, and anywhere a set is needed.
 
 A filter combines lists (one, several, or all of them), a status, a CEFR
-level, a learning state and how much teaching content a word has; every part
-is optional and they narrow together.
+level, a learning state and whether a word has contexts; every part is
+optional and they narrow together.
 """
 
 from __future__ import annotations
@@ -10,10 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ..models.content import ContentStatus
 from ..models.srs import CardState
 from ..models.user_word_state import ReviewStatus
-from ..repositories import CardRepository, ContentRepository
+from ..repositories import CardRepository, ContextRepository
 from ..repositories.word_repository import StoredWord
 from .learning_service import LearningService
 from .vocabulary_service import VocabularyService
@@ -48,8 +47,8 @@ class WordFilter:
     status: ReviewStatus | None = None
     cefr: str | None = None
     state: LearningState = LearningState.ANY
-    #: Teaching content for the learner's language: none, partial or complete.
-    content: ContentStatus | None = None
+    #: True: only words with contexts; False: only words without; None: any.
+    contexts: bool | None = None
 
 
 def filter_words(
@@ -65,11 +64,9 @@ def filter_words(
         words = [w for w in words if w.status is choice.status]
     if choice.cefr:
         words = [w for w in words if (w.cefr_level or "").upper() == choice.cefr.upper()]
-    if choice.content is not None:
-        statuses = ContentRepository(service.database).statuses(
-            (w.id for w in words), engine.settings.learner_language
-        )
-        words = [w for w in words if statuses[w.id] is choice.content]
+    if choice.contexts is not None:
+        counts = ContextRepository(service.database).counts(w.id for w in words)
+        words = [w for w in words if (w.id in counts) is choice.contexts]
     if choice.state is LearningState.ANY:
         return words
     if choice.state is LearningState.LONG_TERM:

@@ -18,7 +18,6 @@ from PySide6.QtCore import QSettings, Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
-from lexitrack.models.attempt import SelfReport  # noqa: E402
 from lexitrack.models.settings import Setting  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.models.user_word_state import ReviewStatus  # noqa: E402
@@ -36,6 +35,8 @@ from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
 from lexitrack.ui.study_page import DAY, EMPTY, SESSION, _interval  # noqa: E402
 from lexitrack.ui.study_plan_dialog import StudyPlanDialog  # noqa: E402
 from lexitrack.ui.theme import ThemeManager, ThemeName  # noqa: E402
+
+from .flow_helpers import answer  # noqa: E402
 
 WORDS = " ".join(f"{a}{b}word" for a in "abcd" for b in "abcdefghijklmnopqrstuvwxyz")  # 104 words
 
@@ -63,10 +64,13 @@ def clock() -> FrozenClock:
 
 @pytest.fixture
 def loaded(service: VocabularyService, make_pdf) -> VocabularyService:
-    """One list of 104 words, all marked unknown."""
+    """One list of 104 words, each with a definition, all marked unknown."""
     service.import_document(make_pdf([WORDS]))
     list_id = service.lists()[0].id
-    service.set_status([w.id for w in service.list_words(list_id)], ReviewStatus.UNKNOWN)
+    words = service.list_words(list_id)
+    for word in words:
+        service.set_definition(word.id, f"the meaning of {word.word}")
+    service.set_status([w.id for w in words], ReviewStatus.UNKNOWN)
     return service
 
 
@@ -133,9 +137,8 @@ class TestDayView:
         window.show_page(STUDY)
         study = window.study
         assert study._stack.currentWidget() is study._pages[DAY]
-        # 25 new words with nothing stored beyond their spelling: the short
-        # route, 45 seconds each.
-        assert study.headline.text() == "25 words · about 19 min"
+        # 25 new words, each read and asked: about 40 seconds each.
+        assert study.headline.text() == "25 words · about 17 min"
         assert study.detail.text() == "25 new"
         assert study.primary_button.isEnabled()
         assert study.primary_button.text() == "Start session →"
@@ -201,33 +204,34 @@ class TestSession:
         window.show_page(STUDY)
         return window.study
 
-    def test_start_opens_the_first_card_asking_for_a_report(self, due) -> None:
-        # These words have no meaning stored: the learner reports on the word.
+    def test_start_opens_the_first_question_with_four_options(self, due) -> None:
         assert due.primary_button.text() == "Start session →"
         due.primary_button.click()
         assert due._stack.currentWidget() is due._pages[SESSION]
         assert due.session_progress.text() == "1 / 25"
+        question = due.card.step.question
+        assert len(question.options) == 4
         labels = [button.title.text() for button in due.answer_buttons.values()]
-        assert labels == ["Forgot", "Effortful", "Remembered", "Instant"]
+        assert labels == ["Again", "Hard", "Good", "Easy"]
 
     def test_space_does_not_answer_for_the_learner(self, due, engine) -> None:
-        """A report is chosen, never taken from a key that means 'next'."""
+        """An option is chosen, never taken from a key that means 'next'."""
         due.start_session()
         due.keyPressEvent(_key(Qt.Key.Key_Space))
         due.keyPressEvent(_key(Qt.Key.Key_Return))
         assert due.session_progress.text() == "1 / 25"
         assert sum(engine.rating_counts().values()) == 0
 
-    def test_number_keys_are_the_four_reports(self, due, engine) -> None:
+    def test_number_keys_choose_then_rate(self, due, engine) -> None:
         due.start_session()
         for key in (Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3, Qt.Key.Key_4):
-            due.keyPressEvent(_key(key))
+            _right(due, key)
         counts = engine.rating_counts()
         assert [counts[int(r)] for r in Rating] == [1, 1, 1, 1]
 
     def test_escape_ends_the_session_and_keeps_the_answers(self, due, engine) -> None:
         due.start_session()
-        due.keyPressEvent(_key(Qt.Key.Key_3))
+        _right(due)
         due.keyPressEvent(_key(Qt.Key.Key_Escape))
         assert not due.in_session
         assert due._stack.currentWidget() is due._pages[DAY]
@@ -241,7 +245,7 @@ class TestSession:
     def test_answering_the_last_card_returns_to_the_day(self, due) -> None:
         due.start_session()
         for _ in range(25):
-            due.keyPressEvent(_key(Qt.Key.Key_3))
+            _right(due)
         assert not due.in_session
         assert due.headline.text() == "All done for today"
         assert due.primary_button.text() == "All done ✓"
@@ -261,11 +265,15 @@ class TestSession:
         study.start_session()
         for _ in range(3):
             assert study.card.step.phase.value == "review"
-            study.keyPressEvent(_key(Qt.Key.Key_3))
+            _right(study)
         for _ in range(3):
-            # Nothing stored beyond the spelling: shown, then learned.
+            # Each new word shown, then all three asked.
             assert study.card.step.label == "New word"
             study.keyPressEvent(_key(Qt.Key.Key_Return))
+        for _ in range(3):
+            assert study.card.step.label == "Definition → Word"
+            assert not study.card.step.rated
+            _right(study)
         assert not study.in_session
         assert messages == [
             "3 words reviewed; 3 new words learned, first review tomorrow."
@@ -274,21 +282,22 @@ class TestSession:
 
     def test_identical_intervals_are_said_once(self, due) -> None:
         due.start_session()
-        due._show_intervals({rating: 1 for rating in Rating})
+        due.card.show_intervals({rating: 1 for rating in Rating})
         assert [b.text() for b in due.answer_buttons.values()] == [
-            "Forgot",
-            "Effortful",
-            "Remembered",
-            "Instant",
+            "Again",
+            "Hard",
+            "Good",
+            "Easy",
         ]
         assert "tomorrow" in due.answer_hint.text()
 
     def test_different_intervals_are_shown_on_each_button(self, due) -> None:
         due.start_session()
-        due._show_intervals({Rating.AGAIN: 1, Rating.HARD: 3, Rating.GOOD: 8, Rating.EASY: 21})
-        # Each report shows the interval of the rating it maps to.
-        assert due.answer_buttons[SelfReport.REMEMBERED].text() == "Remembered\n8 days"
-        assert due.answer_buttons[SelfReport.INSTANT].text() == "Instant\n21 days"
+        due.card.show_intervals(
+            {Rating.AGAIN: 1, Rating.HARD: 3, Rating.GOOD: 8, Rating.EASY: 21}
+        )
+        assert due.answer_buttons[Rating.GOOD].text() == "Good\n8 days"
+        assert due.answer_buttons[Rating.EASY].text() == "Easy\n21 days"
         assert due.answer_hint.isHidden()
 
 
@@ -314,18 +323,18 @@ class TestUndo:
     def test_the_undo_button_names_what_it_takes_back(self, due) -> None:
         due.start_session()
         assert due.undo_button.isHidden(), "nothing to take back yet"
-        first = due.word_label.text()
-        due.keyPressEvent(_key(Qt.Key.Key_4))
+        first = due.card.step.word.word
+        _right(due, Qt.Key.Key_4)
         assert not due.undo_button.isHidden()
         assert due.undo_button.text() == f"\u21b6 Undo Easy on \u201c{first}\u201d"
 
     def test_ctrl_z_puts_the_card_back(self, due, engine) -> None:
         due.start_session()
-        first = due.word_label.text()
-        due.keyPressEvent(_key(Qt.Key.Key_4))
+        first = due.card.step.word.word
+        _right(due, Qt.Key.Key_4)
         assert due.session_progress.text() == "2 / 25"
         due.keyPressEvent(_ctrl(Qt.Key.Key_Z))
-        assert due.word_label.text() == first
+        assert due.card.step.word.word == first
         assert due.session_progress.text() == "1 / 25"
         assert sum(engine.rating_counts().values()) == 0
         assert due.undo_button.isHidden(), "one answer, once"
@@ -337,7 +346,7 @@ class TestUndo:
         due.notify_undo.connect(lambda text, undo: offers.append((text, undo)))
         due.start_session()
         for _ in range(25):
-            due.keyPressEvent(_key(Qt.Key.Key_3))
+            _right(due)
         assert not due.in_session
         (text, undo), = offers
         assert text == "25 words reviewed."
@@ -355,7 +364,7 @@ class TestWordHistory:
         engine.introduce()
         clock.advance_to_day_start(1)
         for item in engine.review_queue():
-            engine.answer(item.word.id, Rating.GOOD)
+            answer(engine, item.word.id, Rating.GOOD)
         word = loaded.list_words(loaded.lists()[0].id)[0]
         panel = window.review.table.panel
         panel.show_word(loaded.get_word(word.id))
@@ -390,7 +399,7 @@ class TestProgressPage:
         engine.introduce()
         clock.advance_to_day_start(1)
         for index, item in enumerate(engine.review_queue()):
-            engine.answer(item.word.id, Rating.AGAIN if index % 5 == 0 else Rating.GOOD)
+            answer(engine, item.word.id, Rating.AGAIN if index % 5 == 0 else Rating.GOOD)
         engine.undo_last_answer()
         return window
 
@@ -577,7 +586,7 @@ class TestStudyPlanDialog:
         before = engine.daily_plan().pool_remaining
         later = loaded.create_list("Made later")
         for word in ("zebra", "yonder", "quartz"):
-            loaded.add_word(later.id, word)
+            loaded.add_word(later.id, word, definition=f"the meaning of {word}")
         loaded.set_status([w.id for w in loaded.list_words(later.id)], ReviewStatus.UNKNOWN)
         assert engine.daily_plan().pool_remaining == before + 3
 
@@ -678,6 +687,16 @@ def _ctrl(key: Qt.Key):
     from PySide6.QtGui import QKeyEvent
 
     return QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.ControlModifier)
+
+
+def _right(study, rating_key: Qt.Key = Qt.Key.Key_3) -> None:
+    """Choose the right option with its key, then rate it (3: Good)."""
+    question = study.card.step.question
+    study.keyPressEvent(_key(Qt.Key.Key_1 + question.answer))
+    if study.card.rating:
+        study.keyPressEvent(_key(rating_key))
+    else:
+        study.keyPressEvent(_key(Qt.Key.Key_Return))
 
 
 def _key(key: Qt.Key):
@@ -822,7 +841,8 @@ class TestStudyExtras:
         # every other program and can be briefly locked by one of them.
         lines = window.study.copy_text().splitlines()
         assert len(lines) == 25
-        assert lines[0] == engine.daily_plan().new_words[0].word
+        first = engine.daily_plan().new_words[0]
+        assert lines[0] == f"{first.word} — {first.definition}"
         messages: list[str] = []
         window.study.notify.connect(messages.append)
         window.study.copy_button.click()
@@ -839,7 +859,7 @@ class TestStudyExtras:
         word = engine.daily_plan().introduced_today[0]
         for _ in range(2):
             clock.advance_to_day_start(1)
-            engine.answer(word.id, Rating.AGAIN)
+            answer(engine, word.id, Rating.AGAIN)
         window.study.refresh()
         assert not window.study.hard_section.isHidden()
         chips = window.study.hard_chips.texts()

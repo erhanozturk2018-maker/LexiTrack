@@ -39,6 +39,7 @@ from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 from lexitrack.core.clock import FrozenClock  # noqa: E402
 from lexitrack.database.connection import Database  # noqa: E402
+from lexitrack.models.attempt import Effort, LearningAttempt, Phase, Role, Task  # noqa: E402
 from lexitrack.models.settings import Setting  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
 from lexitrack.services.learning_service import LearningService  # noqa: E402
@@ -194,8 +195,28 @@ SAMPLE_DEFINITIONS = {
 }
 
 
+#: Sentences for a few of the sample's words, so a session shows both tasks.
+SAMPLE_CONTEXTS = {
+    "ticket": ["I bought a ticket for the train to Leeds.",
+               "You need a ticket to get into the museum."],
+    "scientist": ["The scientist tested the water every morning."],
+    "play": ["The children play in the park after school."],
+}
+
+
 def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
     """Study, a review card, the plan window and Settings, from a week of use."""
+    # Every word needs a definition to be asked; the sample's own where it
+    # has one, a stand-in otherwise, and contexts for a few.
+    service = window._service
+    for word in service.list_words(list_id):
+        if not word.definition:
+            service.set_definition(
+                word.id,
+                SAMPLE_DEFINITIONS.get(word.normalized_word, f"the meaning of {word.word}"),
+            )
+        for sentence in SAMPLE_CONTEXTS.get(word.normalized_word, []):
+            service.add_context(word.id, sentence)
     engine.create_plan("Oxford 3000", list_ids=[list_id])
     engine.save_settings(
         {Setting.NEW_WORDS_PER_DAY: 25, Setting.LEECH_CONSECUTIVE: 2}
@@ -206,20 +227,18 @@ def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
         clock.advance(hours=4)
         engine.introduce()
         for index, item in enumerate(engine.review_queue()):
-            engine.answer(item.word.id, Rating.AGAIN if index % 6 == 0 else Rating.GOOD)
+            missed = index % 6 == 0
+            task = Task.CONTEXT_TO_DEFINITION if index % 4 == 1 else Task.DEFINITION_TO_WORD
+            rating = Rating.AGAIN if missed else Rating.GOOD
+            attempt = LearningAttempt(
+                word_id=item.word.id, at=clock.now_utc(), on_day=clock.today(),
+                phase=Phase.REVIEW, role=Role.PRIMARY, task=task, correct=not missed,
+                effort=None if missed else Effort.of(rating),
+            )
+            engine.review(item.word.id, rating, task=task, correct=not missed,
+                          attempts=[attempt])
     clock.advance_to_day_start(1)
     clock.advance(hours=4)
-    # A definition for the sample's words that have none, so the review card
-    # is shown asking the V2 way: the word from its meaning.
-    connection = window._service.database.connection
-    for item in engine.review_queue():
-        definition = SAMPLE_DEFINITIONS.get(item.word.normalized_word)
-        if definition:
-            connection.execute(
-                "UPDATE word_sources SET definition = ? WHERE word_id = ? "
-                "AND (definition IS NULL OR definition = '')",
-                (definition, item.word.id),
-            )
 
     for name in (ThemeName.LIGHT, ThemeName.DARK):
         theme.apply(name)

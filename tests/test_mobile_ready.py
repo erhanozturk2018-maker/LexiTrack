@@ -1,7 +1,7 @@
 """The learning engine can leave the desktop (docs/DECISIONS.md, 77).
 
-A phone client would reuse the rules — the schedule, the route, the skill
-record, the session — and bring its own screens and storage. These tests
+A phone client would reuse the rules — the schedule, the two questions, the
+record of answers, the session — and bring its own screens and storage. These tests
 hold the boundary that makes that possible: the learning modules load with
 no Qt, no PDF library and no Telegram library; they reach no operating
 system paths; and a session's state is plain data.
@@ -32,12 +32,10 @@ LEARNING = (
     "services/learning_service.py",
     "services/srs_scheduler.py",
     "services/review_flow.py",
-    "services/review_route.py",
+    "services/review_tasks.py",
     "services/review_wording.py",
     "services/review_queue.py",
-    "services/task_selector.py",
     "services/first_learning.py",
-    "services/skill_tracker.py",
     "services/progress.py",
     "services/content_service.py",
     "services/portable.py",

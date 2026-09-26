@@ -16,11 +16,9 @@ Ordering is applied here, to the words handed to the export service, so every
 format honours it: a JSON file exported "by CEFR level" imports back in that
 order.
 
-A PDF or CSV holds the columns ticked under COLUMNS: the dictionary's fields
-and the teaching content. The fields that exist only in the language words
-are explained in are unavailable until one is chosen in Settings; a JSON word
-list always holds the dictionary fields whole, so the columns do not apply to
-it.
+A PDF or CSV holds the columns ticked under COLUMNS: part of speech, CEFR
+level, length, definition and contexts. A JSON word list always holds every
+field, contexts included, so the columns do not apply to it.
 """
 
 from __future__ import annotations
@@ -55,12 +53,10 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..core.errors import LexiTrackError
-from ..models.language import language_name
 from ..models.word_entry import CEFR_ORDER
 from ..repositories.word_repository import StoredWord
 from ..services.export_service import (
     DEFAULT_COLUMNS,
-    DICTIONARY_COLUMNS,
     ExportColumn,
     ExportContent,
     ExportFormat,
@@ -135,7 +131,7 @@ class ExportDialog(QDialog):
         self._service = service
         self._scopes = list(scopes)
         self._contents: dict[int, ExportContent] = {}
-        self._teaching_counts: dict[tuple[int, int], int] = {}
+        self._context_counts: dict[tuple[int, int], int] = {}
         self._settings = QSettings()
         self._preview_dir = Path(tempfile.mkdtemp(prefix="lexitrack-preview-"))
         self._preview_timer = QTimer(self)
@@ -145,7 +141,6 @@ class ExportDialog(QDialog):
         self.written: Path | None = None
         #: Once a format is chosen (now or remembered), switching scope keeps it.
         self._format_chosen = False
-        self._language = service.export_learner_language()
         self.setWindowTitle("Export")
         self.setMinimumSize(860, 680)
         self._build()
@@ -230,18 +225,8 @@ class ExportDialog(QDialog):
         grid.setHorizontalSpacing(m.space_3)
         grid.setVerticalSpacing(m.space_1)
         self._column_boxes: dict[ExportColumn, QCheckBox] = {}
-        teaching = [column for column in ExportColumn if column not in DICTIONARY_COLUMNS]
-        for index, choice in enumerate(DICTIONARY_COLUMNS):
+        for index, choice in enumerate(ExportColumn):
             self._add_column(grid, choice, index // 2, index % 2)
-        self.teaching_label = QLabel(
-            f"Teaching content, in {language_name(self._language)}"
-            if self._language
-            else "Teaching content"
-        )
-        self.teaching_label.setObjectName("Faint")
-        grid.addWidget(self.teaching_label, 2, 0, 1, 2)
-        for index, choice in enumerate(teaching):
-            self._add_column(grid, choice, 3 + index // 2, index % 2)
         column.addWidget(self.columns_box)
         self.columns_hint = QLabel()
         self.columns_hint.setObjectName("Faint")
@@ -330,11 +315,6 @@ class ExportDialog(QDialog):
 
     def _add_column(self, grid: QGridLayout, choice: ExportColumn, row: int, col: int) -> None:
         box = QCheckBox(choice.label)
-        if choice.needs_language and not self._language:
-            box.setEnabled(False)
-            box.setToolTip(
-                "Choose the language words are explained in, under Settings → Learning."
-            )
         box.toggled.connect(self._on_columns)
         self._column_boxes[choice] = box
         grid.addWidget(box, row, col)
@@ -354,13 +334,6 @@ class ExportDialog(QDialog):
         )
 
     def _on_columns(self, _checked: bool) -> None:
-        # A translation hangs under its example: without examples there is
-        # nothing to translate.
-        translations = self._column_boxes.get(ExportColumn.TRANSLATIONS)
-        examples = self._column_boxes.get(ExportColumn.EXAMPLES)
-        if translations is not None and examples is not None and self._language:
-            translations.setEnabled(examples.isChecked())
-            translations.setToolTip("" if examples.isChecked() else "Tick Examples first.")
         self._schedule_preview()
 
     def _on_scope(self, index: int, checked: bool) -> None:
@@ -386,11 +359,10 @@ class ExportDialog(QDialog):
         # A JSON word list is the importable file: always every dictionary field.
         self.columns_box.setEnabled(file_format is not ExportFormat.JSON)
         self.columns_hint.setText(
-            "A JSON word list always holds every dictionary field. Teaching content "
-            "goes out through Word Content."
+            "A JSON word list always holds every field: length, part of speech, "
+            "level, definition and contexts."
             if file_format is ExportFormat.JSON
-            else "" if self._language
-            else "Meanings and translations need a language: Settings → Learning."
+            else ""
         )
         self.columns_hint.setVisible(bool(self.columns_hint.text()))
 
@@ -427,11 +399,9 @@ class ExportDialog(QDialog):
             f"{count:,} {'word' if count == 1 else 'words'}  ·  "
             f"{self.selected_order().label}  ·  {file_format.value.upper()}"
         )
-        if file_format is not ExportFormat.JSON and any(
-            choice.is_teaching for choice in content.columns
-        ):
-            # Said plainly, so a sheet of dashes is not a surprise.
-            summary += f"  ·  {self._with_teaching(content):,} with teaching content"
+        if file_format is ExportFormat.JSON or ExportColumn.CONTEXTS in content.columns:
+            # Said plainly, so a sheet without sentences is not a surprise.
+            summary += f"  ·  {self._with_contexts(content):,} with contexts"
         self.summary.setText(summary)
         self.save_button.setEnabled(count > 0)
         if not count:
@@ -458,11 +428,11 @@ class ExportDialog(QDialog):
             self.text_view.setPlainText("\n".join(shown))
             self.preview_stack.setCurrentWidget(self.text_view)
 
-    def _with_teaching(self, content: ExportContent) -> int:
+    def _with_contexts(self, content: ExportContent) -> int:
         key = (self._scope_group.checkedId(), len(content.words))
-        if key not in self._teaching_counts:
-            self._teaching_counts[key] = self._service.export_with_teaching(content.words)
-        return self._teaching_counts[key]
+        if key not in self._context_counts:
+            self._context_counts[key] = self._service.export_with_contexts(content.words)
+        return self._context_counts[key]
 
     def _render_first_page(self, pdf: Path) -> QPixmap:
         width = max(self.preview_stack.width() - 40, 320)

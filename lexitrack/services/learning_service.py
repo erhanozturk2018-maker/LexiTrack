@@ -16,9 +16,9 @@ The rules implemented here, in order of how much trouble they save:
   finite evening and an endless one.
 * **Intake pauses when the review load is already over capacity.** Adding 25
   more words to a day that is already too big does not make tomorrow better.
-* **Long-term memory is derived; Known is the user's.** When a word's
-  stability passes the threshold the answer says so and the word is offered as
-  Known (:meth:`known_suggestions`). Only the user marks it (:meth:`confirm_known`,
+* **Known is the user's.** A word answered correctly after a long gap (the
+  threshold in Settings, 21 days by default) is offered as Known
+  (:meth:`known_suggestions`). Only the user marks it (:meth:`confirm_known`,
   recorded as learned here, or by hand), and that archives the card instead of
   deleting it.
 
@@ -28,25 +28,14 @@ run a year of study in a second, and it never sleeps or polls.
 
 from __future__ import annotations
 
-import random
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
 from ..core.clock import DayClock
 from ..database.connection import Database
-from ..models.attempt import (
-    ROUTE_V1,
-    ROUTE_V2,
-    Effort,
-    LearningAttempt,
-    MemoryResult,
-    Phase,
-    Role,
-    Task,
-)
+from ..models.attempt import ROUTE_V3, LearningAttempt, Task
 from ..models.settings import LearningSettings, Setting
-from ..models.skill import SkillStage
 from ..models.srs import (
     CardState,
     Channel,
@@ -70,9 +59,9 @@ from ..repositories import (
     StoredWord,
     WordRepository,
 )
+from ..repositories.word_repository import Candidate
 from .review_queue import Queue, effective_capacity
 from .review_queue import build as build_queue
-from .skill_tracker import SkillTracker
 from .srs_scheduler import SrsScheduler
 
 #: How far ahead the Study page looks.
@@ -85,9 +74,6 @@ class StudyItem:
 
     word: StoredWord
     card: SrsCard
-    #: True when the meaning should start hidden. Only study-plan reviews hide
-    #: it; the free-study flashcards and the word table always show it.
-    hide_meaning: bool = True
 
     @property
     def is_struggling(self) -> bool:
@@ -110,6 +96,8 @@ class DailyPlan:
     reviews_done_today: int = 0
     #: Words in the plan that have never been introduced.
     pool_remaining: int = 0
+    #: Words that would be in the pool but have no definition to ask from.
+    without_definition: int = 0
     new_target: int = 0
     review_capacity: int = 0
     #: ``(local date, cards due)`` for the next :data:`FORECAST_DAYS` days.
@@ -170,13 +158,14 @@ class AnswerOutcome:
     duplicate: bool = False
     became_struggling: bool = False
     reached_mastery: bool = False
-    #: True when the word is in long-term memory and not yet Known: the
-    #: caller offers to mark it Known. The engine never does it itself.
+    #: True when the word was answered correctly after a long gap and is not
+    #: yet Known: the caller offers to mark it Known. The engine never does
+    #: it itself.
     suggest_known: bool = False
     #: The answer's row in review_logs, for practice that follows it.
     log_id: int | None = None
-    #: What a V2 review found; None for a V1 answer.
-    memory_result: MemoryResult | None = None
+    #: Whether the option chosen was right.
+    correct: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,15 +217,10 @@ class LearningService:
         plan = self.active_plan()
         return list(self._plans.word_ids(plan.id)) if plan else []
 
-    def choice_pool(self, word_id: int, seed: str, size: int = 40) -> list[StoredWord]:
-        """Other words from the active plan to choose among, a stable sample."""
-        plan = self.active_plan()
-        ids = [i for i in (self._plans.word_ids(plan.id) if plan else []) if i != word_id]
-        if len(ids) < 3:
-            # A plan too small for a choice borrows from the whole vocabulary.
-            ids = [i for i in self._words.all_ids() if i != word_id]
-        sample = random.Random(seed).sample(ids, min(size, len(ids)))
-        return self._words_in_order(sample)
+    def choice_candidates(self) -> list[Candidate]:
+        """Every word with a definition: what the other three options of a
+        question are chosen from (services/review_tasks.py)."""
+        return self._words.choice_candidates()
 
     @property
     def clock(self) -> DayClock:
@@ -367,6 +351,9 @@ class LearningService:
             if target
             else []
         )
+        outlook = self._plans.outlook(
+            plan.id, include_not_reviewed=self._settings.new_words_include_not_reviewed
+        )
         return DailyPlan(
             local_date=today,
             plan=plan,
@@ -375,9 +362,8 @@ class LearningService:
             due_count=len(due),
             due_left_over=queue.left_over,
             reviews_done_today=done,
-            pool_remaining=self._plans.candidate_count(
-                plan.id, include_not_reviewed=self._settings.new_words_include_not_reviewed
-            ),
+            pool_remaining=outlook.to_introduce,
+            without_definition=outlook.without_definition,
             new_target=self._settings.new_words_per_day,
             review_capacity=effective_capacity(self._settings.review_capacity_per_day),
             forecast=forecast,
@@ -503,9 +489,8 @@ class LearningService:
         if not cards:
             return []
         words = {word.id: word for word in self._words.get_many([c.word_id for c in cards])}
-        hide = self._settings.hide_meaning_in_study
         return [
-            StudyItem(word=words[card.word_id], card=card, hide_meaning=hide)
+            StudyItem(word=words[card.word_id], card=card)
             for card in cards
             if card.word_id in words
         ]
@@ -523,7 +508,7 @@ class LearningService:
         word = self._words.get(int(word_id))
         if card is None or word is None:
             return None
-        return StudyItem(word=word, card=card, hide_meaning=self._settings.hide_meaning_in_study)
+        return StudyItem(word=word, card=card)
 
     def _due_cards(self, scope: Sequence[int], limit: int | None) -> list[SrsCard]:
         cards = list(self._queue(scope).cards)
@@ -597,23 +582,28 @@ class LearningService:
         """Close sessions left open on an earlier day. Called at startup."""
         return self._sessions.finish_stale(self._clock.today(), self._clock.now_utc())
 
-    def answer(
+    def review(
         self,
         word_id: int,
         rating: Rating,
         *,
+        task: Task,
+        correct: bool,
+        attempts: Sequence[LearningAttempt] = (),
         session_id: str | None = None,
         channel: Channel = Channel.DESKTOP,
         update_key: str | None = None,
     ) -> AnswerOutcome | None:
-        """Record one V1 answer — the word shown, its meaning recalled — and
-        reschedule the word.
+        """Record the day's answer for a word and reschedule it.
+
+        ``correct`` is whether the option chosen was right; ``rating`` is the
+        effort the learner chose for a right answer, and Again for a wrong
+        one. Both are kept, apart, with the task asked. The attempt behind it
+        is linked to the answer's log row, so Undo reaches it.
 
         ``update_key`` makes the call idempotent, which is what Telegram needs:
         it re-delivers a callback whenever it is not certain the answer
-        arrived, and a second delivery must not rate the card twice. The key
-        is claimed before anything is written, so the duplicate is recognised
-        even if it arrives while the first is still being handled.
+        arrived, and a second delivery must not rate the card twice.
 
         Returns ``None`` when the word has no card at all — a message from
         before the word was removed, say. A duplicate returns an outcome with
@@ -625,41 +615,14 @@ class LearningService:
             session_id=session_id,
             channel=channel,
             update_key=update_key,
-            memory_result=None,
-            route=ROUTE_V1,
-            attempts=None,
-        )
-
-    def review(
-        self,
-        word_id: int,
-        rating: Rating,
-        *,
-        memory_result: MemoryResult,
-        attempts: Sequence[LearningAttempt],
-        session_id: str | None = None,
-        channel: Channel = Channel.DESKTOP,
-        update_key: str | None = None,
-    ) -> AnswerOutcome | None:
-        """Record a V2 review: the rating its memory result earned, and the
-        attempts (primary and probes) that produced it, as one event.
-
-        The attempts are linked to the answer's log row, so Undo reaches them
-        all. See ``services/review_route.py`` for how the rating is decided.
-        """
-        return self._rate(
-            word_id,
-            Rating(int(rating)),
-            session_id=session_id,
-            channel=channel,
-            update_key=update_key,
-            memory_result=memory_result,
-            route=ROUTE_V2,
+            task=task,
+            correct=correct,
             attempts=attempts,
         )
 
     def record_practice(self, attempt: LearningAttempt, log_id: int | None) -> int:
-        """Record relearning or repair practice, which never changes the schedule.
+        """Record practice — a new word asked, a word asked again after a
+        miss — which never changes the schedule.
 
         Linked to the answer it followed (``log_id``), so taking that answer
         back takes the practice with it.
@@ -674,9 +637,9 @@ class LearningService:
         session_id: str | None,
         channel: Channel,
         update_key: str | None,
-        memory_result: MemoryResult | None,
-        route: str,
-        attempts: Sequence[LearningAttempt] | None,
+        task: Task,
+        correct: bool,
+        attempts: Sequence[LearningAttempt],
     ) -> AnswerOutcome | None:
         card = self._cards.get(int(word_id))
         word = self._words.get(int(word_id))
@@ -724,12 +687,11 @@ class LearningService:
                     difficulty_after=result.card.difficulty,
                     scheduler_version=result.card.scheduler_version,
                     params_hash=self._scheduler.params_hash,
-                    memory_result=memory_result.value if memory_result else None,
-                    route_version=route,
+                    route_version=ROUTE_V3,
+                    task=task.value,
+                    correct=correct,
                 )
             )
-            if attempts is None:
-                attempts = [_v1_attempt(word.id, rating, now, today, session_id, log_id)]
             for attempt in attempts:
                 self._attempts.add(
                     replace(attempt, review_log_id=log_id, session_id=session_id)
@@ -759,7 +721,7 @@ class LearningService:
                 word.status is not ReviewStatus.KNOWN and word.id in self.known_evidence([word.id])
             ),
             log_id=log_id,
-            memory_result=memory_result,
+            correct=correct,
         )
 
     # -- undo --------------------------------------------------------------
@@ -848,20 +810,11 @@ class LearningService:
         return changed
 
     def known_evidence(self, word_ids: Sequence[int]) -> set[int]:
-        """Of ``word_ids``, the words whose record makes a strong case for Known.
-
-        Both, never one alone: the skill is **Productive** (the word used well
-        in two different contexts or tasks), and it was **recalled after a long
-        gap** — at least the threshold in Settings (21 days by default) without
-        a review. A forecast is not evidence: stability alone never counts.
-        """
-        recalled = self._cards.recalled_after(word_ids, self._settings.mastery_stability_days)
-        if not recalled:
-            return set()
-        skills = SkillTracker(self._db).skills(recalled)
-        return {
-            word_id for word_id, skill in skills.items() if skill.stage is SkillStage.PRODUCTIVE
-        }
+        """Of ``word_ids``, the words whose record makes the case for Known:
+        answered correctly — and not rated Again — after a long gap, at least
+        the threshold in Settings (21 days by default) without a review. A
+        forecast is not evidence: stability alone never counts."""
+        return self._cards.recalled_after(word_ids, self._settings.mastery_stability_days)
 
     def known_suggestions(self) -> list[StoredWord]:
         """Words not Known yet whose record makes a strong case for Known
@@ -916,7 +869,7 @@ class LearningService:
         cards = self._cards.struggling(self._plans.word_ids(plan.id), limit=limit)
         words = {word.id: word for word in self._words.get_many([c.word_id for c in cards])}
         return [
-            StudyItem(word=words[card.word_id], card=card, hide_meaning=False)
+            StudyItem(word=words[card.word_id], card=card)
             for card in cards
             if card.word_id in words
         ]
@@ -950,41 +903,3 @@ class LearningService:
             return []
         found = {word.id: word for word in self._words.get_many(word_ids)}
         return [found[word_id] for word_id in word_ids if word_id in found]
-
-
-#: What each answer of the V1 route says about the effort of the retrieval.
-_V1_EFFORT = {
-    Rating.HARD: Effort.EFFORTFUL,
-    Rating.GOOD: Effort.NORMAL,
-    Rating.EASY: Effort.INSTANT,
-}
-
-
-def _v1_attempt(
-    word_id: int,
-    rating: Rating,
-    at: datetime,
-    on_day: str,
-    session_id: str | None,
-    log_id: int,
-) -> LearningAttempt:
-    """The attempt a V1 review is: the word shown, its meaning recalled.
-
-    V1 asks one thing — word to meaning, level 1 — and the answer is the
-    learner's own judgement of it. That is recorded as it happened, route
-    ``v1``, and counts as recognition; it is not stretched into evidence of
-    anything the review did not ask.
-    """
-    return LearningAttempt(
-        word_id=int(word_id),
-        at=at,
-        on_day=on_day,
-        phase=Phase.REVIEW,
-        role=Role.PRIMARY,
-        task=Task.WORD_TO_MEANING,
-        success=rating is not Rating.AGAIN,
-        session_id=session_id,
-        effort=_V1_EFFORT.get(rating),
-        review_log_id=log_id,
-        route_version=ROUTE_V1,
-    )

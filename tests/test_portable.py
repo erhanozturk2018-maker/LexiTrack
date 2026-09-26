@@ -17,15 +17,15 @@ from lexitrack.core.clock import FrozenClock
 from lexitrack.core.errors import InvalidFileError, StorageError
 from lexitrack.database.connection import Database
 from lexitrack.database.migrations import SCHEMA_VERSION
-from lexitrack.models.content import WordContent, WordContext, WordLocalization
 from lexitrack.models.srs import Rating
-from lexitrack.repositories import ContentRepository
+from lexitrack.repositories import ContextRepository
 from lexitrack.services import portable
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.maintenance import Maintenance
 
+from .flow_helpers import answer
+from .test_contexts_migration import build_v6_database
 from .test_learning_service import clock, engine  # noqa: F401 - fixtures
-from .test_localization_migration import build_v5_database
 
 
 def _counts(database: Database) -> dict[str, int]:
@@ -37,19 +37,12 @@ def _counts(database: Database) -> dict[str, int]:
 
 @pytest.fixture
 def studied(engine: LearningService, clock: FrozenClock, database: Database):  # noqa: F811
-    """A few days of real use: cards, answers, attempts, content in two languages."""
+    """A few days of real use: cards, answers, attempts, contexts."""
     ids = [word.id for word in engine.introduce().introduced]
     clock.advance_to_day_start(1)
     for word_id in ids[:10]:
-        engine.answer(word_id, Rating.GOOD)
-    repo = ContentRepository(database)
-    repo.save_content(WordContent(word_id=ids[0], pattern="p", collocations=("a b",)))
-    repo.save_localization(WordLocalization(word_id=ids[0], learner_language="de",
-                                            core_meaning="Bedeutung"))
-    repo.save_localization(WordLocalization(word_id=ids[0], learner_language="es",
-                                            core_meaning="significado"))
-    (context_id,) = repo.add_contexts([WordContext(word_id=ids[0], text="A {{word}}.")])
-    repo.save_translation(context_id, "de", "Ein Wort.")
+        answer(engine, word_id, Rating.GOOD)
+    ContextRepository(database).add_many(ids[0], ["A word in use.", "Another use of it."])
     return ids
 
 
@@ -72,14 +65,13 @@ def test_everything_comes_back_as_it_was(
     # Lose most of it.
     database.connection.execute("DELETE FROM learning_attempts")
     database.connection.execute("DELETE FROM review_logs")
-    database.connection.execute("DELETE FROM word_localizations")
+    database.connection.execute("DELETE FROM word_contexts")
     database.connection.execute("DELETE FROM app_settings")
 
     portable.restore(database, summary.path)
     assert _counts(database) == before
-    teaching = ContentRepository(database).teaching(studied[0], "de")
-    assert teaching.core_meaning == "Bedeutung"
-    assert teaching.translation(teaching.contexts[0]) == "Ein Wort."
+    contexts = ContextRepository(database).for_word(studied[0])
+    assert [c.text for c in contexts] == ["A word in use.", "Another use of it."]
     assert database.connection.execute("PRAGMA foreign_key_check").fetchall() == []
     assert engine.refresh_settings().new_words_per_day == 25
 
@@ -155,13 +147,14 @@ def test_an_older_backup_is_upgraded_as_it_is_restored(
     database: Database, tmp_path: Path, clock: FrozenClock  # noqa: F811
 ) -> None:
     old = tmp_path / "old.db"
-    build_v5_database(old)
+    build_v6_database(old)
     maintenance = Maintenance(database, clock, directory=tmp_path / "backups")
     maintenance.restore_backup(old)
     version = database.connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
     assert version[0] == SCHEMA_VERSION
-    teaching = ContentRepository(database).teaching(1, "tr")
-    assert teaching.core_meaning == "meaning-in-tr"
+    assert [c.text for c in ContextRepository(database).for_word(1)] == [
+        "She was reluctant to leave.", "A reluctant yes.",
+    ]
 
 
 def test_a_damaged_backup_changes_nothing(
@@ -181,10 +174,11 @@ def test_attempts_export_as_csv(
     maintenance = Maintenance(database, clock)
     assert maintenance.export_attempts(tmp_path / "a.csv") == 10
     header = (tmp_path / "a.csv").read_text(encoding="utf-8-sig").splitlines()[0]
-    assert header.startswith("date,time_utc,word,phase,role,task,level,success")
+    assert header.startswith("date,time_utc,word,phase,role,task,correct,effort")
     assert maintenance.export_review_log(tmp_path / "r.csv") == 10
-    header = (tmp_path / "r.csv").read_text(encoding="utf-8-sig").splitlines()[0]
-    assert header.endswith("memory_result,route")
+    lines = (tmp_path / "r.csv").read_text(encoding="utf-8-sig").splitlines()
+    assert lines[0].startswith("date,time_utc,word,task,correct,rating,answer")
+    assert ",definition_to_word,yes,3,Good," in lines[1]
     tomorrow = date.fromisoformat(clock.today()) + timedelta(days=1)
     assert maintenance.export_review_log(tmp_path / "r2.csv", since=tomorrow) == 0
     assert maintenance.export_attempts(tmp_path / "a2.csv", since=tomorrow) == 0

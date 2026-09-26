@@ -15,7 +15,7 @@ and everything else is optional::
       "words": [
         "Haus",
         {"word": "gehen", "part_of_speech": "verb", "definition": "to go",
-         "example": "Wir gehen nach Hause.", "cefr_level": "A1"}
+         "cefr_level": "A1", "contexts": ["Wir gehen nach Hause."]}
       ]
     }
 
@@ -45,6 +45,7 @@ import re
 from typing import Any
 
 from ..core.errors import InvalidFileError, NoWordsFoundError
+from ..models.context import MAX_CONTEXT_LENGTH, clean_context
 from ..models.language import UNDETERMINED, is_determined, normalize_language
 from ..models.word_entry import CEFR_ORDER, WordEntry
 from ..normalization.word_normalizer import display_form, normalize_word
@@ -109,14 +110,14 @@ class JsonParser(DocumentParser):
         file_language = _file_language(root)
         source_key = self.source_key(document)
 
-        # A content enrichment file also has a "words" list, of existing words
-        # with teaching content. Imported as a word list it would add nothing
-        # useful and lose the content, so it is refused with directions.
+        # A content file from an earlier LexiTrack also has a "words" list, of
+        # existing words. Imported as a word list it would add nothing useful,
+        # so it is refused with directions.
         if root.get("format") == "lexitrack-content":
             raise InvalidFileError(
                 f"{document.path.name} is a LexiTrack content file, not a word list. "
-                "Import it with Import content, which adds the meanings and contexts "
-                "to the words you already have."
+                "Import it with Word Contexts, which adds its contexts to the words "
+                "you already have."
             )
 
         if "words" not in root:
@@ -291,6 +292,8 @@ def _entry(
     if level and level.upper() in CEFR_ORDER:
         level = level.upper()
 
+    contexts = _contexts(fields.get("contexts"), index, text)
+
     return WordEntry(
         word=display_form(text),
         normalized_word=normalized,
@@ -301,7 +304,38 @@ def _entry(
         example=values["example"],
         metadata={"note": values["note"]} if values["note"] else {},
         language=language,
+        contexts=contexts,
     )
+
+
+def _contexts(value: Any, index: int, text: str) -> tuple[str, ...]:
+    """A word's ``contexts``: a list of sentences (or one sentence). Empty
+    ones are left out; one too long is a problem with the file."""
+    if value is None:
+        return ()
+    items = [value] if isinstance(value, str) else value
+    if not isinstance(items, list):
+        raise _ItemProblem(
+            f"Word {index} (“{text.strip()}”): “contexts” must be a list of "
+            f"sentences, not {_type_name(value)}."
+        )
+    found: list[str] = []
+    for item in items:
+        sentence = item.get("text") if isinstance(item, dict) else item
+        if not isinstance(sentence, str):
+            raise _ItemProblem(
+                f"Word {index} (“{text.strip()}”): every context must be text, "
+                f"not {_type_name(sentence)}."
+            )
+        clean = clean_context(sentence)
+        if len(clean) > MAX_CONTEXT_LENGTH:
+            raise _ItemProblem(
+                f"Word {index} (“{text.strip()}”): a context is longer than "
+                f"{MAX_CONTEXT_LENGTH} characters."
+            )
+        if clean and clean.casefold() not in (f.casefold() for f in found):
+            found.append(clean)
+    return tuple(found)
 
 
 def _type_name(value: Any) -> str:

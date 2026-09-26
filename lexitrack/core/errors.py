@@ -92,3 +92,9 @@ class ExportError(LexiTrackError):
     """An export could not be produced."""
 
     default_message = "The export could not be created."
+
+
+class WordError(LexiTrackError):
+    """A word, its definition or a context could not be changed as asked."""
+
+    default_message = "The word could not be changed."

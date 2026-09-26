@@ -31,6 +31,8 @@ class WordEntry:
         language: Language code (``"en"``, ``"de"``) when the parser knows it.
             ``None`` means "not stated by the document"; the import service
             then takes the language from the target list.
+        contexts: Sentences using the word, when the source provides them
+            (a LexiTrack JSON list). Added to the word's contexts on import.
     """
 
     word: str
@@ -42,6 +44,7 @@ class WordEntry:
     example: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     language: str | None = None
+    contexts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.word or not self.word.strip():
@@ -67,6 +70,7 @@ class WordEntry:
             example=self.example or other.example,
             metadata=merged_metadata,
             language=self.language or other.language,
+            contexts=tuple(dict.fromkeys(self.contexts + other.contexts)),
         )
 
 

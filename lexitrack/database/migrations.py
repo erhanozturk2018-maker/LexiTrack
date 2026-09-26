@@ -29,7 +29,7 @@ from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class MigrationError(StorageError):
@@ -465,10 +465,26 @@ def _migrate_5_to_6(connection: sqlite3.Connection) -> None:
     seed_settings(connection)
 
 
+_CONTEXTS_SCHEMA = Path(__file__).with_name("contexts.sql")
+
+
+def _migrate_6_to_7(connection: sqlite3.Connection) -> None:
+    """A word is its definition and its contexts; see contexts.sql.
+
+    The teaching content of schemas 5 and 6 is dropped (the backup taken
+    before the upgrade keeps it), contexts become ``id, word_id, text``, and
+    every answer records its task and whether it was correct.
+    """
+    _run_sql(connection, _CONTEXTS_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+
+
 # -- verification ------------------------------------------------------------
 
 #: Tables holding the user's data. An upgrade may add to them, never lose a
-#: row; a step that did would be rolled back.
+#: row; a step that did would be rolled back. The teaching content
+#: (word_content) and the contexts are not listed: schema 7 drops the first
+#: and merges contexts that became identical once their markers went.
 _PRESERVED = (
     "words",
     "word_sources",
@@ -478,8 +494,6 @@ _PRESERVED = (
     "srs_cards",
     "review_logs",
     "word_status_events",
-    "word_content",
-    "word_contexts",
     "learning_attempts",
 )
 
@@ -510,6 +524,7 @@ _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     3: _migrate_3_to_4,
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
+    6: _migrate_6_to_7,
 }
 
 

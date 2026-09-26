@@ -6,14 +6,12 @@ through. It takes ``StoredWord`` objects and knows nothing about which parser
 produced them, so a list built from a novel exports exactly as well as one
 built from Oxford — the fields it cannot fill simply show a dash.
 
-With only the dictionary's columns (exporters/sheet.py) the sheet is a table:
-word, part of speech, level, and the definition with the word's note (a
-sense, a UK/US variant) under it. With any teaching column it becomes a list
-of entries, one per word — the word and its level on a line, then each chosen
-field under a small label, examples with the word in bold and their
-translations beneath — because meanings, patterns and examples do not fit in
-table cells. Exported in CEFR order, either form starts each level with a
-heading, so a printed list reads A1, then A2, and so on.
+Without contexts (exporters/sheet.py) the sheet is a table: word, part of
+speech, level, length and definition, as chosen. With contexts it becomes a
+list of entries, one per word — the word and its details on a line, then its
+definition, then its contexts with the word in bold — because sentences do
+not fit in table cells. Exported in CEFR order, either form starts each level
+with a heading, so a printed list reads A1, then A2, and so on.
 
 The text is set in Bitstream Vera, which ships with ReportLab and is embedded
 in the file, so a sheet looks the same everywhere and covers the Latin
@@ -55,8 +53,7 @@ from reportlab.platypus import (
 from reportlab.platypus.flowables import HRFlowable
 
 from ..core.errors import ExportError
-from ..models.content import TARGET, WordContext
-from ..models.language import language_name
+from ..models.context import find_word
 from ..repositories.word_repository import StoredWord
 from .sheet import ExportColumn, WordSheet
 
@@ -80,6 +77,7 @@ _TABLE_COLUMNS: tuple[tuple[ExportColumn | None, str, float], ...] = (
     (None, "WORD", 0.22),
     (ExportColumn.PART_OF_SPEECH, "PART OF SPEECH", 0.20),
     (ExportColumn.CEFR, "CEFR", 0.10),
+    (ExportColumn.LENGTH, "LENGTH", 0.09),
     (ExportColumn.DEFINITION, "DEFINITION", 0.48),
 )
 
@@ -121,8 +119,7 @@ def _build(
     generated = datetime.now().strftime("%d %B %Y")
     footer_text = f"LexiTrack  ·  {title}  ·  {generated}"
     caption = subtitle or _default_subtitle(len(words))
-    language_note = _language_note(sheet)
-    fonts = fonts_for(_texts(words, sheet, (title, caption, footer_text, language_note)))
+    fonts = fonts_for(_texts(words, sheet, (title, caption, footer_text)))
 
     document = BaseDocTemplate(
         str(path),
@@ -149,8 +146,6 @@ def _build(
     styles = _styles(fonts)
     story: list[object] = [Paragraph(_escape(title), styles["title"])]
     story.append(Paragraph(_escape(caption), styles["subtitle"]))
-    if language_note:
-        story.append(Paragraph(_escape(language_note), styles["subtitle"]))
     story.append(Spacer(1, 8 * mm))
 
     if words and group_by_level:
@@ -176,7 +171,7 @@ def _build(
 def _body(
     words: Sequence[StoredWord], sheet: WordSheet, styles: dict[str, ParagraphStyle], width: float
 ) -> list[object]:
-    if not sheet.teaches:
+    if not sheet.has(ExportColumn.CONTEXTS):
         return [_word_table(words, sheet, styles, width)]
     flowables: list[object] = []
     for index, word in enumerate(words):
@@ -190,13 +185,6 @@ def _body(
 def _default_subtitle(count: int) -> str:
     word = "word" if count == 1 else "words"
     return f"{count:,} {word} · generated {datetime.now().strftime('%d %B %Y')}"
-
-
-def _language_note(sheet: WordSheet) -> str:
-    """Says which language meanings are in, when the sheet shows any."""
-    if sheet.learner_language and any(column.needs_language for column in sheet.columns):
-        return f"Meanings and translations in {language_name(sheet.learner_language)}."
-    return ""
 
 
 # -- fonts ---------------------------------------------------------------------
@@ -276,17 +264,8 @@ def _texts(
     yield PLACEHOLDER
     for word in words:
         yield from (word.word, word.part_of_speech or "", word.cefr_level or "",
-                    word.definition or "", word.note or "")
-        if sheet.teaches:
-            teaching = sheet.teaching_for(word.id)
-            if teaching.content is not None:
-                yield teaching.content.pattern or ""
-                yield from teaching.content.collocations
-            if teaching.localization is not None:
-                local = teaching.localization
-                yield from (local.core_meaning or "", local.nuance or "", local.usage_note or "")
-            yield from (context.text for context in teaching.contexts)
-            yield from teaching.translations.values()
+                    word.definition or "")
+        yield from sheet.contexts_for(word.id)
 
 
 # -- layout --------------------------------------------------------------------
@@ -333,6 +312,8 @@ def _word_table(
                 cells.append(_cell(word.part_of_speech, styles))
             elif column is ExportColumn.CEFR:
                 cells.append(_cell(word.cefr_level, styles))
+            elif column is ExportColumn.LENGTH:
+                cells.append(_cell(str(word.length), styles))
             else:
                 cells.append(_definition_cell(word, styles))
         rows.append(cells)
@@ -369,6 +350,7 @@ def _entry(
         for column, value in (
             (ExportColumn.PART_OF_SPEECH, word.part_of_speech),
             (ExportColumn.CEFR, word.cefr_level),
+            (ExportColumn.LENGTH, f"{word.length} letters"),
         )
         if sheet.has(column) and value
     ]
@@ -377,30 +359,16 @@ def _entry(
         head += f"   <font name='{styles['cell'].fontName}' size=9 color='#6B7280'>" \
             f"{'  ·  '.join(meta)}</font>"
 
-    teaching = sheet.teaching_for(word.id)
-    content, local = teaching.content, teaching.localization
     rows: list[list[object]] = []
 
     def add(label: str, value: object) -> None:
         rows.append([Paragraph(label, styles["label"]), value])
 
-    if sheet.has(ExportColumn.DEFINITION) and (word.definition or word.note):
+    if sheet.has(ExportColumn.DEFINITION) and word.definition:
         add("DEFINITION", _definition_cell(word, styles))
-    if sheet.has(ExportColumn.MEANING) and local and local.core_meaning:
-        add("MEANING", Paragraph(_escape(local.core_meaning), styles["cell"]))
-    if sheet.has(ExportColumn.NUANCE) and local:
-        if local.nuance:
-            add("NUANCE", Paragraph(_escape(local.nuance), styles["cell"]))
-        if local.usage_note:
-            add("USAGE", Paragraph(_escape(local.usage_note), styles["cell"]))
-    if sheet.has(ExportColumn.PATTERN) and content and content.pattern:
-        add("PATTERN", Paragraph(_escape(content.pattern), styles["cell"]))
-    if sheet.has(ExportColumn.COLLOCATIONS) and content and content.collocations:
-        add("COLLOCATIONS",
-            Paragraph("  ·  ".join(_escape(c) for c in content.collocations), styles["cell"]))
-    examples = _examples(teaching.contexts, teaching.translation, sheet, styles)
-    if examples:
-        add("EXAMPLES" if sheet.has(ExportColumn.EXAMPLES) else "TRANSLATIONS", examples)
+    contexts = sheet.contexts_for(word.id)
+    if contexts:
+        add("CONTEXTS", [Paragraph(_marked(text, word.word), styles["cell"]) for text in contexts])
     if not rows:
         rows.append(["", Paragraph(PLACEHOLDER, styles["muted"])])
 
@@ -420,30 +388,15 @@ def _entry(
     return KeepTogether([Paragraph(head, styles["entry"]), fields])
 
 
-def _examples(
-    contexts: Sequence[WordContext],
-    translation,
-    sheet: WordSheet,
-    styles: dict[str, ParagraphStyle],
-) -> list[Paragraph]:
-    """Each example with the word in bold, its translation under it when chosen."""
-    show_text = sheet.has(ExportColumn.EXAMPLES)
-    show_translation = sheet.has(ExportColumn.TRANSLATIONS)
-    parts: list[Paragraph] = []
-    for context in contexts:
-        translated = translation(context) if show_translation else None
-        if show_text:
-            parts.append(Paragraph(_marked(context.text), styles["cell"]))
-        if translated:
-            parts.append(Paragraph(_escape(translated), styles["note"]))
-        if show_text and translated:
-            parts.append(Spacer(1, 2))
-    return parts
-
-
-def _marked(text: str) -> str:
-    """A context's text with the target word in bold and the braces gone."""
-    return TARGET.sub(lambda match: f"<b>{match.group(1)}</b>", _escape(text))
+def _marked(text: str, word: str) -> str:
+    """A context with the word in bold, where it can be found."""
+    span = find_word(text, word)
+    if span is None:
+        return _escape(text)
+    start, end = span
+    return (
+        _escape(text[:start]) + "<b>" + _escape(text[start:end]) + "</b>" + _escape(text[end:])
+    )
 
 
 def _level_runs(words: Sequence[StoredWord]) -> list[tuple[str | None, list[StoredWord]]]:
@@ -458,15 +411,8 @@ def _level_runs(words: Sequence[StoredWord]) -> list[tuple[str | None, list[Stor
 
 
 def _definition_cell(word: StoredWord, styles: dict[str, ParagraphStyle]) -> object:
-    """The definition, with the note under it; a dash when there is neither."""
-    if not word.definition and not word.note:
-        return Paragraph(PLACEHOLDER, styles["muted"])
-    parts: list[Paragraph] = []
-    if word.definition:
-        parts.append(Paragraph(_escape(word.definition), styles["cell"]))
-    if word.note:
-        parts.append(Paragraph(_escape(word.note), styles["note"]))
-    return parts
+    """The definition; a dash when there is none."""
+    return _cell(word.definition, styles)
 
 
 def _cell(value: str | None, styles: dict[str, ParagraphStyle]) -> Paragraph:

@@ -9,8 +9,8 @@ to outlive this program:
   the database's own form (ids kept, so every reference stays valid).
 
 It holds the vocabulary, lists, statuses and their history, the study plans,
-the cards and every review, the learning attempts, the teaching content in
-every language, and the settings. It leaves out what belongs to one machine
+the cards and every review, the learning attempts, the contexts, and the
+settings. It leaves out what belongs to one machine
 — the Telegram chat and update bookkeeping, runtime state — and nothing
 secret is in the database to begin with (the bot token lives in a file of
 its own).
@@ -59,10 +59,7 @@ TABLES: tuple[str, ...] = (
     "srs_cards",
     "review_sessions",
     "review_logs",
-    "word_content",
-    "word_localizations",
     "word_contexts",
-    "context_translations",
     "learning_attempts",
     "app_settings",
 )

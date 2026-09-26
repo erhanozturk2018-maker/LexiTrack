@@ -45,14 +45,14 @@ def words(database: Database) -> dict[str, int]:
         Source(key="test", name="Test source", parser_type="generic")
     )
     entries = [
-        entry("apple", cefr_level="A1"),
-        entry("bridge", cefr_level="A2"),
-        entry("candle", cefr_level="B1"),
-        entry("dagger", cefr_level="B2"),
-        entry("effort", cefr_level="C1"),
-        entry("fabric", cefr_level="A1"),
-        entry("gadget"),
-        entry("hazard", cefr_level="A2"),
+        entry("apple", cefr_level="A1", definition="a apple"),
+        entry("bridge", cefr_level="A2", definition="a bridge"),
+        entry("candle", cefr_level="B1", definition="a candle"),
+        entry("dagger", cefr_level="B2", definition="a dagger"),
+        entry("effort", cefr_level="C1", definition="a effort"),
+        entry("fabric", cefr_level="A1", definition="a fabric"),
+        entry("gadget", definition="a gadget"),
+        entry("hazard", cefr_level="A2", definition="a hazard"),
     ]
     WordRepository(database).add_entries(entries, source.id)
     rows = database.connection.execute("SELECT id, normalized_word FROM words").fetchall()
@@ -106,6 +106,24 @@ class TestPlanRepository:
         plan = plans.create("Fresh plan", list_ids=[a_list.id])
         assert plans.candidate_count(plan.id, include_not_reviewed=False) == 0
         assert plans.candidate_count(plan.id, include_not_reviewed=True) == len(words)
+
+    def test_a_word_without_a_definition_is_not_offered(
+        self, database: Database, words: dict[str, int]
+    ) -> None:
+        """Both questions are built on the definition: without one, a word waits."""
+        lists = ListRepository(database)
+        a_list = lists.create("Bare")
+        lists.add_words(a_list.id, list(words.values()))
+        database.connection.execute(
+            "UPDATE word_sources SET definition = NULL WHERE word_id = ?", (words["apple"],)
+        )
+        plans = PlanRepository(database)
+        plan = plans.create("Bare plan", list_ids=[a_list.id])
+        offered = plans.candidate_word_ids(plan.id, include_not_reviewed=True)
+        assert words["apple"] not in offered
+        outlook = plans.outlook(plan.id, include_not_reviewed=True)
+        assert outlook.to_introduce == len(words) - 1
+        assert outlook.without_definition == 1
 
     def test_introduced_words_leave_the_candidate_pool(
         self, database: Database, words: dict[str, int], clock: FrozenClock

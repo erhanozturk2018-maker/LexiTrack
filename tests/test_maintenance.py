@@ -26,6 +26,7 @@ from lexitrack.services.maintenance import KEEP_BACKUPS, Maintenance
 from lexitrack.services.vocabulary_service import VocabularyService
 
 from .conftest import entry
+from .flow_helpers import answer
 
 
 @pytest.fixture
@@ -38,7 +39,8 @@ def studied(database: Database, clock: FrozenClock) -> LearningService:
     """Thirty words, a plan, one day introduced and one day reviewed."""
     source = SourceRepository(database).upsert(Source(key="t", name="T", parser_type="generic"))
     names = [f"a{c}word" for c in "abcdefghijklmnopqrstuvwxyz"] + ["zeta", "yolk", "xray", "wax"]
-    ids = list(WordRepository(database).add_entries([entry(n) for n in names], source.id).word_ids)
+    entries = [entry(n, definition=f"the {n}") for n in names]
+    ids = list(WordRepository(database).add_entries(entries, source.id).word_ids)
     a_list = ListRepository(database).create("L")
     ListRepository(database).add_words(a_list.id, ids)
     StateRepository(database).set_status_many(ids, ReviewStatus.UNKNOWN)
@@ -47,7 +49,7 @@ def studied(database: Database, clock: FrozenClock) -> LearningService:
     engine.introduce()
     clock.advance_to_day_start(1)
     for index, item in enumerate(engine.review_queue()):
-        engine.answer(item.word.id, Rating.AGAIN if index % 5 == 0 else Rating.GOOD)
+        answer(engine, item.word.id, Rating.AGAIN if index % 5 == 0 else Rating.GOOD)
     return engine
 
 

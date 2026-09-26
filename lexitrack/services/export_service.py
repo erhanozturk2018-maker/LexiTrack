@@ -12,16 +12,15 @@ Every format accepts every scope. The UI picks a sensible default from where
 the user is, rather than asking about all of this every time.
 
 A PDF or CSV holds the word and the **columns** chosen (exporters/sheet.py):
-the dictionary's fields, and the teaching content, read here for the
-language words are explained in. Scheduling data is never a column. A JSON
-file is the importable word list and holds the dictionary fields whole;
-teaching content travels in Word Content files.
+part of speech, CEFR level, length, definition and contexts. Scheduling data
+is never a column. A JSON file is the importable word list and holds every
+field, contexts included.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -31,25 +30,19 @@ from ..core.errors import ExportError
 from ..exporters.csv_exporter import export_words_csv
 from ..exporters.json_exporter import export_words_json
 from ..exporters.pdf_exporter import export_words_pdf
-from ..exporters.sheet import (
-    DEFAULT_COLUMNS,
-    DICTIONARY_COLUMNS,
-    ExportColumn,
-    WordSheet,
-)
-from ..models.content import ContentStatus, WordTeaching
+from ..exporters.sheet import ALL_COLUMNS, DEFAULT_COLUMNS, ExportColumn, WordSheet
 from ..models.language import UNDETERMINED
 from ..models.user_word_state import ReviewStatus
 from ..models.vocabulary_list import VocabularyList
-from ..repositories.content_repository import ContentRepository
+from ..repositories.context_repository import ContextRepository
 from ..repositories.list_repository import ListRepository
 from ..repositories.word_repository import StoredWord, WordRepository
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "ALL_COLUMNS",
     "DEFAULT_COLUMNS",
-    "DICTIONARY_COLUMNS",
     "ExportColumn",
     "ExportContent",
     "ExportFormat",
@@ -108,34 +101,17 @@ class ExportService:
         self,
         words: WordRepository,
         lists: ListRepository,
-        content: ContentRepository | None = None,
-        learner_language: Callable[[], str | None] = lambda: None,
+        contexts: ContextRepository | None = None,
     ) -> None:
         self._words = words
         self._lists = lists
-        self._content = content
-        self._learner_language = learner_language
+        self._contexts = contexts
 
-    def learner_language(self) -> str | None:
-        """The language words are explained in, or None when none is chosen."""
-        return self._learner_language() or None
-
-    def columns_available(self, columns: Sequence[ExportColumn]) -> tuple[ExportColumn, ...]:
-        """``columns`` less those that cannot be filled: a learner language's without one."""
-        language = self.learner_language()
-        return tuple(
-            column
-            for column in dict.fromkeys(columns)
-            if (not column.is_teaching or self._content is not None)
-            and (language or not column.needs_language)
-        )
-
-    def with_teaching(self, words: Sequence[StoredWord]) -> int:
-        """How many of ``words`` have any teaching content for the learner's language."""
-        if self._content is None or not words:
+    def with_contexts(self, words: Sequence[StoredWord]) -> int:
+        """How many of ``words`` have at least one context."""
+        if self._contexts is None or not words:
             return 0
-        statuses = self._content.statuses((w.id for w in words), self.learner_language())
-        return sum(1 for status in statuses.values() if status is not ContentStatus.NONE)
+        return len(self._contexts.counts(w.id for w in words))
 
     # -- scopes ------------------------------------------------------------
 
@@ -188,12 +164,10 @@ class ExportService:
     # -- writing -----------------------------------------------------------
 
     def write(self, content: ExportContent, path: Path, file_format: ExportFormat) -> Path:
-        columns = self.columns_available(content.columns)
-        sheet = WordSheet(
-            columns=columns,
-            learner_language=self.learner_language(),
-            teaching=self._teaching(content.words, columns),
-        )
+        columns = tuple(column for column in ALL_COLUMNS if column in content.columns)
+        wants_contexts = file_format is ExportFormat.JSON or ExportColumn.CONTEXTS in columns
+        contexts = self._contexts_of(content.words) if wants_contexts else {}
+        sheet = WordSheet(columns=columns, contexts=contexts)
         if file_format is ExportFormat.PDF:
             return export_words_pdf(
                 content.words,
@@ -212,15 +186,15 @@ class ExportService:
                 name=content.name,
                 language=content.language,
                 description=content.description,
+                contexts=contexts,
             )
         raise ExportError(f"{file_format} is not a supported export format.")  # pragma: no cover
 
-    def _teaching(
-        self, words: Sequence[StoredWord], columns: Sequence[ExportColumn]
-    ) -> Mapping[int, WordTeaching]:
-        if self._content is None or not any(column.is_teaching for column in columns):
+    def _contexts_of(self, words: Sequence[StoredWord]) -> Mapping[int, tuple[str, ...]]:
+        if self._contexts is None:
             return {}
-        return self._content.teachings((w.id for w in words), self.learner_language())
+        found = self._contexts.for_words(w.id for w in words)
+        return {word_id: tuple(c.text for c in items) for word_id, items in found.items()}
 
     # -- kept for existing callers ----------------------------------------
 

@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.errors import LexiTrackError
+from ..models.context import contains_word, word_length
 from ..models.language import LANGUAGE_NAMES, UNDETERMINED, language_name
 from ..models.vocabulary_list import VocabularyList
 from ..models.word_entry import CEFR_ORDER
@@ -177,7 +178,12 @@ class ListDialog(QDialog):
 
 
 class AddWordDialog(QDialog):
-    """Type words into a list by hand. Stays open for the next word."""
+    """Type words into a list by hand. Stays open for the next word.
+
+    A word is its text, its length (worked out from it), part of speech, CEFR
+    level, definition and contexts — one sentence per line. The definition is
+    needed for it to be asked; nothing else is.
+    """
 
     word_added = Signal(int)
 
@@ -189,7 +195,7 @@ class AddWordDialog(QDialog):
         self._target = target
         m = METRICS
         self.setWindowTitle("Add Word")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(m.space_5, m.space_5, m.space_5, m.space_5)
@@ -198,14 +204,23 @@ class AddWordDialog(QDialog):
             "" if target.language == UNDETERMINED else f" · {target.language_name}"
         )
         layout.addLayout(
-            dialog_header(f"Add Word to {target.name}", f"Only the word is required{language}.")
+            dialog_header(
+                f"Add Word to {target.name}",
+                f"The word and its definition are needed; the rest helps{language}.",
+            )
         )
 
         form = QFormLayout()
         form.setSpacing(m.space_3)
         self.word_field = QLineEdit()
-        self.word_field.setPlaceholderText("Word")
+        self.word_field.setPlaceholderText("Word or phrase")
+        self.word_field.textChanged.connect(self._show_length)
         form.addRow("Word", self.word_field)
+
+        self.length_label = QLabel("—")
+        self.length_label.setObjectName("Muted")
+        self.length_label.setToolTip("Letters, not counting spaces or hyphens")
+        form.addRow("Length", self.length_label)
 
         self.pos_field = QComboBox()
         self.pos_field.setEditable(True)
@@ -219,13 +234,23 @@ class AddWordDialog(QDialog):
             self.cefr_field.addItem(level, level)
         form.addRow("CEFR level", self.cefr_field)
 
-        self.definition_field = QLineEdit()
-        self.definition_field.setPlaceholderText("Optional, e.g. a translation")
+        self.definition_field = QPlainTextEdit()
+        self.definition_field.setPlaceholderText(
+            "Every sense the word is learned in, in one text: “done on purpose; "
+            "to think carefully before deciding”"
+        )
+        self.definition_field.setFixedHeight(64)
+        self.definition_field.setTabChangesFocus(True)
         form.addRow("Definition", self.definition_field)
 
-        self.example_field = QLineEdit()
-        self.example_field.setPlaceholderText("Optional")
-        form.addRow("Example", self.example_field)
+        self.contexts_field = QPlainTextEdit()
+        self.contexts_field.setPlaceholderText(
+            "Sentences using the word, one per line. Optional; with one, the word is "
+            "also asked from a context."
+        )
+        self.contexts_field.setFixedHeight(88)
+        self.contexts_field.setTabChangesFocus(True)
+        form.addRow("Contexts", self.contexts_field)
         layout.addLayout(form)
 
         self.message = QLabel()
@@ -246,32 +271,58 @@ class AddWordDialog(QDialog):
         layout.addLayout(buttons)
         self.word_field.setFocus()
 
+    def _show_length(self, text: str) -> None:
+        length = word_length(text)
+        self.length_label.setText(f"{length} letters" if length else "—")
+
+    def _contexts(self) -> list[str]:
+        return [line.strip() for line in self.contexts_field.toPlainText().splitlines()
+                if line.strip()]
+
     def _add(self) -> None:
         text = self.word_field.text().strip()
         if not text:
             self.message.setText("Type a word first.")
             self.word_field.setFocus()
             return
+        definition = self.definition_field.toPlainText().strip()
+        if not definition:
+            self.message.setText(
+                "Give its definition too: both questions LexiTrack asks are built on it."
+            )
+            self.definition_field.setFocus()
+            return
+        contexts = self._contexts()
         try:
             word, added = self._service.add_word(
                 self._target.id,
                 text,
                 part_of_speech=self.pos_field.currentText(),
                 cefr_level=self.cefr_field.currentData(),
-                definition=self.definition_field.text(),
-                example=self.example_field.text(),
+                definition=definition,
+                contexts=contexts,
             )
         except LexiTrackError as exc:
             self.message.setText(exc.user_message)
             return
 
+        missing = sum(1 for context in contexts if not contains_word(context, word.word))
+        note = (
+            f" {missing} of its contexts {'does' if missing == 1 else 'do'} not seem to "
+            f"contain “{word.word}”; check {'it' if missing == 1 else 'them'} on its page."
+            if missing else ""
+        )
         if added:
-            self.message.setText(f"Added “{word.word}”. Type the next word, or close.")
+            self.message.setText(f"Added “{word.word}”.{note} Type the next word, or close.")
             self.word_added.emit(word.id)
         else:
-            self.message.setText(f"“{word.word}” is already in {self._target.name}.")
-        for field in (self.word_field, self.definition_field, self.example_field):
-            field.clear()
+            self.message.setText(
+                f"“{word.word}” is already in {self._target.name}; any new contexts were "
+                f"added to it.{note}"
+            )
+        self.word_field.clear()
+        self.definition_field.clear()
+        self.contexts_field.clear()
         self.pos_field.setCurrentIndex(0)
         self.word_field.setFocus()
 

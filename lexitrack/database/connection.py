@@ -21,14 +21,15 @@ from .migrations import SCHEMA_VERSION, migrate, read_version, seed_settings
 log = logging.getLogger(__name__)
 
 #: Run in order for a new database. ``learning.sql``, ``progress.sql``,
-#: ``content.sql`` and ``localization.sql`` are also run by the 2 → 3, 3 → 4,
-#: 4 → 5 and 5 → 6 migrations, so both paths produce the same tables.
+#: ``content.sql``, ``localization.sql`` and ``contexts.sql`` are also run by
+#: the 2 → 3 … 6 → 7 migrations, so both paths produce the same tables.
 _SCHEMA_FILES = (
     Path(__file__).with_name("schema.sql"),
     Path(__file__).with_name("learning.sql"),
     Path(__file__).with_name("progress.sql"),
     Path(__file__).with_name("content.sql"),
     Path(__file__).with_name("localization.sql"),
+    Path(__file__).with_name("contexts.sql"),
 )
 
 

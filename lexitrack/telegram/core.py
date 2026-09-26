@@ -24,9 +24,9 @@ A session is the desktop's :class:`ReviewFlow` — the same questions, the same
 rules, recorded as answers from Telegram. Its state is saved after every
 step, so a restart of the app loses nothing: the next tap, reply or /review
 finds the session, restores it, and shows the step it is on, rather than
-acting on a card whose question may no longer be the one asked. Answer times
-are not measured here: a phone's delivery and typing delays would read as
-effort, so typed answers count as normal effort unless they slip.
+acting on a card whose question may no longer be the one asked. Every step
+is answered with buttons: an option, then — for a right answer to the day's
+question — Again, Hard, Good or Easy.
 """
 
 from __future__ import annotations
@@ -38,13 +38,12 @@ from typing import Protocol
 
 from ..core.clock import DayClock
 from ..database.connection import Database
-from ..models.attempt import SelfReport
 from ..models.srs import Channel
 from ..repositories import RuntimeRepository
 from ..services.learning_service import AnswerOutcome, LearningService
 from ..services.progress import ProgressService
 from ..services.review_flow import Feedback, ReviewFlow, StepKind
-from ..services.review_wording import feedback_text
+from ..services.review_wording import feedback_text, rated_line
 from . import messages
 from .messages import Message
 from .schedule import Notification, due_notifications, mark_sent
@@ -209,16 +208,14 @@ class BotCore:
         step = flow.current
         assert step is not None and flow.session_id is not None
         position = min(flow.position + 1, flow.total)
-        # A step half answered — a right answer, a sentence written — comes
-        # back as it stood, even after a restart.
+        # A right answer waiting for its rating comes back as it stood, even
+        # after a restart.
         pending = flow.pending_feedback()
         if pending is not None:
-            line, _tone = feedback_text(step, pending)
-            return messages.assess_card(
-                step, flow.session_id, flow.step_number, line, position, flow.total
+            return messages.rate_card(
+                step, flow.session_id, flow.step_number, feedback_text(step, pending),
+                flow.intervals(), position, flow.total,
             )
-        if flow.written is not None:
-            return messages.write_check(step, flow.written, flow.session_id, flow.step_number)
         return messages.step_card(
             step,
             flow.session_id,
@@ -229,7 +226,6 @@ class BotCore:
             note=note,
             can_undo=flow.can_undo(),
             known_word=known_word,
-            more=flow.can_show_more(),
         )
 
     async def _show(
@@ -308,59 +304,28 @@ class BotCore:
     def _act(self, flow: ReviewFlow, value: str) -> Feedback | bool | None:
         """Do what a button says to the step on screen. None when it does not fit."""
         step = flow.current
-        kind = step.kind
-        report = SelfReport(value) if value in SelfReport._value2member_map_ else None
-        if kind is StepKind.TEACH and value == "go":
-            return flow.proceed() or None
-        if kind is StepKind.TEACH and value == "more":
-            return flow.more() or None
-        if kind is StepKind.TYPE and value == "dk" and not flow.awaiting:
-            return flow.submit("")
-        if kind is StepKind.TYPE and flow.awaiting and report is not None and report.success:
-            return flow.assess(report)
-        if kind is StepKind.CHOOSE and value.isdigit():
-            return flow.choose(int(value))
-        if kind is StepKind.RECALL and report is not None:
-            return flow.assess(report)
-        if kind is StepKind.WRITE and report is not None and flow.written is not None:
-            return flow.assess(report)
+        if step.kind is StepKind.TEACH:
+            return (flow.proceed() or None) if value == "go" else None
+        rating = messages.RATING_VALUES.get(value)
+        if flow.awaiting:
+            return flow.rate(rating) if rating is not None else None
+        if value.isdigit() and step.question is not None:
+            index = int(value)
+            if 0 <= index < len(step.question.options):
+                return flow.choose(index)
         return None
 
     async def text(self, chat_id: str, text: str) -> None:
-        """A message that is not a command: the answer to a typed or written step."""
+        """A message that is not a command. Every step is answered with its
+        buttons, so it only says so — or that no session is open."""
         chat_id = str(chat_id)
         if not self._admit(chat_id) or self.owner() is None:
             return
-        answer = " ".join(text.split())
         with self._db.lock:
             self._engine.refresh_settings()
             session = self._engine.open_session(Channel.TELEGRAM)
-            flow, restored = self._flow(session.id) if session is not None else (None, False)
-            step = flow.current if flow is not None else None
-            reply = None
-            card = None
-            result = None
-            if step is None:
-                reply = messages.no_session()
-            elif restored:
-                card = self._card(flow, note="LexiTrack restarted; here is where you were.")
-            elif step.kind is StepKind.TYPE and flow.awaiting:
-                reply = messages.use_the_buttons()
-            elif step.kind is StepKind.TYPE:
-                # No time is passed: see the module docstring.
-                result = flow.submit(answer)
-            elif step.kind is StepKind.WRITE and answer and flow.written is None:
-                flow.note_written(answer)
-                card = messages.write_check(step, answer, flow.session_id, flow.step_number)
-            else:
-                reply = messages.use_the_buttons()
-            replaces = session.message_id if session is not None else None
-        if reply is not None:
-            await self._outbox.send(chat_id, Message(reply))
-        elif card is not None:
-            await self._show(chat_id, flow, card, replaces)
-        elif result is not None:
-            await self._after(chat_id, replaces, flow, step, result)
+        reply = messages.use_the_buttons() if session is not None else messages.no_session()
+        await self._outbox.send(chat_id, Message(reply))
 
     async def _after(
         self,
@@ -375,23 +340,26 @@ class BotCore:
         line = None
         known = None
         if feedback is not None and feedback.awaiting:
-            # A right answer: how it came is asked before anything is recorded.
-            line, _tone = feedback_text(step, feedback)
+            # A right answer: how it went is asked before anything is recorded.
             with self._db.lock:
-                card = messages.assess_card(
-                    step, flow.session_id or "", flow.step_number, line,
-                    min(flow.position + 1, flow.total), flow.total,
+                card = messages.rate_card(
+                    step, flow.session_id or "", flow.step_number, feedback_text(step, feedback),
+                    flow.intervals(), min(flow.position + 1, flow.total), flow.total,
                 )
             await self._show(chat_id, flow, card, message_id)
             return
         if feedback is not None:
-            line, _tone = feedback_text(step, feedback)
+            if feedback.correct and feedback.outcome is not None:
+                # Rated: the word and its definition were on the card just now.
+                line = rated_line(feedback)
+            else:
+                line = messages.feedback_lines(feedback_text(step, feedback))
             outcome = feedback.outcome
             if outcome is not None and not outcome.duplicate:
                 self._on_activity()
                 if outcome.suggest_known:
-                    line += (
-                        f" “{outcome.word.word}”: long-term memory and productive use"
+                    line = (line or "") + (
+                        f"\n“{outcome.word.word}”: right after a long gap"
                         " — consider marking it Known."
                     )
                     known = (outcome.word.id, outcome.word.word)

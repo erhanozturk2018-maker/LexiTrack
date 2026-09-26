@@ -36,7 +36,7 @@ A bare array is accepted too, as shorthand for the same thing:
       "part_of_speech": "verb",
       "cefr_level": "A1",
       "definition": "to go",
-      "example": "Wir gehen nach Hause."
+      "contexts": ["Wir gehen nach Hause.", "Gehst du heute ins Kino?"]
     },
     { "word": "gift", "language": "en" }
   ]
@@ -66,10 +66,16 @@ All optional except `word`.
 | `word` | — | text, **required** |
 | `part_of_speech` | `pos` | text |
 | `cefr_level` | `cefr`, `level` | text (`A1`…`C2` are normalised to upper case) |
-| `definition` | `meaning`, `translation` | text |
-| `example` | — | text |
-| `note` | `notes` | text: a sense, a UK/US variant, an opposite |
+| `definition` | `meaning`, `translation` | text: every sense the word is learned in, in one text |
+| `contexts` | — | list of text (or one text): sentences using the word |
+| `length` | — | number; ignored on import — worked out from the word |
 | `language` | — | text; overrides the list's `language` for this word |
+
+A context that the word already has — the same sentence, case and spacing
+aside — is not added twice, so importing a file again adds nothing new. The
+older fields `example` and `note` are still read, and kept with the word's
+source, but are not shown or exported: a word is its definition and its
+contexts.
 
 Unknown fields are ignored, so a file produced by another tool with extra
 fields still imports.
@@ -153,9 +159,12 @@ Exports follow three rules:
   learning status. What you know belongs to your copy of LexiTrack, not to the
   word list — and importing never changes it anyway.
 - **Nothing empty.** Missing fields are left out rather than written as
-  `null`; a word with no details is written as a plain string.
+  `null`.
 - **Round-trips.** Importing an exported file reproduces the same words, in
-  the same order, with the same details. A test enforces this.
+  the same order, with the same details and contexts. A test enforces this.
+
+Each word is written with its `length` (its letters, for reading) and its
+`contexts`, beside the part of speech, level and definition.
 
 In a list with an unspecified language that mixes languages, each word keeps
 its own `language` field, so the round trip does not lose it.

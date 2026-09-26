@@ -205,12 +205,10 @@ class VocabularyTableModel(QAbstractTableModel):
         if role == SORT_ROLE:
             return self._sort_key(word, column, index.row())
         if role == Qt.ItemDataRole.ToolTipRole:
-            if column is Column.WORD and (word.definition or word.note or word.sources):
+            if column is Column.WORD and (word.definition or word.sources):
                 parts = []
                 if word.definition:
                     parts.append(word.definition)
-                if word.note:
-                    parts.append(word.note)
                 if word.sources:
                     parts.append(f"Source: {word.source_label}")
                 return "\n".join(parts)
@@ -304,7 +302,6 @@ class VocabularyFilterProxy(QSortFilterProxyModel):
         haystack = (
             word.normalized_word,
             (word.definition or "").casefold(),
-            (word.note or "").casefold(),
         )
         return any(self._search in text for text in haystack)
 
@@ -337,7 +334,9 @@ class VocabularyTable(QWidget):
     remove_requested = Signal(list)
     #: "Export selection…" for these word ids.
     export_requested = Signal(list)
-    #: The selection, to send out for content (meanings, examples…).
+    #: A word was deleted from its details panel, by id.
+    word_deleted = Signal(int)
+    #: The selection, to send out for contexts.
     content_requested = Signal(list)
     #: The visible row count changed (after filtering or loading).
     count_changed = Signal(int, int)
@@ -483,6 +482,8 @@ class VocabularyTable(QWidget):
         self.panel.status_requested.connect(
             lambda word_id, status: self.status_requested.emit([word_id], status)
         )
+        self.panel.word_changed.connect(lambda word: self.refresh_words([word]))
+        self.panel.word_deleted.connect(self._on_word_deleted)
         body.addWidget(self.panel)
         layout.addLayout(body, 1)
 
@@ -536,7 +537,7 @@ class VocabularyTable(QWidget):
             "Export Selection…", lambda: self._emit_selection(self.export_requested)
         )
         more.addAction(
-            "Export for Content…", lambda: self._emit_selection(self.content_requested)
+            "Export with Contexts…", lambda: self._emit_selection(self.content_requested)
         )
         self.remove_action = more.addAction(
             "Remove from This List…", lambda: self._emit_selection(self.remove_requested)
@@ -610,6 +611,10 @@ class VocabularyTable(QWidget):
         self.model.remove_ids(set(word_ids))
         self._update_counts()
         self._on_current_changed()
+
+    def _on_word_deleted(self, word_id: int) -> None:
+        self.remove_word_ids([word_id])
+        self.word_deleted.emit(word_id)
 
     def set_remove_allowed(self, allowed: bool) -> None:
         self._allow_remove = allowed
@@ -838,7 +843,7 @@ class VocabularyTable(QWidget):
             remove.setShortcut(QKeySequence(Qt.Key.Key_Delete))
         menu.addAction("Export…", lambda: self._emit_selection(self.export_requested))
         menu.addAction(
-            "Export for Content…", lambda: self._emit_selection(self.content_requested)
+            "Export with Contexts…", lambda: self._emit_selection(self.content_requested)
         )
         if len(self.selected_ids()) == 1:
             menu.addSeparator()

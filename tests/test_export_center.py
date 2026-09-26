@@ -10,9 +10,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from lexitrack.database.connection import Database
-from lexitrack.models.content import ContentStatus, WordContent, WordContext
 from lexitrack.models.user_word_state import ReviewStatus
-from lexitrack.repositories import ContentRepository
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.vocabulary_service import VocabularyService
 from lexitrack.services.word_filter import LearningState, WordFilter, filter_words
@@ -36,8 +34,8 @@ def setup(qapp, database: Database):
     first = service.create_list("First", language="en").id
     second = service.create_list("Second", language="en").id
     for word, level in (("apple", "A1"), ("bridge", "A2"), ("candle", "B1")):
-        service.add_word(first, word, cefr_level=level)
-    service.add_word(second, "dagger", cefr_level="B2")
+        service.add_word(first, word, cefr_level=level, definition=f"a {word}")
+    service.add_word(second, "dagger", cefr_level="B2", definition="a dagger")
     words = {w.word: w.id for lst in (first, second) for w in service.list_words(lst)}
     service.set_status([words["apple"], words["bridge"], words["dagger"]], ReviewStatus.UNKNOWN)
     service.set_status([words["candle"]], ReviewStatus.KNOWN)
@@ -121,21 +119,17 @@ def test_answers_and_attempts_export(setup, qtbot, tmp_path: Path, monkeypatch) 
     assert "attempts written" in center.message.text()
 
 
-def test_content_narrows_by_how_much_a_word_has(setup, database: Database) -> None:
+def test_words_narrow_by_whether_they_have_contexts(setup, database: Database) -> None:
     service, engine, words, _first = setup
-    repo = ContentRepository(database)
-    repo.save_content(WordContent(word_id=words["apple"], pattern="an apple of sth"))
-    repo.add_contexts([WordContext(word_id=words["apple"], text=f"{n} {{{{apple}}}}.")
-                       for n in ("One", "Two")])
-    repo.save_content(WordContent(word_id=words["bridge"], pattern="bridge the gap"))
+    service.add_context(words["apple"], "An apple a day.")
+    service.add_context(words["apple"], "She ate an apple.")
 
-    def names(status: ContentStatus) -> set[str]:
-        return {w.word for w in filter_words(service, engine, WordFilter(content=status))}
+    def names(contexts: bool | None) -> set[str]:
+        return {w.word for w in filter_words(service, engine, WordFilter(contexts=contexts))}
 
-    # No learner language: a pattern and two contexts make it complete.
-    assert names(ContentStatus.COMPLETE) == {"apple"}
-    assert names(ContentStatus.PARTIAL) == {"bridge"}
-    assert names(ContentStatus.NONE) == {"candle", "dagger"}
+    assert names(True) == {"apple"}
+    assert names(False) == {"bridge", "candle", "dagger"}
+    assert names(None) == {"apple", "bridge", "candle", "dagger"}
 
 
 def test_several_lists_are_picked_in_one_drop_down(setup, qtbot) -> None:

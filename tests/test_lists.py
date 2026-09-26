@@ -85,12 +85,16 @@ def test_an_operation_on_a_deleted_list_is_explained(service: VocabularyService)
 def test_adding_a_word_by_hand(service: VocabularyService) -> None:
     german = service.create_list("German A1", "de")
     word, added = service.add_word(
-        german.id, "Haus", part_of_speech="noun", definition="house", example="Das Haus."
+        german.id, "Haus", part_of_speech="noun", definition="house",
+        contexts=["Das Haus ist groß.", "Wir kaufen ein Haus."],
     )
 
     assert added
     assert (word.word, word.normalized_word, word.language) == ("Haus", "haus", "de")
-    assert (word.part_of_speech, word.definition, word.example) == ("noun", "house", "Das Haus.")
+    assert (word.part_of_speech, word.definition, word.length) == ("noun", "house", 4)
+    assert [c.text for c in service.contexts(word.id)] == [
+        "Das Haus ist groß.", "Wir kaufen ein Haus.",
+    ]
     assert word.status is ReviewStatus.NOT_REVIEWED
     assert word.lists == ("German A1",)
     assert word.sources == ("Added manually",)

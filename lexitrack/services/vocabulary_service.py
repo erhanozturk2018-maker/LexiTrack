@@ -15,8 +15,9 @@ import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ..core.errors import ListError
+from ..core.errors import ListError, WordError
 from ..database.connection import Database
+from ..models.context import WordContext, clean_context
 from ..models.language import UNDETERMINED
 from ..models.source import Source
 from ..models.user_word_state import Progress, ReviewStatus
@@ -26,9 +27,8 @@ from ..normalization.word_normalizer import display_form, normalize_word
 from ..parsers.base import ParserInfo
 from ..parsers.registry import AUTO, ParserRegistry
 from ..repositories.card_repository import CardRepository
-from ..repositories.content_repository import ContentRepository
+from ..repositories.context_repository import ContextRepository
 from ..repositories.list_repository import ListRepository
-from ..repositories.settings_repository import SettingsRepository
 from ..repositories.source_repository import SourceRepository
 from ..repositories.state_repository import StateRepository
 from ..repositories.word_repository import (
@@ -62,16 +62,12 @@ class VocabularyService:
         self._sources = SourceRepository(self._db)
         self._state = StateRepository(self._db)
         self._lists = ListRepository(self._db)
+        self._contexts = ContextRepository(self._db)
         self._registry = ParserRegistry()
         self._import = ImportService(
             self._db, self._registry, self._words, self._sources, self._lists
         )
-        self._export = ExportService(
-            self._words,
-            self._lists,
-            ContentRepository(self._db),
-            lambda: SettingsRepository(self._db).load().learner_language,
-        )
+        self._export = ExportService(self._words, self._lists, self._contexts)
 
     @property
     def database(self) -> Database:
@@ -183,16 +179,19 @@ class VocabularyService:
         part_of_speech: str | None = None,
         cefr_level: str | None = None,
         definition: str | None = None,
-        example: str | None = None,
+        contexts: Sequence[str] = (),
     ) -> tuple[StoredWord, bool]:
-        """Type a word into a list by hand.
+        """Type a word into a list by hand: the word, its part of speech, CEFR
+        level, definition and any number of contexts. Its length is worked
+        out from the word.
 
         The word goes through exactly the same model and normalization as an
         imported one, in the list's language, so a manually added "ability"
-        and an imported "ability" are the same vocabulary item.
+        and an imported "ability" are the same vocabulary item. A word that
+        was deleted can be added again: it starts afresh.
 
         Returns ``(word, added)``; ``added`` is False when it was already in
-        the list.
+        the list (its new contexts are still added to it).
         """
         target = self._lists.require(list_id)
         normalized = normalize_word(word)
@@ -214,8 +213,8 @@ class VocabularyService:
             part_of_speech=clean(part_of_speech),
             cefr_level=level.upper() if level else None,
             definition=clean(definition),
-            example=clean(example),
             language=target.language,
+            contexts=tuple(text for text in (clean_context(t) for t in contexts) if text),
         )
         with self._db.transaction():
             source = self._sources.upsert(MANUAL_SOURCE)
@@ -227,6 +226,34 @@ class VocabularyService:
         stored = self._words.get(word_id)
         assert stored is not None
         return stored, added
+
+    # -- a word's definition and contexts -----------------------------------
+
+    def contexts(self, word_id: int) -> tuple[WordContext, ...]:
+        """The word's contexts, in the order they were added."""
+        return self._contexts.for_word(word_id)
+
+    def add_context(self, word_id: int, text: str) -> WordContext | None:
+        """Add a context to a word. None when it already has that sentence."""
+        return self._contexts.add(word_id, text)
+
+    def delete_context(self, context_id: int) -> bool:
+        return self._contexts.delete(context_id)
+
+    def set_definition(self, word_id: int, definition: str) -> StoredWord:
+        """Replace a word's definition: one text covering all its senses."""
+        self._words.set_definition(word_id, definition)
+        stored = self._words.get(word_id)
+        if stored is None:
+            raise WordError("That word no longer exists.")
+        return stored
+
+    def delete_words(self, word_ids: Sequence[int]) -> int:
+        """Delete words from LexiTrack altogether — from every list, with
+        their contexts, status, card and answers. Returns how many."""
+        deleted = self._words.delete(word_ids)
+        log.info("Deleted %d words", deleted)
+        return deleted
 
     # -- review ------------------------------------------------------------
 
@@ -325,13 +352,9 @@ class VocabularyService:
         context = self._lists.get(list_id) if list_id is not None else None
         return self._export.selection_content(word_ids, context)
 
-    def export_learner_language(self) -> str | None:
-        """The language exported meanings and translations are in, if one is chosen."""
-        return self._export.learner_language()
-
-    def export_with_teaching(self, words: Sequence[StoredWord]) -> int:
-        """How many of ``words`` have teaching content to export."""
-        return self._export.with_teaching(words)
+    def export_with_contexts(self, words: Sequence[StoredWord]) -> int:
+        """How many of ``words`` have contexts to export."""
+        return self._export.with_contexts(words)
 
     def export(self, content: ExportContent, path: Path | str, file_format: ExportFormat) -> Path:
         return self._export.write(content, Path(path), ExportFormat(file_format))

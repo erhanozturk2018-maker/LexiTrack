@@ -5,12 +5,12 @@ word was introduced. Four tabs, in the order the questions come:
 
 * **Overview** — how much has been learned, which words are ready to be
   marked Known (the engine only offers; the learner says yes), where the words
-  stand in *memory* and in *skill* — two bars, because the engine keeps them
-  apart — the evidence that is neither, and the last 30 days.
-* **Words** — every studied word, its memory and its skill; each opens the
-  word's full history.
-* **Answers** — every answer, what it asked and what it showed, filtered and
-  exported as CSV.
+  stand in *memory*, how the answers go — right at the first question, by
+  task — and the last 30 days.
+* **Words** — every studied word and its memory; each opens the word's full
+  history.
+* **Answers** — every answer, what it asked and whether it was right,
+  filtered and exported as CSV.
 * **Scheduler** — does the schedule fit you: its forecasts against your
   answers, and which parameters are in use. Expert information, kept apart.
 
@@ -44,7 +44,6 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import paths
-from ..models.attempt import MemoryResult
 from ..models.srs import Channel, Rating
 from ..services.learning_service import LearningService
 from ..services.maintenance import Maintenance
@@ -57,12 +56,7 @@ from ..services.progress import (
     WordProgress,
 )
 from .components.cards import StatTile
-from .components.progress_charts import (
-    CalibrationChart,
-    PipelineBar,
-    TimelineChart,
-    skill_colours,
-)
+from .components.progress_charts import CalibrationChart, PipelineBar, TimelineChart
 from .components.word_history import pretty_day, remembered_for
 from .theme import current_palette
 from .theme.palette import METRICS
@@ -88,23 +82,16 @@ _ANSWER_FILTERS = ((ALL, "All"), (AGAIN, "Again"), (TAKEN_BACK, "Taken back"))
 
 #: The Overview's rates: (LearningMetrics field, caption).
 _RATES = (
-    ("first_attempt", "first-attempt recall"),
-    ("productive", "productive recall"),
-    ("long_interval", "recalled after a long gap"),
-    ("transfer", "recalled in a new sentence"),
-    ("relearn", "answers relearned (Forgotten)"),
-    ("recurring", "words forgotten twice or more"),
+    ("first_attempt", "right at the day's question"),
+    ("definition_to_word", "Definition → Word right"),
+    ("context_to_definition", "Context → Definition right"),
+    ("long_interval", "right after a long gap"),
+    ("relearn", "answers rated Again"),
+    ("recurring", "words missed twice or more"),
 )
 
 #: Known suggestions listed one by one; the rest are counted.
 _SUGGESTIONS_SHOWN = 5
-
-_MEMORY_TONE = {
-    MemoryResult.RECALLED: "known",
-    MemoryResult.RECALLED_EFFORT: "known",
-    MemoryResult.FORGOTTEN: "unknown",
-}
-
 
 class _Item(QTableWidgetItem):
     """A cell that sorts by a key, not by its text: 9 before 10, dates as dates."""
@@ -368,38 +355,20 @@ class ProgressPage(QWidget):
         suggestions_layout.addWidget(panel)
         layout.addWidget(self.suggestions)
 
-        # Memory and skill
-        where, where_layout, _, _ = _section("MEMORY AND SKILL")
+        # Memory
+        where, where_layout, _, _ = _section("MEMORY")
         panel, panel_layout = _panel()
-        panel_layout.addWidget(_label("MEMORY", "SubsectionTitle"))
         panel_layout.addWidget(
             _label("How long each word is expected to be remembered, from its last answer.",
                    "Faint", wrap=True)
         )
         self.pipeline = PipelineBar()
         panel_layout.addWidget(self.pipeline)
-        panel_layout.addSpacing(m.space_2)
-        panel_layout.addWidget(_label("SKILL", "SubsectionTitle"))
-        panel_layout.addWidget(
-            _label(
-                "What your answers on later days have shown you can do with each word: "
-                "recognise it, recall it from its meaning or a sentence, or use it.",
-                "Faint",
-                wrap=True,
-            )
-        )
-        self.skill_bar = PipelineBar(skill_colours)
-        panel_layout.addWidget(self.skill_bar)
-        self.evidence = _label("", None, wrap=True)
-        self.evidence.setObjectName("EvidenceLine")
-        panel_layout.addWidget(self.evidence)
-        self.skill_note = _label("", "Faint", wrap=True)
-        panel_layout.addWidget(self.skill_note)
         where_layout.addWidget(panel)
         layout.addWidget(where)
 
-        # How retrieval goes: the rates, each with its count
-        rates, rates_layout, _, _ = _section("HOW RETRIEVAL GOES")
+        # How the answers go: the rates, each with its count
+        rates, rates_layout, _, _ = _section("HOW THE ANSWERS GO")
         grid = QGridLayout()
         grid.setHorizontalSpacing(m.space_3)
         grid.setVerticalSpacing(m.space_3)
@@ -411,8 +380,8 @@ class ProgressPage(QWidget):
         rates_layout.addLayout(grid)
         rates_layout.addWidget(
             _label(
-                "Each rate with the answers it is counted from. First questions only, "
-                "on later days: practice right after teaching is not counted.",
+                "Each rate with the answers it is counted from. The day's question for "
+                "each word only: practice after a new word or a miss is not counted.",
                 "Faint",
                 wrap=True,
             )
@@ -455,10 +424,9 @@ class ProgressPage(QWidget):
         self.filter_buttons[self._filter].setChecked(True)
         words_layout.addWidget(filters, 0, Qt.AlignmentFlag.AlignLeft)
         self.words_table = _Table(
-            ["Word", "CEFR", "Introduced", "Known", "Answers", "Again", "Remembered for",
-             "Skill"],
+            ["Word", "CEFR", "Introduced", "Known", "Answers", "Again", "Remembered for"],
             sort_column=2,
-            stretch=(0, 7),
+            stretch=(0, 6),
         )
         self.words_table.open_word.connect(self._open)
         words_layout.addWidget(self.words_table)
@@ -486,8 +454,8 @@ class ProgressPage(QWidget):
         answers_layout.addWidget(
             _label(
                 "Every answer from Today and Telegram, newest first: what it asked, "
-                "your answer, and what it showed about the memory. Answers taken back "
-                "with Undo are kept for the record and left out of every count.",
+                "whether it was right, and its rating. Answers taken back with Undo are "
+                "kept for the record and left out of every count.",
                 "Faint",
                 wrap=True,
             )
@@ -498,7 +466,7 @@ class ProgressPage(QWidget):
         self.answer_filter_buttons[ALL].setChecked(True)
         answers_layout.addWidget(filters, 0, Qt.AlignmentFlag.AlignLeft)
         self.answers_table = _Table(
-            ["When", "Word", "Asked", "Answer", "Showed", "Remembered for", "Where", ""],
+            ["When", "Word", "Asked", "Right?", "Rating", "Remembered for", "Where", ""],
             stretch=(1, 2),
         )
         self.answers_table.open_word.connect(self._open)
@@ -543,7 +511,8 @@ class ProgressPage(QWidget):
         panel_layout.addWidget(
             _label(
                 "Answers by the way they were asked: v1 showed the word and you rated "
-                "it; v2 asks for the word and probes a miss. Compare the share of Again.",
+                "it; v2 asked you to type the word; v3 asks Definition → Word or Context "
+                "→ Definition, four options. Compare the share of Again.",
                 "Faint",
                 wrap=True,
             )
@@ -585,7 +554,6 @@ class ProgressPage(QWidget):
         )
         self._fill_suggestions()
         self.pipeline.set_stages(self._progress.pipeline(rows))
-        self._fill_skill(rows)
         self._fill_recent(rows)
         self._fill_rates()
         self.timeline.set_days(self._progress.timeline(rows))
@@ -684,29 +652,6 @@ class ProgressPage(QWidget):
         self._set_filter(READY)
         self.show_tab(WORDS)
 
-    def _fill_skill(self, rows: list[WordProgress]) -> None:
-        overview = self._progress.skill_overview(rows)
-        self.skill_bar.set_stages(list(overview.stages))
-        self.evidence.setText(
-            f"<b>{overview.automatic:,}</b> retrieved instantly on several days · "
-            f"<b>{overview.long_interval:,}</b> recalled after "
-            f"{self._engine.settings.mastery_stability_days:g}+ days without a review · "
-            f"<b>{overview.new_context:,}</b> recognised in a sentence they had not been "
-            "seen in"
-        )
-        notes = []
-        if overview.only_v1:
-            notes.append(
-                f"{overview.only_v1:,} {'word has' if overview.only_v1 == 1 else 'words have'} "
-                "answers only from before this version, which asked for the meaning of "
-                "the word; they count as recognised at most until asked again."
-            )
-        notes.append(
-            "Memory comes from the schedule and skill from what each question asked, so "
-            "one can be ahead of the other. Neither marks a word Known: you do."
-        )
-        self.skill_note.setText(" ".join(notes))
-
     def _fill_rates(self) -> None:
         metrics = self._progress.metrics()
         for key, _caption in _RATES:
@@ -787,7 +732,7 @@ class ProgressPage(QWidget):
         return rows
 
     def _is_ready(self, row: WordProgress) -> bool:
-        """What is offered as Known: productive, and recalled after a long gap."""
+        """What is offered as Known: answered right after a long gap."""
         return row.word.id in getattr(self, "_suggested", ())
 
     def _fill_words(self) -> None:
@@ -798,7 +743,6 @@ class ProgressPage(QWidget):
         for index, row in enumerate(rows):
             word = _Item(row.word.word, row.word.word.casefold())
             word.setData(Qt.ItemDataRole.UserRole + 1, row.word.id)
-            skill = row.skill
             cells = [
                 word,
                 _Item(row.word.cefr_level or "—", row.word.cefr_level or "Z"),
@@ -808,11 +752,6 @@ class ProgressPage(QWidget):
                 _Item(str(row.answers), row.answers),
                 _Item(str(row.agains), row.agains),
                 _Item(remembered_for(row.stability), row.stability or 0.0),
-                _Item(
-                    (skill.stage.label + (" · automatic" if skill.automatic else ""))
-                    if skill else "—",
-                    (int(skill.stage), skill.automatic_days) if skill else (-1, 0),
-                ),
             ]
             for column, cell in enumerate(cells):
                 table.setItem(index, column, cell)
@@ -871,13 +810,14 @@ class ProgressPage(QWidget):
             word = _Item(row.word, row.word.casefold())
             word.setData(Qt.ItemDataRole.UserRole + 1, entry.word_id)
             when.setData(Qt.ItemDataRole.UserRole + 1, entry.word_id)
-            result = row.memory_result
+            correct = row.correct
             cells = [
                 when,
                 word,
                 _Item(row.asked.label if row.asked else "—", row.asked.value if row.asked else ""),
+                _Item("—" if correct is None else ("Right" if correct else "Wrong"),
+                      -1 if correct is None else int(correct)),
                 _Item(entry.rating.label, int(entry.rating)),
-                _Item(result.label if result else "—", result.value if result else ""),
                 _Item(remembered_for(entry.stability_after), entry.stability_after or 0.0),
                 _Item("Telegram" if entry.channel is Channel.TELEGRAM else "Desktop"),
                 _Item("taken back" if entry.undone_at else "", 1 if entry.undone_at else 0),
@@ -889,10 +829,10 @@ class ProgressPage(QWidget):
                     font.setStrikeOut(cell is not cells[7])
                     cell.setFont(font)
             else:
+                if correct is not None:
+                    cells[3].setForeground(QColor(tones["known" if correct else "unknown"]))
                 if entry.rating in rating_tones:
-                    cells[3].setForeground(QColor(tones[rating_tones[entry.rating]]))
-                if result in _MEMORY_TONE:
-                    cells[4].setForeground(QColor(tones[_MEMORY_TONE[result]]))
+                    cells[4].setForeground(QColor(tones[rating_tones[entry.rating]]))
             for column, cell in enumerate(cells):
                 table.setItem(index, column, cell)
         table.setSortingEnabled(True)

@@ -12,6 +12,15 @@ them up:
 
 Words you already know are never offered and never scheduled.
 
+## A word
+
+A word is what you see on its page: the **word**, its **length**, its **CEFR
+level**, its **part of speech**, one **definition** — covering every sense
+the word is learned in — and its **contexts**, sentences that show the
+definition in use. Add a context, delete one or change the definition on the
+word's page (select it in any table). A word needs a definition to be asked;
+without one it waits.
+
 ## The pages
 
 The sidebar on the left reaches every page. On a narrow window it folds to
@@ -24,38 +33,48 @@ its icons; hover over one for its name.
 | **Lists** | Your lists and how far each one is sorted. |
 | **Sort words** | Sorting a list into Known and Unknown, as flashcards or as a table. |
 | **Unknown** | Every word you marked Unknown, across all lists. |
-| **Export and backup** | Words as PDF, CSV or JSON; your answers and attempts as CSV; backups, one file with everything, and restoring them. |
+| **Export and backup** | Words as PDF, CSV or JSON; your answers as CSV; backups, one file with everything, and restoring them. |
 
 ## Your day
 
 **Start session** on Today does the day's reviews first, then its new words.
 
-1. **Review.** Words come one at a time, and you **type** them from their
-   meaning, or later from a sentence with a gap. **Enter** checks; **Ctrl+H**
-   shows the first letter; **Enter** with nothing typed means you don't know.
-   Missed it? The answer stays hidden and an easier question follows, down to
-   picking the word among four (**1**–**4**). A word you forgot is shown again
-   and asked once more later, which never changes its schedule. A word with no
-   meaning stored is reviewed as before: **Space**, then **1**–**4**.
-   **Ctrl+Z** takes back the last word, with every question about it.
-2. **Learn the new words.** Four at a time: shown, then asked from their
-   meaning; some are asked again later. None of it is scored — a word's first
-   real question is tomorrow. **Mark as studied** skips the practice if you
-   studied them another way.
+1. **Review.** Words come one at a time, each with one question and four
+   options: the word for its definition, or the definition of the word picked
+   out in a sentence. Choose with **1**–**4** or **A**–**D**. Right: say how
+   it went with **1** Again, **2** Hard, **3** Good or **4** Easy. Wrong: the
+   right word and its definition are shown, **Enter** moves on, and the word
+   comes back a few cards later, asked the other way. **Ctrl+Z** takes back
+   the last word.
+2. **Learn the new words.** Four at a time: each shown whole, then asked;
+   words with contexts are asked a second time a little later. None of it is
+   rated — a word's first real question is tomorrow. **Mark as studied**
+   skips the practice if you studied them another way.
 
 On your phone the Telegram bot does the same, if you set it up in
 *Settings → Telegram*.
 
 ## How a word is learned
 
-The four answers do not move a word along a fixed track; they change one
-number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. You say how each retrieval went — **Instant**, **Remembered**,
-**Effortful** or **Forgot** — after typing the word right, after writing a
-sentence, or for a word shown without a meaning, and that becomes the answer:
-**Easy**, **Good**, **Hard** or **Again**. A wrong answer is followed by an
-easier question; picking the word out among four only after missing it is
-**Hard**, and missing that too is **Again**. With the default settings:
+Every question has four options and one right answer: the word for its
+definition (**Definition → Word**), or — for a word with contexts — its
+definition for a sentence that uses it (**Context → Definition**). A word due
+for review is asked once a day, one of the two, and that answer is the day's
+answer for the word:
+
+- **Right:** the word and its definition are shown again, and you say how it
+  went — **Again**, **Hard**, **Good** or **Easy**. That is the rating.
+- **Wrong:** the right word and its definition are shown, the answer is
+  recorded as wrong and rated **Again**, and the word is asked again a few
+  cards later, the other way round when it has contexts. That second question
+  is practice: it never changes the schedule.
+
+Whether an answer was right and how it went are kept apart: a right answer
+you rate Again is recorded as right, rated Again.
+
+The rating does not move a word along a fixed track; it changes one number,
+how long LexiTrack expects you to remember the word. Everything else follows
+from it. With the default settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |
@@ -68,11 +87,9 @@ A word is in **long-term memory** when that number passes 21 days — three
 Goods, or two Easys, but never on the day you first study it. Answering Easy
 every time gets there on day 9; Hard alone never does, because it barely moves
 the number. That is a forecast, not yet a reason to call the word Known.
-LexiTrack offers to mark it Known when the record makes the case: you have
-**used it well in two different ways** — a collocation, a sentence of your own
-— and **recalled it after 21 days or more without a review**. It never marks a
-word Known itself, because Known is your judgement, and until you say yes the
-word keeps coming back.
+LexiTrack offers to mark it Known when you **answer it right after 21 days or
+more without a review**. It never marks a word Known itself, because Known is
+your judgement, and until you say yes the word keeps coming back.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not
@@ -83,43 +100,44 @@ go back into the new-word list and never uses up one of your 25:
 | 14 | Again | 11 days → **1.5 days** |
 | 15 | Good | 3.6 days |
 | 19 | Good | 9.7 days |
-| 29 | Good | 22.9 days → **Known** |
+| 29 | Good | 22.9 days → **long-term memory** |
 
 Note day 15: Good brings the word back to normal intervals immediately, but
-not to where it was. One slip on day 14 moved Known from day 14 to day 29.
-Miss the same word again later and it recovers more slowly each time, because
-LexiTrack has learned the word is hard for you — after the second slip it also
-joins *Words you find hard* and comes first in every session.
+not to where it was. One slip on day 14 moved long-term memory from day 14 to
+day 29. Miss the same word again later and it recovers more slowly each time,
+because LexiTrack has learned the word is hard for you — after the second slip
+it also joins *Words you find hard* and comes first in every session.
 
 These days come from the scheduler with the default settings. Change
-*Count as known after* or, in Developer mode, the target retention, and they
-move with it.
+*Long-term evidence after* or, in Developer mode, the target retention, and
+they move with it.
 
-## The four answers
+## The four ratings
 
-You say how the retrieval went; LexiTrack records the answer it means.
+After a right answer you say how it went; that is the answer the schedule
+hears.
 
-| You say | Use it when | Answer | What happens |
-| --- | --- | --- | --- |
-| **Forgot** | It did not come | **Again** | Back tomorrow; the interval you had built up is lost. |
-| **Effortful** | It came, with effort | **Hard** | A short interval; the word stays in its current step. |
-| **Remembered** | It came | **Good** | The normal next interval. |
-| **Instant** | It came at once, without thinking | **Easy** | The longest interval. |
+| You choose | Use it when | What happens |
+| --- | --- | --- |
+| **Again** | You were not sure — a guess that happened to be right | Back tomorrow; the interval you had built up is lost; asked again later today. |
+| **Hard** | It came, with effort | A short interval; the word stays in its current step. |
+| **Good** | It came | The normal next interval. |
+| **Easy** | It came at once, without thinking | The longest interval. |
 
-Only **Remembered** and **Instant** move a word forward. Keep **Instant** for
-words that come without thinking: it spaces a word out fastest, so an Instant
-you did not mean costs the most. Time, a hint or a slip never change what you
-said; they are kept beside it. A word you have used well and recalled after a
-long gap is offered as Known, never made Known for you.
+Only **Good** and **Easy** move a word forward. Keep **Easy** for words that
+come without thinking: it spaces a word out fastest, so an Easy you did not
+mean costs the most. A wrong answer is always Again. A word you answer right
+after a long gap is offered as Known, never made Known for you.
 
 ## What is recorded, and where to see it
 
 Nothing is hidden from you.
 
-- **Every answer** from Today and Telegram, with its time, the answer, how
-  long you were expected to remember the word afterwards and where you
-  answered. See it in *Progress → Answers*, or save it as a spreadsheet
-  from *Settings → Data → Export history*.
+- **Every answer** from Today and Telegram, with its time, the question it
+  answered, whether it was right, its rating, how long you were expected to
+  remember the word afterwards and where you answered. See it in
+  *Progress → Answers*, or save it as a spreadsheet from *Export and backup*.
+- **Every question**, practice included, with whether it was right.
 - **Every change of status** - Known, Unknown, reset - with its cause: the
   schedule, a button, Sort words or Undo.
 - **Answers taken back** stay in the record, marked, and are left out of

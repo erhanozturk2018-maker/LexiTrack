@@ -378,8 +378,9 @@ class CardRepository:
                         (word_id, session_id, channel, reviewed_at, reviewed_on, rating,
                          state_before, state_after, due_before, due_after, elapsed_days,
                          scheduled_days, stability_after, difficulty_after,
-                         scheduler_version, params_hash, memory_result, route_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         scheduler_version, params_hash, memory_result, route_version,
+                         task, correct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         entry.word_id,
@@ -400,6 +401,8 @@ class CardRepository:
                         entry.params_hash,
                         entry.memory_result,
                         entry.route_version,
+                        entry.task,
+                        None if entry.correct is None else int(entry.correct),
                     ),
                 )
                 return int(cursor.lastrowid)
@@ -417,9 +420,10 @@ class CardRepository:
         return [_to_log(row) for row in rows]
 
     def recalled_after(self, word_ids: Iterable[int], days: float) -> set[int]:
-        """Of ``word_ids``, those recalled at least once after ``days`` or more
-        without a review: an answer not taken back, not Again, and — when
-        recorded — a recall rather than a recognition."""
+        """Of ``word_ids``, those answered correctly at least once after
+        ``days`` or more without a review: an answer not taken back, not
+        Again, correct when that was recorded, and a recall rather than a
+        recognition when an earlier version recorded that."""
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         found: set[int] = set()
         for start in range(0, len(ids), _CHUNK):
@@ -428,7 +432,8 @@ class CardRepository:
             rows = self._db.connection.execute(
                 f"SELECT DISTINCT word_id FROM review_logs WHERE word_id IN ({marks}) "
                 "AND undone_at IS NULL AND rating != ? AND elapsed_days >= ? "
-                "AND (memory_result IS NULL OR memory_result IN ('RECALLED', 'RECALLED_EFFORT'))",
+                "AND (memory_result IS NULL OR memory_result IN ('RECALLED', 'RECALLED_EFFORT')) "
+                "AND (correct IS NULL OR correct = 1)",
                 [*chunk, int(Rating.AGAIN), float(days)],
             ).fetchall()
             found.update(int(row["word_id"]) for row in rows)
@@ -566,4 +571,6 @@ def _to_log(row: sqlite3.Row) -> ReviewLogEntry:
         undone_at=_parse(row["undone_at"]),
         memory_result=row["memory_result"],
         route_version=row["route_version"],
+        task=row["task"],
+        correct=None if row["correct"] is None else bool(row["correct"]),
     )

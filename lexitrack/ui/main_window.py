@@ -199,9 +199,9 @@ class MainWindow(QMainWindow):
                     "Words as files, learning data, backups, and restoring them",
                     self.open_export_center, None,
                     "backup restore portable lexitrack csv pdf json save"),
-            Command("Word Content\u2026",
-                    "Send words out for meanings and examples; import the filled file",
-                    self.open_content, None, "enrich llm meanings examples batch translate"),
+            Command("Word Contexts\u2026",
+                    "Export words with their contexts; import a file of contexts",
+                    self.open_content, None, "contexts sentences examples json llm import"),
             Command("Back Up Now", "Copy your vocabulary and progress to the backups folder",
                     self.backup_now, None, "backup copy save"),
             Command("Open Backups Folder", "Where the daily copies are kept",
@@ -255,7 +255,7 @@ class MainWindow(QMainWindow):
         menu.clear()
         groups = (
             ("Import\u2026", "New List\u2026", "Export\u2026"),
-            ("Export and Backup\u2026", "Word Content\u2026", "Export Answer History\u2026",
+            ("Export and Backup\u2026", "Word Contexts\u2026", "Export Answer History\u2026",
              "Back Up Now", "Open Backups Folder"),
             ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
@@ -306,7 +306,10 @@ class MainWindow(QMainWindow):
         self._progress = ProgressService(self._service.database, self._engine)
         for table in (self.review.table, self.unknown.table):
             table.panel.set_history_source(self._progress.journey)
+            table.panel.set_editor(self._service)
+            table.panel.confirm_delete = self._confirm_delete_word
             table.content_requested.connect(self.open_content)
+            table.word_deleted.connect(lambda _word_id: self._on_data_changed())
 
         self.study = StudyPage(self._engine)
         self.study.history_opener = self.open_word_history
@@ -661,8 +664,19 @@ class MainWindow(QMainWindow):
             self._ensure_current_list()
             self._on_data_changed()
 
+    def _confirm_delete_word(self, word) -> bool:
+        lists = f" It is in {len(word.lists)} lists." if len(word.lists) > 1 else ""
+        return confirm(
+            self,
+            "Delete word",
+            f"Delete “{word.word}” from LexiTrack?{lists}\n\nIt is removed from every "
+            "list, with its contexts, its status and its review history. You can add "
+            "it again later; it then starts afresh.",
+            "Delete",
+        )
+
     def open_content(self, word_ids: list | None = None) -> None:
-        """Word content: export a batch that needs it, import a filled one."""
+        """Word contexts: export words with theirs, import a file of them."""
         dialog = ContentDialog(self._service, self._engine, word_ids or None, parent=self)
         dialog.exec()
         if dialog.changed:

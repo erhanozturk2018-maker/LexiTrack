@@ -2,7 +2,7 @@
 
 from .attempt_repository import AttemptRepository
 from .card_repository import CardRepository
-from .content_repository import ContentRepository
+from .context_repository import ContextRepository
 from .list_repository import ListRepository
 from .plan_repository import PlanRepository
 from .session_repository import ReviewSession, SessionRepository
@@ -14,7 +14,7 @@ from .word_repository import IdentityCheck, ImportResult, StoredWord, WordReposi
 __all__ = [
     "AttemptRepository",
     "CardRepository",
-    "ContentRepository",
+    "ContextRepository",
     "IdentityCheck",
     "ImportResult",
     "ListRepository",

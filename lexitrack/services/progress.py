@@ -15,12 +15,10 @@ Four groups answer "which words did I learn here?":
   tab) before the schedule got there.
 * **Known before** - Known without ever being studied here; only counted.
 
-Memory and skill are shown apart, as the engine keeps them: *memory* is how
-long a word is expected to be remembered (the cards), *skill* what the
-learner has shown they can do with it (``learning_attempts``, through
-:class:`SkillTracker`). Evidence that is neither a stage nor a schedule —
-retrieval that came instantly on several days, a word remembered after a long
-gap, a word retrieved in a context never seen before — is counted on its own.
+*Memory* is how long a word is expected to be remembered (the cards). How
+the answers go is counted from ``learning_attempts``: the day's questions
+answered right, by task (Definition → Word, Context → Definition), words
+answered right after a long gap, and words missed again and again.
 
 The calibration check compares what the scheduler predicted with what the user
 then did. It is the honest answer to "does the algorithm fit me?", and it
@@ -36,8 +34,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..database.connection import Database
-from ..models.attempt import Level, MemoryResult, Phase, Role, Task
-from ..models.skill import SkillStage, WordSkill
+from ..models.attempt import Phase, Role, Task
 from ..models.srs import CardState, Channel, Rating, ReviewLogEntry, SrsCard
 from ..models.user_word_state import ReviewStatus, StatusCause, StatusEvent
 from ..repositories import (
@@ -48,7 +45,6 @@ from ..repositories import (
     StoredWord,
     WordRepository,
 )
-from .skill_tracker import SkillTracker
 
 if TYPE_CHECKING:
     from .learning_service import LearningService
@@ -85,8 +81,6 @@ class WordProgress:
     days_to_known: int | None
     answers: int
     agains: int
-    #: What the record shows the learner can do with the word.
-    skill: WordSkill | None = None
 
     @property
     def struggling(self) -> bool:
@@ -117,8 +111,8 @@ class JourneyStep:
     reconstructed: bool = False
     #: What the answer asked, when the review recorded it (version 5 on).
     asked: Task | None = None
-    #: What the answer showed about the memory, when recorded.
-    memory_result: MemoryResult | None = None
+    #: Whether the option chosen was right (version 7 on).
+    correct: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,10 +135,8 @@ class WordJourney:
     mastery_days: float
     #: The last answer that still counts: why the word is due when it is.
     last_answer: JourneyStep | None
-    #: What the record shows the learner can do with it; None before study.
-    skill: WordSkill | None = None
-    #: Firsts in its record, in order: recalled, in a context, used, after a
-    #: long gap.
+    #: Firsts in its record, in order: each task answered right, and right
+    #: after a long gap.
     milestones: tuple[Milestone, ...] = ()
     #: Answers that ended Forgotten, taken back ones left out.
     forgotten: int = 0
@@ -241,25 +233,8 @@ class AnswerRow:
     asked: Task | None = None
 
     @property
-    def memory_result(self) -> MemoryResult | None:
-        return _memory_result(self.entry.memory_result)
-
-
-@dataclass(frozen=True, slots=True)
-class SkillOverview:
-    """What the studied words' record shows, beside where their memory stands."""
-
-    #: Encountered, Recognised, Recalled, Productive: every studied word once.
-    stages: tuple[PipelineStage, ...]
-    #: Words retrieved instantly, above recognition, on several days.
-    automatic: int
-    #: Words remembered after LONG_INTERVAL_DAYS or more without a review.
-    long_interval: int
-    #: Words retrieved in a context they had not been seen in.
-    new_context: int
-    #: Words whose only evidence is answers from before version 5, which
-    #: asked word → meaning and so show recognition at most.
-    only_v1: int
+    def correct(self) -> bool | None:
+        return self.entry.correct
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +252,8 @@ class Rate:
 
 @dataclass(frozen=True, slots=True)
 class RouteLine:
-    """One learning route's answers, for comparing v1 with v2."""
+    """One learning route's answers, for comparing the routes: v1 (word shown,
+    self-rated), v2 (typed), v3 (four choices)."""
 
     route: str
     answers: int
@@ -290,17 +266,17 @@ class RouteLine:
 
 @dataclass(frozen=True, slots=True)
 class LearningMetrics:
-    """How retrieval goes, across every studied word (answers taken back left out)."""
+    """How the answers go, across every studied word (answers taken back left out)."""
 
-    #: First questions of reviews at level 2 and above that were answered right.
+    #: The day's questions answered right, both tasks.
     first_attempt: Rate
-    #: First questions at levels 4–5 (a collocation, a sentence) that succeeded.
-    productive: Rate
-    #: Answers after the long-gap threshold that were recalls.
+    #: The same, Definition → Word only.
+    definition_to_word: Rate
+    #: The same, Context → Definition only.
+    context_to_definition: Rate
+    #: Answers after the long-gap threshold that were right (and not Again).
     long_interval: Rate
-    #: First questions in a context never used before that succeeded: transfer.
-    transfer: Rate
-    #: Answers that ended Forgotten (Again), so the word was relearned.
+    #: Answers rated Again — wrong, or right but rated Again.
     relearn: Rate
     #: Words forgotten twice or more.
     recurring_failures: int
@@ -342,7 +318,6 @@ class ProgressService:
         self._words = WordRepository(database)
         self._plans = PlanRepository(database)
         self._attempts = AttemptRepository(database)
-        self._skills = SkillTracker(database)
 
     @property
     def database(self) -> Database:
@@ -360,7 +335,6 @@ class ProgressService:
         known = self._known_events()
         clock = self._engine.clock
         threshold = self._engine.settings.mastery_stability_days
-        skills = self._skills.skills(card.word_id for card in cards)
         rows: list[WordProgress] = []
         for card in cards:
             word = words.get(card.word_id)
@@ -389,7 +363,6 @@ class ProgressService:
                     days_to_known=days,
                     answers=answers,
                     agains=agains,
-                    skill=skills.get(card.word_id),
                 )
             )
         rows.sort(key=lambda row: (row.introduced_on, row.word.word.casefold()), reverse=True)
@@ -442,8 +415,8 @@ class ProgressService:
                     interval_days=log.scheduled_days,
                     channel=log.channel,
                     undone=log.undone_at is not None,
-                    asked=asked.get(log.id) if log.id is not None else None,
-                    memory_result=_memory_result(log.memory_result),
+                    asked=_task(log.task) or (asked.get(log.id) if log.id is not None else None),
+                    correct=log.correct,
                 )
             )
         events = self._state.events_for_word(word.id)
@@ -504,7 +477,6 @@ class ProgressService:
             due_today=due_today,
             mastery_days=threshold,
             last_answer=last,
-            skill=self._skills.skill(word.id) if card is not None or logs else None,
             milestones=self._milestones(word.id, live),
             forgotten=sum(1 for log in live if _forgot(log)),
         )
@@ -521,7 +493,7 @@ class ProgressService:
                 entry=log,
                 word=words.get(log.word_id, "?"),
                 day=log.reviewed_on,
-                asked=asked.get(log.id) if log.id is not None else None,
+                asked=_task(log.task) or (asked.get(log.id) if log.id is not None else None),
             )
             for log in logs
         ]
@@ -585,10 +557,8 @@ class ProgressService:
         firsts = [
             attempt for attempt in self._attempts.all()
             if attempt.phase is Phase.REVIEW and attempt.role is Role.PRIMARY
+            and attempt.task.is_current
         ]
-        recall = [a for a in firsts if a.level >= Level.MEANING_TO_WORD]
-        productive = [a for a in firsts if a.level >= Level.COLLOCATION]
-        novel = [a for a in firsts if a.novel_context]
         logs = self._cards.all_logs(include_undone=False)
         late = [log for log in logs if (log.elapsed_days or 0) >= threshold]
         forgot = Counter(log.word_id for log in logs if _forgot(log))
@@ -602,10 +572,14 @@ class ProgressService:
             return Rate(sum(1 for item in items if hit(item)), len(items))
 
         return LearningMetrics(
-            first_attempt=rate(recall, lambda a: a.success),
-            productive=rate(productive, lambda a: a.success),
+            first_attempt=rate(firsts, lambda a: a.correct),
+            definition_to_word=rate(
+                [a for a in firsts if a.task is Task.DEFINITION_TO_WORD], lambda a: a.correct
+            ),
+            context_to_definition=rate(
+                [a for a in firsts if a.task is Task.CONTEXT_TO_DEFINITION], lambda a: a.correct
+            ),
             long_interval=rate(late, _recalled),
-            transfer=rate(novel, lambda a: a.success),
             relearn=rate(logs, _forgot),
             recurring_failures=sum(1 for count in forgot.values() if count >= 2),
             routes=tuple(RouteLine(route, answers, agains)
@@ -613,7 +587,8 @@ class ProgressService:
         )
 
     def _milestones(self, word_id: int, live: list[ReviewLogEntry]) -> tuple[Milestone, ...]:
-        """The firsts in one word's record, from its delayed retrievals and answers."""
+        """The firsts in one word's record: each task answered right in a
+        review, and a right answer after a long gap."""
         found: list[Milestone] = []
 
         def first(label: str, days) -> None:
@@ -621,50 +596,19 @@ class ProgressService:
             if day:
                 found.append(Milestone(label, day))
 
-        firsts = [
+        rights = [
             a for a in self._attempts.for_word(word_id)
-            if a.phase is Phase.REVIEW and a.role in (Role.PRIMARY, Role.PROBE) and a.success
+            if a.phase is Phase.REVIEW and a.role is Role.PRIMARY and a.correct
         ]
-        first("First recalled", (a.on_day for a in firsts if a.level >= Level.MEANING_TO_WORD))
-        first("First recalled from a sentence",
-              (a.on_day for a in firsts if a.level is Level.CONTEXT_TO_WORD))
-        first("First used (a collocation or a sentence)",
-              (a.on_day for a in firsts if a.level >= Level.COLLOCATION))
+        first("First right from its definition",
+              (a.on_day for a in rights if a.task is Task.DEFINITION_TO_WORD))
+        first("First right from a context",
+              (a.on_day for a in rights if a.task is Task.CONTEXT_TO_DEFINITION))
         threshold = self._engine.settings.mastery_stability_days
-        first(f"First recalled after {threshold:g}+ days",
+        first(f"First right after {threshold:g}+ days",
               (log.reviewed_on for log in live
                if (log.elapsed_days or 0) >= threshold and _recalled(log)))
         return tuple(sorted(found, key=lambda m: m.day))
-
-    def skill_overview(self, rows: list[WordProgress] | None = None) -> SkillOverview:
-        """Where the studied words' skill stands, and the evidence beside it."""
-        rows = self.words() if rows is None else rows
-        skills = [row.skill for row in rows if row.skill is not None]
-        counts = Counter(skill.stage for skill in skills)
-        remembered_late = self._cards.recalled_after(
-            (row.word.id for row in rows), self._engine.settings.mastery_stability_days
-        )
-        return SkillOverview(
-            stages=tuple(
-                PipelineStage(stage.label, counts[stage])
-                for stage in (
-                    SkillStage.ENCOUNTERED,
-                    SkillStage.RECOGNIZED,
-                    SkillStage.RECALLED,
-                    SkillStage.PRODUCTIVE,
-                )
-            ),
-            automatic=sum(1 for skill in skills if skill.automatic),
-            long_interval=len(remembered_late),
-            new_context=sum(1 for skill in skills if skill.novel_context),
-            only_v1=sum(
-                1
-                for skill in skills
-                if skill.from_v1
-                and skill.from_v1 == skill.recognized + skill.failures
-                and skill.recalled == 0
-            ),
-        )
 
     # -- charts --------------------------------------------------------------
 
@@ -680,8 +624,8 @@ class ProgressService:
                 stages["new"] += 1
             elif row.stability >= threshold:
                 # Expected to last past the threshold. Memory only: whether it
-                # is offered as Known depends on skill and a real long recall.
-                # Checked first, so a low threshold never hides it as fragile.
+                # is offered as Known depends on a right answer after a real
+                # long gap. Checked first, so a low threshold never hides it.
                 stages["ready"] += 1
             elif row.stability < 3:
                 stages["short"] += 1
@@ -804,16 +748,16 @@ def _forgot(log: ReviewLogEntry) -> bool:
 
 
 def _recalled(log: ReviewLogEntry) -> bool:
-    """A recall, not only a recognition: not Again, and recorded as recalled
-    when the answer recorded what it showed."""
-    if log.rating is Rating.AGAIN:
+    """A right answer: not Again, correct when that was recorded, and a
+    recall rather than a recognition when an earlier version recorded that."""
+    if log.rating is Rating.AGAIN or log.correct is False:
         return False
     return log.memory_result in (None, "RECALLED", "RECALLED_EFFORT")
 
 
-def _memory_result(value: str | None) -> MemoryResult | None:
+def _task(value: str | None) -> Task | None:
     try:
-        return MemoryResult(value) if value else None
+        return Task(value) if value else None
     except ValueError:
         return None
 

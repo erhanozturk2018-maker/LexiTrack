@@ -1,30 +1,29 @@
-"""Word content: sending words out to be enriched, and taking the result in.
+"""Word contexts: how many words have them, and moving them in and out as JSON.
 
-LexiTrack never calls an LLM. It writes a batch of words that still need
-content — with a prompt that explains every field — to a file; any tool fills
-it in; this window reads the filled file back, shows what it would change,
-and imports it when told to. See ``docs/formats/content-enrichment.md``.
+LexiTrack never writes a context itself. Contexts are added on a word's page,
+or imported from a JSON file prepared anywhere — by hand, or with an LLM:
 
-The window has three parts: how much of your vocabulary has content, the
-next batch to export, and the file to import — with the batches still out
-listed, since their words are left out of the next batch until they return.
+    [{"word": "sleep in", "contexts": ["I usually sleep in on Sundays."]}]
+
+The window has three parts: how much of the vocabulary has contexts, an
+export (words with their definition and contexts, to be filled in), and an
+import, which shows what a file would add before anything is written. See
+``docs/formats/contexts.md``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from enum import Enum
-from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QTableWidget,
@@ -35,16 +34,14 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..core.errors import LexiTrackError
-from ..models.content import ContentStatus, Related
-from ..models.language import language_name
-from ..services.content_service import ContentImportPreview, ContentService
+from ..services.content_service import ContentService, ContextImportPreview
 from ..services.learning_service import LearningService
 from ..services.vocabulary_service import VocabularyService
-from .components.settings_rows import CONTROL_WIDTH, SettingsGroup, note, page, scrolled, spin
+from .components.settings_rows import CONTROL_WIDTH, SettingsGroup, note, page, scrolled
 from .dialogs import error_label, show_error
 from .theme.palette import METRICS
 
-_PLAN, _NEW, _SELECTION, _ALL = "plan", "new", "selection", "all"
+_PLAN, _SELECTION, _ALL = "plan", "selection", "all"
 
 
 class ContentDialog(QDialog):
@@ -56,14 +53,14 @@ class ContentDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Word Content")
+        self.setWindowTitle("Word Contexts")
         self._service = service
         self._engine = engine
         self._content = ContentService(service.database)
         self._selection = [int(i) for i in word_ids] if word_ids else []
         #: Set when something was imported, for the window behind to refresh.
         self.changed = False
-        self.resize(760, 760)
+        self.resize(720, 640)
         self._build()
         self._refresh()
 
@@ -75,11 +72,11 @@ class ContentDialog(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         body, layout = page(
-            "Word content",
-            "Meanings in your language, how a word is used, examples and memory cues — "
-            "added in batches from any tool you like, such as an LLM. LexiTrack never "
-            "calls one itself: it writes the words to a file, and reads the filled file "
-            "back.",
+            "Word contexts",
+            "Sentences that show a word in use. A word with contexts is asked two "
+            "ways — from its definition, and its definition from a context. Add them "
+            "on a word's page, or import a JSON file written by hand or with any tool "
+            "you like. LexiTrack never writes them itself.",
         )
 
         overview = SettingsGroup("YOUR WORDS")
@@ -88,79 +85,48 @@ class ContentDialog(QDialog):
         self.status_label.setWordWrap(True)
         self.status_scope = QLabel("")
         self.status_scope.setObjectName("SettingTitle")
-        overview.add("With content", self.status_label, self.status_scope)
+        overview.add("With contexts", self.status_label, self.status_scope)
         layout.addWidget(overview)
 
-        export = SettingsGroup("EXPORT A BATCH")
+        export = SettingsGroup("EXPORT")
         self.source = QComboBox()
         self.source.setFixedWidth(CONTROL_WIDTH + 80)
         if self._selection:
             self.source.addItem(f"The {len(self._selection)} words chosen", _SELECTION)
-        self.source.addItem("Your study plan", _PLAN)
-        self.source.addItem("Today's new words", _NEW)
         self.source.addItem("All your words", _ALL)
+        self.source.addItem("Your study plan", _PLAN)
         for lst in self._service.lists():
             self.source.addItem(lst.name, lst.id)
         self.source.currentIndexChanged.connect(self._refresh)
-        export.add("Words from", "Only words that still need content are taken.", self.source)
-
-        self.languages = QLineEdit(self._engine.settings.learner_language or "")
-        self.languages.setPlaceholderText("de, es, tr…")
-        self.languages.setFixedWidth(CONTROL_WIDTH + 80)
-        self.languages.textChanged.connect(self._refresh)
-        export.add(
-            "Explain in",
-            "Language codes, several allowed. Empty: only what is true of the word in "
-            "its own language — patterns, collocations, examples.",
-            self.languages,
-        )
-        self.size = spin(1, 500, " words")
-        self.size.setValue(25)
-        self.size.setFixedWidth(CONTROL_WIDTH + 80)
-        self.size.valueChanged.connect(self._refresh)
-        export.add("Batch size", "Smaller batches are easier to check.", self.size)
-
+        export.add("Words from", "Each with its length, level, part of speech, "
+                   "definition and contexts.", self.source)
+        self.only_missing = QCheckBox("Only words without contexts")
+        self.only_missing.toggled.connect(self._refresh)
+        export.add("Which", "To fill in: an empty “contexts” list for each.", self.only_missing)
         self.export_summary = QLabel("")
         self.export_summary.setObjectName("SettingHint")
         self.export_summary.setWordWrap(True)
-        self.export_button = QPushButton("Export batch…")
+        self.export_button = QPushButton("Export…")
         self.export_button.setProperty("variant", "primary")
         self.export_button.clicked.connect(self._export)
-        export.add("Next", self.export_summary, self.export_button)
+        export.add("File", self.export_summary, self.export_button)
         layout.addWidget(export)
 
-        take_in = SettingsGroup("IMPORT A FILLED FILE")
+        take_in = SettingsGroup("IMPORT")
         import_button = QPushButton("Choose file…")
         import_button.clicked.connect(self._import)
         take_in.add(
-            "Filled batch",
-            "You see what it would change before anything is written. Nothing you "
-            "already have is replaced unless you choose to.",
+            "Contexts file",
+            "Each word is found among your words and its new contexts are added; a "
+            "word is never created, and a sentence it already has is not added twice. "
+            "You see what it would add before anything is written.",
             import_button,
         )
         layout.addWidget(take_in)
-
-        everything = SettingsGroup("ALL CONTENT")
-        self.dataset_button = QPushButton("Export all…")
-        self.dataset_button.clicked.connect(self._export_dataset)
-        self.dataset_hint = QLabel("")
-        self.dataset_hint.setObjectName("SettingHint")
-        self.dataset_hint.setWordWrap(True)
-        everything.add("Every enriched word", self.dataset_hint, self.dataset_button)
-        layout.addWidget(everything)
-
-        self.open_group = SettingsGroup("WAITING FOR")
-        self._open_rows = QVBoxLayout()
-        holder = QWidget()
-        holder.setObjectName("PanelBody")
-        holder.setLayout(self._open_rows)
-        self._open_rows.setContentsMargins(0, 0, 0, 0)
-        self._open_rows.setSpacing(m.space_2)
-        self.open_group.add_widget(holder)
-        layout.addWidget(self.open_group)
         layout.addWidget(note(
-            "The file format, and what each field means, are in "
-            "docs/formats/content-enrichment.md."
+            'The file is a list: [{"word": "sleep in", "contexts": ["…", "…"]}]. A '
+            '"definition" may be given too, to replace the word\'s. The format is in '
+            "docs/formats/contexts.md."
         ))
 
         self.error = error_label()
@@ -178,121 +144,70 @@ class ContentDialog(QDialog):
 
     # -- state ------------------------------------------------------------------
 
-    def _languages(self) -> list[str]:
-        return [part.strip() for part in self.languages.text().replace(";", ",").split(",")
-                if part.strip()]
-
     def _scope_ids(self) -> list[int]:
         choice = self.source.currentData()
         if choice == _SELECTION:
             return list(self._selection)
-        if choice == _NEW:
-            return [word.id for word in self._engine.daily_plan().new_words]
         if choice == _PLAN:
             return self._engine.plan_word_ids()
         if choice == _ALL:
             return self._content.all_word_ids()
         return [word.id for word in self._service.list_words(int(choice))]
 
+    def _export_ids(self) -> list[int]:
+        ids = self._scope_ids()
+        if self.only_missing.isChecked():
+            have = self._content.words_with_contexts(ids)
+            ids = [word_id for word_id in ids if word_id not in have]
+        return ids
+
     def _refresh(self) -> None:
         ids = self._scope_ids()
-        languages = self._languages()
-        language = languages[0] if languages else None
-        statuses = self._content.statuses(ids, language)
-        counts = {status: 0 for status in ContentStatus}
-        for status in statuses.values():
-            counts[status] += 1
-        pair = f"explained in {language_name(language)}" if language else "on their own"
-        self.status_label.setText(
-            f"{counts[ContentStatus.COMPLETE]:,} complete · "
-            f"{counts[ContentStatus.PARTIAL]:,} partial · "
-            f"{counts[ContentStatus.NONE]:,} with nothing yet, {pair}."
+        status = self._content.status(ids)
+        text = (
+            f"{status.with_contexts:,} of {status.words:,} words have contexts, "
+            f"{status.contexts:,} in all."
         )
-        self.status_scope.setText(f"{len(ids):,} words")
-        enriched = len(self._content.words_with_content())
-        self.dataset_hint.setText(
-            f"{enriched:,} words have content. One file with all of it, in every "
-            "language, dated as a version; it imports back through the same preview."
+        if status.without_definition:
+            text += (
+                f" {status.without_definition:,} have no definition: they are not asked "
+                "until they have one."
+            )
+        self.status_label.setText(text)
+        self.status_scope.setText(f"{status.words:,} words")
+        count = len(self._export_ids())
+        self.export_summary.setText(
+            f"{count:,} {'word' if count == 1 else 'words'} to a JSON file."
+            if count else "No words to export here."
         )
-        self.dataset_button.setEnabled(bool(enriched))
-
-        candidates = self._content.batch_candidates(ids, self.size.value(), languages)
-        self._candidates = candidates
-        name = self._content.next_batch_name()
-        self._batch_name = name
-        if candidates:
-            self.export_summary.setText(
-                f"{name}: {len(candidates)} {'word' if len(candidates) == 1 else 'words'} "
-                "that still need content."
-            )
-        else:
-            self.export_summary.setText(
-                "Nothing here needs content"
-                + (" that is not already out in a batch." if self._content.open_batches()
-                   else ".")
-            )
-        self.export_button.setEnabled(bool(candidates))
-        self._show_open_batches()
-
-    def _show_open_batches(self) -> None:
-        while self._open_rows.count():
-            item = self._open_rows.takeAt(0)
-            if item.widget() is not None:
-                item.widget().hide()
-                item.widget().deleteLater()
-        batches = self._content.open_batches()
-        self.open_group.setVisible(bool(batches))
-        for batch in batches:
-            row = QWidget()
-            row.setObjectName("PanelBody")
-            line = QHBoxLayout(row)
-            line.setContentsMargins(0, 0, 0, 0)
-            label = QLabel(
-                f"{batch.name} · {len(batch.word_ids)} words · exported {batch.exported_on}"
-            )
-            label.setObjectName("SettingTitle")
-            label.setToolTip(batch.path or "")
-            line.addWidget(label, 1)
-            again = QPushButton("Send again…")
-            again.setProperty("variant", "ghost")
-            again.setToolTip("Write its file again: the same words, languages and name")
-            again.clicked.connect(lambda _c=False, n=batch.name: self._resend(n))
-            line.addWidget(again)
-            forget = QPushButton("Forget")
-            forget.setProperty("variant", "ghost")
-            forget.setToolTip("It will not come back: offer its words again")
-            forget.clicked.connect(lambda _c=False, n=batch.name: self._forget(n))
-            line.addWidget(forget)
-            self._open_rows.addWidget(row)
+        self.export_button.setEnabled(bool(count))
 
     # -- actions -----------------------------------------------------------------
 
     def _export(self) -> None:
-        if not self._candidates:
+        ids = self._export_ids()
+        if not ids:
             return
-        default = paths.exports_dir() / f"content_{self._batch_name}.json"
+        default = paths.exports_dir() / "lexitrack-contexts.json"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Content Batch", str(default), "JSON files (*.json)"
+            self, "Export Words and Contexts", str(default), "JSON files (*.json)"
         )
         if not path:
             return
         try:
-            self._content.export_batch(
-                self._candidates, path, self._batch_name, self._languages()
-            )
+            target, count = self._content.export(path, ids)
         except (OSError, LexiTrackError) as exc:
-            show_error(self.error, f"The batch could not be written: {exc}")
+            show_error(self.error, f"The file could not be written: {exc}")
             return
         show_error(self.error, None)
-        self._refresh()
         self.export_summary.setText(
-            f"Written to {Path(path).name}. Give it to the tool of your choice, "
-            "then import the filled file here."
+            f"{count:,} words written to {target.name}. Fill in their contexts, then "
+            "import the file here."
         )
 
     def _import(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import Filled Batch", str(paths.exports_dir()), "JSON files (*.json)"
+            self, "Import Contexts", str(paths.exports_dir()), "JSON files (*.json)"
         )
         if not path:
             return
@@ -302,63 +217,25 @@ class ContentDialog(QDialog):
             show_error(self.error, str(exc))
             return
         show_error(self.error, None)
-        dialog = ContentImportDialog(self._content, preview, parent=self)
+        dialog = ContextImportDialog(self._content, preview, parent=self)
         imported = bool(dialog.exec()) and bool(dialog.result_text)
         self._refresh()
         if imported:
             self.changed = True
             self.export_summary.setText(dialog.result_text)
 
-    def _forget(self, name: str) -> None:
-        self._content.forget_batch(name)
-        self._refresh()
 
-    def _resend(self, name: str) -> None:
-        default = paths.exports_dir() / f"content_{name}.json"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Send Batch Again", str(default), "JSON files (*.json)"
-        )
-        if not path:
-            return
-        try:
-            self._content.resend_batch(name, path)
-        except (OSError, LexiTrackError) as exc:
-            show_error(self.error, f"The batch could not be written: {exc}")
-            return
-        show_error(self.error, None)
-        self._refresh()
-        self.export_summary.setText(f"{name} written again to {Path(path).name}.")
-
-    def _export_dataset(self) -> None:
-        default = paths.exports_dir() / "lexitrack-content.json"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export All Content", str(default), "JSON files (*.json)"
-        )
-        if not path:
-            return
-        try:
-            target, count = self._content.export_dataset(path)
-        except (OSError, LexiTrackError) as exc:
-            show_error(self.error, f"The content could not be written: {exc}")
-            return
-        show_error(self.error, None)
-        self.export_summary.setText(
-            f"The content of {count:,} words written to {target.name}. It imports back "
-            "like any batch, through the same preview."
-        )
-
-
-class ContentImportDialog(QDialog):
-    """What a filled file would change, and which conflicts to take."""
+class ContextImportDialog(QDialog):
+    """What a contexts file would add, before anything is written."""
 
     def __init__(
         self,
         content: ContentService,
-        preview: ContentImportPreview,
+        preview: ContextImportPreview,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Import Content")
+        self.setWindowTitle("Import Contexts")
         self._content = content
         self._preview = preview
         self.result_text = ""
@@ -371,69 +248,62 @@ class ContentImportDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(m.space_5, m.space_5, m.space_5, m.space_4)
         layout.setSpacing(m.space_3)
-        title = QLabel(f"Import {preview.batch or preview.path.name}")
+        title = QLabel(f"Import {preview.path.name}")
         title.setObjectName("DialogTitle")
         layout.addWidget(title)
-        languages = ", ".join(language_name(code) for code in preview.learner_languages)
-        summary = QLabel(
-            f"{len(preview.plans)} words · {preview.fill_count} fields to fill · "
-            f"{preview.context_count} new examples · {preview.translation_count} translations"
-            + (f" · explained in {languages}" if languages else "")
-        )
+        parts = [
+            f"{preview.words:,} words",
+            f"{preview.context_count:,} new contexts",
+        ]
+        if preview.definition_count:
+            parts.append(f"{preview.definition_count:,} definitions replaced")
+        if preview.duplicate_count:
+            parts.append(f"{preview.duplicate_count:,} already there, not added again")
+        if preview.rejected:
+            parts.append(f"{len(preview.rejected):,} not imported")
+        summary = QLabel(" · ".join(parts))
         summary.setObjectName("Muted")
         summary.setWordWrap(True)
         layout.addWidget(summary)
 
-        conflicts = [
-            (plan, key, old, new)
-            for plan in preview.plans
-            for key, (old, new) in plan.conflicts.items()
-        ]
-        heading = QLabel(
-            f"ALREADY SET, DIFFERENT IN THE FILE · {len(conflicts)}"
-            if conflicts
-            else "NOTHING YOU HAVE WOULD BE REPLACED"
-        )
+        changing = [entry for entry in preview.entries if entry.changes_anything]
+        heading = QLabel(f"WHAT IT ADDS · {len(changing):,} WORDS" if changing
+                         else "NOTHING NEW TO ADD")
         heading.setObjectName("SectionTitle")
         layout.addWidget(heading)
-        self.table = QTableWidget(len(conflicts), 4)
-        self.table.setHorizontalHeaderLabels(["Replace", "Word · field", "Now", "In the file"])
+        self.table = QTableWidget(len(changing), 3)
+        self.table.setHorizontalHeaderLabels(["Word", "New contexts", "Definition"])
         self.table.verticalHeader().setVisible(False)
+        self.table.setWordWrap(True)
         header = self.table.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self._conflict_keys: list[tuple[int, str]] = []
-        for row, (plan, key, old, new) in enumerate(conflicts):
-            check = QTableWidgetItem()
-            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            check.setCheckState(Qt.CheckState.Unchecked)
-            self.table.setItem(row, 0, check)
-            self.table.setItem(row, 1, QTableWidgetItem(f"{plan.word} · {_field_name(key)}"))
-            self.table.setItem(row, 2, QTableWidgetItem(_shown(old)))
-            self.table.setItem(row, 3, QTableWidgetItem(_shown(new)))
-            self._conflict_keys.append((plan.word_id, key))
-        self.table.setVisible(bool(conflicts))
+        for row, entry in enumerate(changing):
+            self.table.setItem(row, 0, QTableWidgetItem(entry.word.word if entry.word else ""))
+            self.table.setItem(row, 1, QTableWidgetItem("\n".join(entry.new_contexts)))
+            self.table.setItem(
+                row, 2, QTableWidgetItem(entry.definition or "unchanged")
+            )
+        self.table.resizeRowsToContents()
+        self.table.setVisible(bool(changing))
         layout.addWidget(self.table, 1)
 
-        notes = [f"Rejected — {reason}" for reason in preview.rejected]
+        notes = [f"#{entry.index} “{entry.text}”: {entry.problem}" for entry in preview.rejected]
         notes += [
-            f"{plan.word}: {warning}" for plan in preview.plans for warning in plan.warnings
+            f"{entry.word.word}: {warning}"
+            for entry in preview.entries
+            if entry.problem is None and entry.word is not None
+            for warning in entry.warnings
         ]
-        notes += [
-            f"{plan.word}: {plan.duplicate_contexts} example(s) already stored, not added again"
-            for plan in preview.plans
-            if plan.duplicate_contexts
-        ]
-        notes_heading = QLabel(f"NOTES · {len(notes)}")
+        notes_heading = QLabel(f"NOTES · {len(notes):,}")
         notes_heading.setObjectName("SectionTitle")
         notes_heading.setVisible(bool(notes))
         layout.addWidget(notes_heading)
         self.notes = QPlainTextEdit("\n".join(notes))
         self.notes.setReadOnly(True)
-        self.notes.setMaximumHeight(140)
+        self.notes.setMaximumHeight(160)
         self.notes.setVisible(bool(notes))
         layout.addWidget(self.notes)
 
@@ -445,41 +315,20 @@ class ContentImportDialog(QDialog):
         self.import_button = QPushButton("Import")
         self.import_button.setProperty("variant", "primary")
         self.import_button.setDefault(True)
-        self.import_button.setEnabled(bool(preview.plans))
+        self.import_button.setEnabled(preview.changes_anything)
         self.import_button.clicked.connect(self._import)
         buttons.addWidget(self.import_button)
         layout.addLayout(buttons)
 
-    def chosen(self) -> list[tuple[int, str]]:
-        return [
-            key
-            for row, key in enumerate(self._conflict_keys)
-            if self.table.item(row, 0).checkState() == Qt.CheckState.Checked
-        ]
-
     def _import(self) -> None:
-        result = self._content.apply_import(self._preview, replace_fields=self.chosen())
-        self.result_text = (
-            f"Imported {result.words} words: {result.fields_filled} fields filled, "
-            f"{result.fields_replaced} replaced, {result.contexts_added} examples and "
-            f"{result.translations_added} translations added."
+        result = self._content.apply_import(self._preview)
+        text = (
+            f"Imported {result.contexts_added:,} contexts for {result.words:,} words"
         )
+        if result.definitions_changed:
+            text += f", and {result.definitions_changed:,} definitions"
+        text += "."
+        if result.rejected:
+            text += f" {result.rejected:,} entries were not imported: see the notes."
+        self.result_text = text
         self.accept()
-
-
-def _field_name(key: str) -> str:
-    part, name = key.split(".", 1)
-    name = name.replace("_", " ")
-    return name if part == "target" else f"{name} ({language_name(part)})"
-
-
-def _shown(value: object) -> str:
-    """A stored or incoming field value, as text for the table."""
-    if isinstance(value, tuple):
-        return " · ".join(
-            f"{item.word} ({item.relation})" if isinstance(item, Related) else str(item)
-            for item in value
-        )
-    if isinstance(value, Enum):
-        return str(value.value)
-    return str(value)

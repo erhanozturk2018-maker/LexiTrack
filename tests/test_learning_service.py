@@ -27,7 +27,7 @@ from lexitrack.repositories import (
 from lexitrack.services.learning_service import LearningService
 
 from .conftest import entry
-from .flow_helpers import record_known_evidence
+from .flow_helpers import answer, record_known_evidence
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1"]
 
@@ -51,7 +51,9 @@ def engine(database: Database, clock: FrozenClock) -> LearningService:
         Source(key="test", name="Test source", parser_type="generic")
     )
     entries = [
-        entry(_name(index), cefr_level=LEVELS[index % len(LEVELS)]) for index in range(120)
+        entry(_name(index), cefr_level=LEVELS[index % len(LEVELS)],
+              definition=f"the meaning of {_name(index)}")
+        for index in range(120)
     ]
     result = WordRepository(database).add_entries(entries, source.id)
     word_ids = list(result.word_ids)
@@ -68,7 +70,7 @@ def study(service: LearningService, clock: FrozenClock, rating: Rating = Rating.
     """Answer everything due today. Returns how many were answered."""
     answered = 0
     for item in service.review_queue():
-        assert service.answer(item.word.id, rating) is not None
+        assert answer(service, item.word.id, rating) is not None
         answered += 1
     return answered
 
@@ -197,7 +199,7 @@ class TestReviewQueue:
         engine.introduce()
         clock.advance_to_day_start(1)
         first = engine.review_queue()[0]
-        engine.answer(first.word.id, Rating.GOOD)
+        answer(engine, first.word.id, Rating.GOOD)
         assert first.word.id not in {item.word.id for item in engine.review_queue()}
 
     def test_even_again_does_not_bring_a_word_back_the_same_day(
@@ -207,7 +209,7 @@ class TestReviewQueue:
         engine.introduce()
         clock.advance_to_day_start(1)
         for item in engine.review_queue():
-            engine.answer(item.word.id, Rating.AGAIN)
+            answer(engine, item.word.id, Rating.AGAIN)
         assert engine.review_queue() == []
         clock.advance(hours=20)
         assert engine.review_queue() == []
@@ -220,7 +222,7 @@ class TestReviewQueue:
         clock.advance_to_day_start(1)
         victim = engine.review_queue()[5].word.id
         for _ in range(2):
-            engine.answer(victim, Rating.AGAIN)
+            answer(engine, victim, Rating.AGAIN)
             clock.advance_to_day_start(1)
         queue = engine.review_queue()
         assert queue[0].word.id == victim
@@ -236,17 +238,6 @@ class TestReviewQueue:
         engine.save_settings({Setting.REVIEW_CAPACITY_PER_DAY: 10})
         assert len(engine.review_queue()) == 10
 
-    def test_meaning_is_hidden_in_study_reviews_only_when_asked(
-        self, engine: LearningService, clock: FrozenClock
-    ) -> None:
-        engine.introduce()
-        clock.advance_to_day_start(1)
-        assert engine.review_queue()[0].hide_meaning is True
-        engine.save_settings({Setting.HIDE_MEANING_IN_STUDY: False})
-        assert engine.review_queue()[0].hide_meaning is False
-        # The Struggling view is for reading, so it never hides anything.
-        assert all(not item.hide_meaning for item in engine.struggling_words())
-
 
 class TestAnswers:
     def test_an_answer_reschedules_the_card_and_is_logged(
@@ -255,7 +246,7 @@ class TestAnswers:
         engine.introduce()
         clock.advance_to_day_start(1)
         item = engine.review_queue()[0]
-        outcome = engine.answer(item.word.id, Rating.GOOD, channel=Channel.TELEGRAM)
+        outcome = answer(engine, item.word.id, Rating.GOOD, channel=Channel.TELEGRAM)
         assert outcome is not None
         assert outcome.next_due_on > clock.today()
         assert outcome.interval_days >= 1
@@ -272,8 +263,8 @@ class TestAnswers:
         engine.introduce()
         clock.advance_to_day_start(1)
         item = engine.review_queue()[0]
-        first = engine.answer(item.word.id, Rating.GOOD, update_key="cb:1:good")
-        second = engine.answer(item.word.id, Rating.AGAIN, update_key="cb:1:good")
+        first = answer(engine, item.word.id, Rating.GOOD, update_key="cb:1:good")
+        second = answer(engine, item.word.id, Rating.AGAIN, update_key="cb:1:good")
         assert first is not None and first.duplicate is False
         assert second is not None and second.duplicate is True
         assert len(engine.word_history(item.word.id)) == 1
@@ -284,7 +275,7 @@ class TestAnswers:
     ) -> None:
         """A tap on a message sent before the word was removed."""
         word_id = engine.daily_plan().new_words[0].id
-        assert engine.answer(word_id, Rating.GOOD) is None
+        assert answer(engine, word_id, Rating.GOOD) is None
 
     def test_a_session_counts_what_it_did(
         self, engine: LearningService, clock: FrozenClock
@@ -294,7 +285,7 @@ class TestAnswers:
         session = engine.start_session(Channel.TELEGRAM, chat_id="42")
         assert session.planned_count == 25
         for item in engine.review_queue()[:3]:
-            engine.answer(item.word.id, Rating.GOOD, session_id=session.id)
+            answer(engine, item.word.id, Rating.GOOD, session_id=session.id)
         assert engine.open_session(Channel.TELEGRAM).done_count == 3
         finished = engine.finish_session(session.id)
         assert finished.is_open is False
@@ -410,36 +401,53 @@ class TestWorkload:
 
 class TestMastery:
     def test_stability_alone_is_never_a_case_for_known(
-        self, engine: LearningService, clock: FrozenClock
+        self, engine: LearningService, database: Database, clock: FrozenClock
     ) -> None:
-        """A forecast is not evidence: no productive use, no suggestion."""
-        engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 10})
+        """A forecast is not evidence: only a right answer after a real long
+        gap is, however stable the word is expected to be."""
         engine.introduce()
+        threshold = engine.settings.mastery_stability_days
+        stable_without_gap = 0
         for _ in range(60):
             clock.advance_to_day_start(1)
             for item in engine.review_queue():
-                assert not engine.answer(item.word.id, Rating.EASY).suggest_known
-        assert engine.known_suggestions() == []
+                outcome = answer(engine, item.word.id, Rating.EASY)
+                (log,) = [entry for entry in engine.word_history(item.word.id, limit=1)]
+                if (log.elapsed_days or 0) < threshold:
+                    assert not outcome.suggest_known
+                    stable_without_gap += (outcome.card.stability or 0) >= threshold
+                else:
+                    assert outcome.suggest_known
+        assert stable_without_gap, "some words were stable long before any long gap"
 
-    def test_productive_use_alone_is_not_enough_either(
+    def test_a_right_answer_after_a_long_gap_is_the_case(
         self, engine: LearningService, clock: FrozenClock
     ) -> None:
         ids = [word.id for word in engine.introduce().introduced]
         clock.advance_to_day_start(1)
         for word_id in ids:
-            engine.answer(word_id, Rating.GOOD)
-        record_known_evidence(engine, ids, gap_days=None)
-        assert engine.known_suggestions() == [], "no recall after a long gap yet"
+            answer(engine, word_id, Rating.GOOD)
+        assert engine.known_suggestions() == [], "no long gap yet"
         record_known_evidence(engine, ids[:1], gap_days=21)
         assert [word.id for word in engine.known_suggestions()] == ids[:1]
+
+    def test_a_wrong_answer_after_a_long_gap_is_not(
+        self, engine: LearningService, database: Database, clock: FrozenClock
+    ) -> None:
+        ids = [word.id for word in engine.introduce().introduced]
+        clock.advance_to_day_start(1)
+        answer(engine, ids[0], Rating.GOOD)
+        clock.advance_to_day_start(30)
+        outcome = answer(engine, ids[0], Rating.AGAIN)
+        assert outcome.correct is False and not outcome.suggest_known
+        assert engine.known_suggestions() == []
 
     def test_a_proven_word_is_suggested_as_known_never_marked(
         self, engine: LearningService, database: Database, clock: FrozenClock
     ) -> None:
-        """Productive and recalled after a long gap: offered; Known is the user's word."""
+        """Right after a long gap: offered; Known is the user's word."""
         engine.save_settings({Setting.MASTERY_STABILITY_DAYS: 10})
-        ids = [word.id for word in engine.introduce().introduced]
-        record_known_evidence(engine, ids, gap_days=None)
+        engine.introduce()
         word_id = None
         # Easy answers stretch the interval fast, so most of these days have
         # nothing due; mastery is reached in reviews, not in elapsed time.
@@ -447,7 +455,7 @@ class TestMastery:
         for _ in range(200):
             clock.advance_to_day_start(1)
             for item in engine.review_queue():
-                outcome = engine.answer(item.word.id, Rating.EASY)
+                outcome = answer(engine, item.word.id, Rating.EASY)
                 if outcome and outcome.suggest_known:
                     word_id = outcome.word.id
         assert word_id is not None
@@ -467,7 +475,7 @@ class TestMastery:
         """A stale suggestion cannot record a word as learned that is not."""
         introduced = [word.id for word in engine.introduce().introduced]
         clock.advance_to_day_start(1)
-        engine.answer(introduced[0], Rating.GOOD)
+        answer(engine, introduced[0], Rating.GOOD)
         assert engine.known_suggestions() == []
         assert engine.confirm_known(introduced[:1]) == 0
         assert WordRepository(database).get(introduced[0]).status is ReviewStatus.UNKNOWN
@@ -498,7 +506,7 @@ class TestMastery:
         engine.save_settings({Setting.REVIEW_KNOWN_WORDS: False})
         introduced = [word.id for word in engine.introduce().introduced]
         clock.advance_to_day_start(1)
-        engine.answer(introduced[0], Rating.GOOD)
+        answer(engine, introduced[0], Rating.GOOD)
         engine.mark_known([introduced[0]])
         assert engine.resume([introduced[0]]) == 1
         history = engine.word_history(introduced[0])

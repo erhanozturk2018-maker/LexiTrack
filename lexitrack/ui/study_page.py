@@ -10,17 +10,17 @@ The page has three faces and shows exactly one of them:
    new words as chips grouped by level, the week as seven day tiles, the
    words you find hard, and the last thirty days as stat tiles.
 3. **A review session** — one card (``components/review_card.py``) that
-   asks what :class:`~lexitrack.services.review_flow.ReviewFlow` says is
-   next: type the word from its meaning or a context, choose it among four,
-   see it taught again — or, for a word with nothing to ask from, the V1
-   card with four answers.
+   shows what :class:`~lexitrack.services.review_flow.ReviewFlow` says is
+   next: a new word to read, or a question — Definition → Word or
+   Context → Definition — with four options, then Again / Hard / Good /
+   Easy after a right answer.
 
 Two decisions worth knowing:
 
 * **There is one primary button, and its label changes.** Two panels with a
   button each made the user choose between them; the day has an order —
   learn the new words, then review — and the button follows it.
-* **The answer buttons say when the word comes back**, and when all four say
+* **The rating buttons say when the word comes back**, and when all four say
   the same thing they say it once, underneath.
 
 The page holds no learning logic: every number comes from one
@@ -48,11 +48,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models.attempt import SelfReport
 from ..models.srs import Channel, Rating
 from ..models.word_entry import CEFR_ORDER
-from ..repositories import ContentRepository
-from ..services.first_learning import choose_depth, estimate
+from ..services.first_learning import estimate
 from ..services.learning_service import DailyPlan, LearningService
 from ..services.review_flow import Feedback, ReviewFlow, StepKind
 from ..services.review_wording import interval_text
@@ -149,7 +147,6 @@ class StudyPage(QWidget):
         #: The session itself — queue, position, reveal, Undo — lives in the
         #: flow; this page only shows it and passes on what the user does.
         self.flow = ReviewFlow(engine)
-        self._content = ContentRepository(engine.database)
         self._plan: DailyPlan | None = None
         self._primary: str | None = None
         self._setup_pool = 0
@@ -476,11 +473,8 @@ class StudyPage(QWidget):
 
         card = ReviewCard()
         self.card = card
-        card.submitted.connect(self._on_submitted)
         card.chosen.connect(self._on_chosen)
-        card.assessed.connect(self._on_assessed)
-        card.written_sentence.connect(self._on_written)
-        card.more_requested.connect(self._more)
+        card.rated.connect(self._on_rated)
         card.continue_requested.connect(self._continue)
         card.undo_requested.connect(self.undo_last)
         # The card's parts, by the names the page has always had.
@@ -488,7 +482,7 @@ class StudyPage(QWidget):
         self.session_flag = card.session_flag
         self.word_label = card.word_label
         self.meta_label = card.meta_label
-        self.answer_buttons = card.answer_buttons
+        self.answer_buttons = card.rating_buttons
         self.answer_hint = card.answer_hint
         self.undo_button = card.undo_button
         self.session_progress = card.session_progress
@@ -537,12 +531,7 @@ class StudyPage(QWidget):
         learned = len(plan.introduced_today)
         due = plan.due_count
         done = plan.reviews_done_today
-        language = self._engine.settings.learner_language
-        depths = [
-            choose_depth(self._content.teaching(word.id, language)).depth
-            for word in plan.new_words
-        ]
-        day = estimate(due, depths)
+        day = estimate(due, new_count)
         hard = sum(1 for item in self._engine.review_queue() if item.is_struggling)
 
         if day.words:
@@ -579,7 +568,7 @@ class StudyPage(QWidget):
             started = done or learned
             self.primary_button.setText("Continue session →" if started else "Start session →")
             self.primary_button.setToolTip(
-                "Reviews first, then the new words: each taught, then asked."
+                "Reviews first, then the new words: each shown, then asked."
             )
             self.primary_button.setEnabled(True)
         else:
@@ -599,10 +588,15 @@ class StudyPage(QWidget):
             )
         self.intake_note.setText(" ".join(notes))
         self.intake_note.setVisible(bool(notes))
-        self.pool_label.setText(
-            f"{plan.pool_remaining:,} words in the plan are still to come."
-        )
-        self.pool_label.setVisible(bool(plan.pool_remaining))
+        pool = f"{plan.pool_remaining:,} words in the plan are still to come."
+        waiting = plan.without_definition
+        if waiting:
+            pool += (
+                f" {waiting:,} more have no definition yet: they are offered once they "
+                "have one."
+            )
+        self.pool_label.setText(pool)
+        self.pool_label.setVisible(bool(plan.pool_remaining or waiting))
 
     def _primary_action(self) -> None:
         if self._primary == "session":
@@ -799,20 +793,15 @@ class StudyPage(QWidget):
         if step is None:
             self.end_session()
             return
-        self.card.show_step(step, intervals=self.flow.intervals())
-        self.card.set_more(self.flow.can_show_more())
+        self.card.show_step(step)
         self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
-        # A step half answered before the app closed comes back as it stood.
+        # A right answer waiting for its rating before the app closed comes
+        # back as it stood.
         pending = self.flow.pending_feedback()
         if pending is not None:
-            self.card.answer_input.setText(pending.answer or "")
-            self.card.show_feedback(pending)
-        elif self.flow.written is not None:
-            self.card.write_input.setText(self.flow.written)
-            self.card.show_written()
-        if step.kind not in (StepKind.TYPE, StepKind.WRITE):
-            self.setFocus()
+            self.card.show_feedback(pending, self.flow.intervals())
+        self.setFocus()
 
     def _show_undo(self) -> None:
         possible = self.flow.can_undo()
@@ -834,43 +823,26 @@ class StudyPage(QWidget):
         else:
             self.refresh()
 
-    def _show_intervals(self, preview: dict[Rating, int]) -> None:
-        self.card.show_intervals(preview)
-
-    def _on_submitted(self, text: str, response_ms: int, hinted: bool) -> None:
-        self._show_feedback(self.flow.submit(text, response_ms, hinted))
-
-    def _more(self) -> None:
-        if self.flow.more():
-            self._show_card()
-
-    def _on_written(self, sentence: str) -> None:
-        self.flow.note_written(sentence)
-
     def _on_chosen(self, index: int, response_ms: int) -> None:
-        self._show_feedback(self.flow.choose(index, response_ms))
-
-    def _on_assessed(self, report: SelfReport) -> None:
-        """The learner's report: after a right answer, a sentence, or a shown word."""
-        step = self.flow.current
-        if step is None:
+        if self.flow.current is None or self.flow.awaiting:
             return
-        feedback = self.flow.assess(report)
-        if step.kind is StepKind.RECALL:
-            # Nothing to read after a shown word: straight on.
-            self._after_rating(feedback)
-            if feedback.finished:
-                self.end_session()
-                return
-            self._show_card()
-            return
-        self._show_feedback(feedback)
-
-    def _show_feedback(self, feedback: Feedback) -> None:
+        feedback = self.flow.choose(index, response_ms)
         self._after_rating(feedback)
-        self.card.show_feedback(feedback)
+        self.card.show_feedback(feedback, self.flow.intervals())
         self.card.set_progress(self.flow.position, self.flow.total)
         self._show_undo()
+
+    def _on_rated(self, rating: Rating) -> None:
+        """Again, Hard, Good or Easy for a right answer: recorded, and on to
+        the next step — the word and its definition were just on screen."""
+        if not self.flow.awaiting:
+            return
+        feedback = self.flow.rate(rating)
+        self._after_rating(feedback)
+        if feedback.finished:
+            self.end_session()
+            return
+        self._show_card()
 
     def _after_rating(self, feedback: Feedback) -> None:
         outcome = feedback.outcome
@@ -878,7 +850,7 @@ class StudyPage(QWidget):
             self._suggest_known(outcome.word)
 
     def _continue(self) -> None:
-        """Enter after feedback or a teaching page: on to the next step."""
+        """Enter after an answer or on a new word's page: on to the next step."""
         if not self.card.waiting:
             return
         step = self.flow.current
@@ -890,14 +862,16 @@ class StudyPage(QWidget):
         self._show_card()
 
     def _suggest_known(self, word) -> None:
-        """The word reached long-term memory: offer, never decide, Known."""
+        """Right after a long gap: offer, never decide, Known."""
         def confirm() -> None:
             if self._engine.confirm_known([word.id]):
                 self.notify.emit(f"“{word.word}” is marked Known.")
                 self.data_changed.emit()
 
+        days = self._engine.settings.mastery_stability_days
         self.notify_action.emit(
-            f"“{word.word}”: long-term memory and productive use. Consider marking it Known.",
+            f"“{word.word}”: right after {days:g}+ days without a review. "
+            "Consider marking it Known.",
             ("Mark Known", confirm),
         )
 
@@ -919,17 +893,21 @@ class StudyPage(QWidget):
         if self.card.waiting and enter:
             self._continue()
             return
-        if key == Qt.Key.Key_M and self.card.waiting:
-            self._more()
-            return
-        step = self.flow.current
         number = _NUMBER_KEYS.get(key)
-        if step is not None and number is not None and not self.card.waiting:
-            if step.kind is StepKind.CHOOSE:
-                self.card.choose(number)
-                return
-            # A report, wherever the card asks for one: 1 Forgot … 4 Instant.
-            self.card.report_by_key(number)
+        if self.card.rating and number is not None:
+            # After a right answer: 1 Again … 4 Easy.
+            self.card.rate_by_key(number)
+            return
+        choice = number if number is not None else _LETTER_KEYS.get(key)
+        step = self.flow.current
+        if (
+            step is not None
+            and step.kind is StepKind.QUESTION
+            and choice is not None
+            and not self.card.waiting
+            and not self.card.rating
+        ):
+            self.card.choose(choice)
             return
         super().keyPressEvent(event)
 
@@ -941,13 +919,17 @@ _NUMBER_KEYS = {
     Qt.Key.Key_3: 2,
     Qt.Key.Key_4: 3,
 }
+#: Keys A–D, as the options are lettered, as indexes 0–3.
+_LETTER_KEYS = {
+    Qt.Key.Key_A: 0,
+    Qt.Key.Key_B: 1,
+    Qt.Key.Key_C: 2,
+    Qt.Key.Key_D: 3,
+}
 
 
 def _meaning(word) -> str:
-    meaning = word.definition or ""
-    if word.note:
-        meaning = f"{meaning} ({word.note})".strip()
-    return meaning
+    return word.definition or ""
 
 
 def _no_words_reason(plan: DailyPlan) -> str:

@@ -1,9 +1,10 @@
-"""Review route V2 as a session (services/review_flow.py), without widgets.
+"""A day's study as a session (services/review_flow.py), without widgets.
 
-Each test walks a real engine on a frozen clock through a day's reviews and
-checks what reaches the database: one rating per word, with its memory
-result; the probes and practice as attempts linked to it; nothing rated
-twice, and nothing left behind by Undo.
+Each test walks a real engine on a frozen clock through a day and checks what
+reaches the database: the two tasks and nothing else, four options each, one
+rating per word a day with its correctness and effort kept apart, a wrong
+answer rated Again and asked again as practice, and nothing left behind by
+Undo or a restart.
 """
 
 from __future__ import annotations
@@ -14,16 +15,14 @@ import pytest
 
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
-from lexitrack.models.attempt import LearningAttempt, MemoryResult, Phase, Role, SelfReport, Task
-from lexitrack.models.content import WordContext, WordLocalization
-from lexitrack.models.settings import Setting
+from lexitrack.models.attempt import Effort, Phase, Role, Task
 from lexitrack.models.source import Source
 from lexitrack.models.srs import Rating
 from lexitrack.models.user_word_state import ReviewStatus
 from lexitrack.repositories import (
     AttemptRepository,
     CardRepository,
-    ContentRepository,
+    ContextRepository,
     ListRepository,
     SourceRepository,
     StateRepository,
@@ -31,17 +30,25 @@ from lexitrack.repositories import (
 )
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.review_flow import ReviewFlow, StepKind
+from lexitrack.services.review_wording import feedback_text
 
 from .conftest import entry
-from .flow_helpers import say
+from .flow_helpers import right, wrong
 
 WORDS = {
-    "reluctant": "not willing to do something",
-    "arid": "very dry, with little rain",
-    "attic": "a room just below the roof of a house",
-    "avenue": "a wide street in a town",
-    "barn": "a large farm building for animals or crops",
-    "meadow": "a field of grass and wild flowers",
+    "sleep in": ("verb", "to sleep later than usual"),
+    "stay up": ("verb", "to not go to bed until late"),
+    "wake up": ("verb", "to stop sleeping"),
+    "lie down": ("verb", "to put your body flat on a bed or the floor"),
+    "attic": ("noun", "a room just below the roof of a house"),
+    "avenue": ("noun", "a wide street in a town"),
+    "barn": ("noun", "a large farm building for animals or crops"),
+    "meadow": ("noun", "a field of grass and wild flowers"),
+}
+CONTEXTS = {
+    "sleep in": ["I don't have to work tomorrow, so I can sleep in.",
+                 "I usually sleep in on Sundays."],
+    "attic": ["We keep old toys in the attic."],
 }
 
 
@@ -50,517 +57,409 @@ def clock() -> FrozenClock:
     return FrozenClock(datetime(2026, 9, 17, 5, 0, tzinfo=UTC))
 
 
-@pytest.fixture
-def engine(database: Database, clock: FrozenClock) -> LearningService:
+def _setup(database: Database, clock: FrozenClock, introduce: bool = True) -> LearningService:
     source = SourceRepository(database).upsert(
         Source(key="test", name="Test source", parser_type="generic")
     )
-    entries = [entry(word, definition=meaning, part_of_speech="noun")
-               for word, meaning in WORDS.items()]
-    entries.append(entry("gizmo"))  # no definition: reviewed the V1 way
+    entries = [entry(word, part_of_speech=pos, definition=meaning, cefr_level="B1")
+               for word, (pos, meaning) in WORDS.items()]
     ids = list(WordRepository(database).add_entries(entries, source.id).word_ids)
+    contexts = ContextRepository(database)
+    for word_id, word in zip(ids, WORDS, strict=True):
+        contexts.add_many(word_id, CONTEXTS.get(word, []))
     a_list = ListRepository(database).create("Test list")
     ListRepository(database).add_words(a_list.id, ids)
-    StateRepository(database).set_status_many(ids, ReviewStatus.UNKNOWN)
+    StateRepository(database).set_status_many(ids, ReviewStatus.UNKNOWN, at=clock.now_utc())
     service = LearningService(database, clock)
     service.create_plan("Test plan", list_ids=[a_list.id])
-    service.introduce()
-    clock.advance_to_day_start(1)
-    clock.advance(hours=4)
+    if introduce:
+        service.introduce()
+        clock.advance_to_day_start(1)
+        clock.advance(hours=4)
     return service
 
 
-def _ids(database: Database) -> dict[str, int]:
-    rows = database.connection.execute("SELECT id, normalized_word FROM words").fetchall()
-    return {row["normalized_word"]: int(row["id"]) for row in rows}
+@pytest.fixture
+def engine(database: Database, clock: FrozenClock) -> LearningService:
+    """Eight words introduced yesterday: all due today."""
+    return _setup(database, clock)
 
 
-def _to(flow: ReviewFlow, word: str) -> None:
-    """Answer until ``word`` is on screen (correctly, at a normal pace)."""
-    while flow.current.word.word != word:
-        step = flow.current
-        if step.kind is StepKind.RECALL:
-            flow.assess(SelfReport.REMEMBERED)
-        elif step.kind is StepKind.TEACH:
-            flow.proceed()
-        elif step.kind is StepKind.WRITE:
-            flow.assess(SelfReport.REMEMBERED)
-        else:
-            say(flow, step.prompt.accepted[0], response_ms=6000)
+def _id(database: Database, word: str) -> int:
+    return WordRepository(database).find(word).id
 
 
 def _logs(database: Database, word_id: int):
     return [log for log in CardRepository(database).logs_for_word(word_id) if not log.undone_at]
 
 
-def test_a_recalled_word_is_rated_once_with_its_memory_result(
+def _to(flow: ReviewFlow, word: str) -> None:
+    """Answer the others right until ``word`` is on screen."""
+    while flow.current.word.word != word:
+        if flow.current.kind is StepKind.TEACH:
+            flow.proceed()
+        else:
+            right(flow)
+
+
+def _asked(flow: ReviewFlow) -> list:
+    """Every step of the session, answered right, as it was on screen."""
+    seen = []
+    while flow.current is not None:
+        step = flow.current
+        seen.append(step)
+        if step.kind is StepKind.TEACH:
+            flow.proceed()
+        else:
+            right(flow)
+    return seen
+
+
+# -- the two tasks ------------------------------------------------------------------
+
+
+def test_definition_to_word_shows_the_definition_and_four_words(
     engine: LearningService, database: Database
 ) -> None:
     flow = ReviewFlow(engine)
     assert flow.start()
+    _to(flow, "barn")
     step = flow.current
-    assert step.kind is StepKind.TYPE and step.prompt.task is Task.MEANING_TO_WORD
-    feedback = say(flow, step.word.word, response_ms=6000)
-    assert feedback.correct and feedback.outcome.rating is Rating.GOOD
-    assert feedback.resolution.memory is MemoryResult.RECALLED
+    question = step.question
+    assert step.kind is StepKind.QUESTION and step.rated
+    assert question.task is Task.DEFINITION_TO_WORD
+    assert question.prompt == "a large farm building for animals or crops"
+    assert len(question.options) == 4
+    assert question.right.word_id == step.word.id and question.right.text == "barn"
+    assert len({o.word_id for o in question.options}) == 4
+    assert len({o.text for o in question.options}) == 4
+
+
+def test_context_to_definition_shows_a_context_and_four_definitions(
+    engine: LearningService, database: Database
+) -> None:
+    # Asked Definition → Word last time, a word with contexts is asked the
+    # other way today.
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "sleep in")
+    assert flow.current.question.task is Task.DEFINITION_TO_WORD
+    right(flow)
+    flow.finish()
+
+    engine.clock.advance_to_day_start(30)
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "sleep in")
+    question = flow.current.question
+    assert question.task is Task.CONTEXT_TO_DEFINITION
+    assert question.prompt in CONTEXTS["sleep in"]
+    assert question.right.text == "to sleep later than usual"
+    assert all(option.text in {m for _, m in WORDS.values()} for option in question.options)
+    assert len({option.text for option in question.options}) == 4
+    start, end = question.highlight
+    assert question.prompt[start:end] == "sleep in"
+
+
+def test_context_to_word_is_never_asked(engine: LearningService, database: Database) -> None:
+    """Over many days every question is one of the two tasks, and a context is
+    only ever shown with definitions to choose from, never words."""
+    definitions = {meaning for _pos, meaning in WORDS.values()}
+    for _day in range(6):
+        flow = ReviewFlow(engine)
+        if flow.start():
+            for step in _asked(flow):
+                if step.kind is not StepKind.QUESTION:
+                    continue
+                question = step.question
+                assert question.task in (Task.DEFINITION_TO_WORD, Task.CONTEXT_TO_DEFINITION)
+                if question.task is Task.CONTEXT_TO_DEFINITION:
+                    assert all(o.text in definitions for o in question.options)
+                else:
+                    assert question.prompt in definitions
+                    assert all(o.text not in definitions for o in question.options)
+            flow.finish()
+        engine.clock.advance_to_day_start(40)
+    tasks = {row[0] for row in database.connection.execute("SELECT task FROM learning_attempts")}
+    assert tasks <= {"definition_to_word", "context_to_definition"}
+
+
+def test_a_word_without_contexts_is_only_asked_from_its_definition(
+    engine: LearningService, database: Database
+) -> None:
+    barn = _id(database, "barn")
+    for _ in range(4):
+        flow = ReviewFlow(engine)
+        if flow.start():
+            _asked(flow)
+            flow.finish()
+        engine.clock.advance_to_day_start(60)
+    attempts = AttemptRepository(database).for_word(barn)
+    assert attempts and {a.task for a in attempts} == {Task.DEFINITION_TO_WORD}
+
+
+# -- right and wrong ------------------------------------------------------------------
+
+
+def test_a_right_answer_waits_for_its_effort_then_is_recorded_with_it(
+    engine: LearningService, database: Database
+) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    step = flow.current
+    feedback = flow.choose(step.question.answer, response_ms=3200)
+    assert feedback.correct and feedback.awaiting and feedback.outcome is None
+    assert _logs(database, step.word.id) == []
+    assert flow.awaiting and flow.intervals()
+
+    rated = flow.rate(Rating.HARD)
+    assert rated.correct and rated.outcome.rating is Rating.HARD
     (log,) = _logs(database, step.word.id)
-    assert log.route_version == "v2" and log.memory_result == "RECALLED"
+    assert (log.task, log.correct, log.rating, log.route_version) == (
+        "definition_to_word", True, Rating.HARD, "v3",
+    )
     (attempt,) = AttemptRepository(database).for_word(step.word.id)
-    assert attempt.review_log_id == log.id and attempt.role is Role.PRIMARY
+    assert (attempt.correct, attempt.effort, attempt.role, attempt.phase) == (
+        True, Effort.HARD, Role.PRIMARY, Phase.REVIEW,
+    )
+    assert attempt.review_log_id == log.id and attempt.response_ms == 3200
     assert flow.position == 1 and flow.answered == 1
 
 
-def test_the_learners_report_is_the_result(engine: LearningService, database: Database) -> None:
-    """Instant is Easy, Effortful is Hard: whatever the clock or a hint said."""
-    flow = ReviewFlow(engine)
-    flow.start()
-    first = flow.current
-    waiting = flow.submit(first.word.word, response_ms=30_000, hinted=True)
-    assert waiting.awaiting and waiting.correct and waiting.outcome is None
-    assert _logs(database, first.word.id) == [], "nothing recorded before the report"
-    assert flow.assess(SelfReport.INSTANT).outcome.rating is Rating.EASY
-    second = flow.current
-    feedback = say(flow, second.word.word, SelfReport.EFFORTFUL, response_ms=900)
-    assert feedback.outcome.rating is Rating.HARD
-    assert feedback.resolution.memory is MemoryResult.RECALLED_EFFORT
-    third = flow.current
-    assert say(flow, third.word.word, SelfReport.REMEMBERED).outcome.rating is Rating.GOOD
-    # The time is kept beside the report, as telemetry.
-    (attempt,) = AttemptRepository(database).for_word(first.word.id)
-    assert attempt.response_ms == 30_000 and attempt.effort.value == "instant"
-
-
-def test_forgot_is_again_and_a_wrong_answer_is_not_a_report(engine: LearningService) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    word = flow.current.word
-    assert not flow.submit("", response_ms=4000).awaiting, "Forgot: straight to the probe"
-    assert flow.current.kind is StepKind.CHOOSE
-    wrong = next(i for i, o in enumerate(flow.current.options) if o.id != word.id)
-    assert flow.choose(wrong).outcome.rating is Rating.AGAIN
-
-
-def test_a_failed_recall_is_probed_without_showing_the_answer(
-    engine: LearningService, database: Database
+@pytest.mark.parametrize("rating", list(Rating))
+def test_every_effort_can_follow_a_right_answer(
+    engine: LearningService, database: Database, rating: Rating
 ) -> None:
     flow = ReviewFlow(engine)
     flow.start()
-    word = flow.current.word
-    feedback = say(flow, "no idea", response_ms=5000)
-    assert not feedback.correct and feedback.answer is None and feedback.outcome is None
-    probe = flow.current
-    assert probe.kind is StepKind.CHOOSE and probe.word.id == word.id
-    assert len(probe.options) == 4 and word.id in {o.id for o in probe.options}
-    assert _logs(database, word.id) == [], "not rated before the probe is answered"
-
-    right = next(i for i, o in enumerate(probe.options) if o.id == word.id)
-    feedback = flow.choose(right)
-    assert feedback.outcome.rating is Rating.HARD
-    assert feedback.resolution.memory is MemoryResult.RECOGNIZED
-    assert feedback.answer == word.word
-    # Repair: taught at once, asked again three cards later.
-    assert flow.current.kind is StepKind.TEACH
-    assert flow.proceed()
-    later = [s for s in flow._steps if s.word.id == word.id]
-    assert len(later) == 1 and later[0].role is Role.RETRIEVAL
-    assert flow._steps.index(later[0]) == 3
-
-    attempts = AttemptRepository(database).for_word(word.id)
-    assert [(a.role, a.task, a.success) for a in attempts] == [
-        (Role.PRIMARY, Task.MEANING_TO_WORD, False),
-        (Role.PROBE, Task.CHOOSE_WORD, True),
-    ]
-
-
-def test_practice_is_recorded_but_never_rated(
-    engine: LearningService, database: Database
-) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    word = flow.current.word
-    say(flow, "", response_ms=4000)  # I don't know
-    wrong = next(i for i, o in enumerate(flow.current.options) if o.id != word.id)
-    feedback = flow.choose(wrong)
-    assert feedback.outcome.rating is Rating.AGAIN
-    assert feedback.resolution.memory is MemoryResult.FORGOTTEN
-    card_after = CardRepository(database).get(word.id)
-
-    assert flow.current.kind is StepKind.TEACH and flow.current.phase is Phase.RELEARN
-    flow.proceed()
-    _to(flow, word.word)
-    retrieval = flow.current
-    assert retrieval.phase is Phase.RELEARN and retrieval.role is Role.RETRIEVAL
-    say(flow, word.word, response_ms=4000)
-    assert CardRepository(database).get(word.id) == card_after
-    assert len(_logs(database, word.id)) == 1
-    practice = AttemptRepository(database).for_word(word.id)[-1]
-    assert practice.phase is Phase.RELEARN and practice.success
-    assert practice.review_log_id == _logs(database, word.id)[0].id
-
-
-def test_relearning_stops_after_two_cycles(engine: LearningService) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    word = flow.current.word
-    say(flow, "", response_ms=4000)
-    flow.choose(next(i for i, o in enumerate(flow.current.options) if o.id != word.id))
-    teaches = 0
-    while flow.current is not None:
-        step = flow.current
-        if step.kind is StepKind.TEACH:
-            teaches += step.word.id == word.id
-            flow.proceed()
-        elif step.kind is StepKind.RECALL:
-            flow.assess(SelfReport.REMEMBERED)
-        elif step.word.id == word.id:
-            say(flow, "still no idea", response_ms=4000)
-        else:
-            say(flow, step.prompt.accepted[0], response_ms=6000)
-    assert teaches == 2
-
-
-def test_a_failed_context_is_probed_by_meaning_and_repaired_in_another_context(
-    engine: LearningService, database: Database
-) -> None:
-    ids = _ids(database)
-    word_id = ids["reluctant"]
-    content = ContentRepository(database)
-    content.add_contexts([
-        WordContext(word_id=word_id, text="She was {{reluctant}} to leave."),
-        WordContext(word_id=word_id, text="A {{reluctant}} yes, after a long sigh."),
-    ])
-    content.save_localization(
-        WordLocalization(word_id=word_id, learner_language="de", core_meaning="widerwillig")
-    )
-    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
-    # Recalled once before, so today's first question is a context.
-    AttemptRepository(database).add(LearningAttempt(
-        word_id=word_id, at=datetime(2026, 9, 17, 5, tzinfo=UTC), on_day="2026-09-17",
-        phase=Phase.REVIEW, role=Role.PRIMARY, task=Task.MEANING_TO_WORD, success=True,
-    ))
-    flow = ReviewFlow(engine)
-    flow.start()
-    _to(flow, "reluctant")
-    primary = flow.current
-    assert primary.prompt.task is Task.CONTEXT_CLOZE and primary.prompt.novel_context
-    failed_context = primary.prompt.context_id
-
-    say(flow, "unwilling", response_ms=5000)
-    probe = flow.current
-    assert probe.role is Role.PROBE and probe.prompt.task is Task.MEANING_TO_WORD
-    feedback = say(flow, "reluctant", response_ms=5000)
-    assert feedback.outcome.rating is Rating.GOOD, "the memory held: case F"
-    assert feedback.resolution.memory is MemoryResult.RECALLED
-    flow.proceed()
-    retrieval = next(s for s in flow._steps if s.word.id == word_id)
-    assert retrieval.prompt.context_id not in (None, failed_context)
-
-
-def test_a_word_with_nothing_to_ask_from_is_reported_on_before_anything_shows(
-    engine: LearningService, database: Database
-) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    _to(flow, "gizmo")
     step = flow.current
-    assert step.kind is StepKind.RECALL and not hasattr(flow, "reveal")
-    feedback = flow.assess(SelfReport.FORGOT)
-    assert feedback.outcome.rating is Rating.AGAIN
+    flow.choose(step.question.answer)
+    feedback = flow.rate(rating)
     (log,) = _logs(database, step.word.id)
-    assert log.route_version == "v2" and log.memory_result == "FORGOTTEN"
+    assert log.correct is True and log.rating is rating
     (attempt,) = AttemptRepository(database).for_word(step.word.id)
-    assert attempt.task is Task.WORD_TO_MEANING and not attempt.success
+    assert attempt.effort is Effort.of(rating)
+    # Right but rated Again: the learner's word that it did not come; asked
+    # again later, like a miss.
+    assert feedback.again_later is (rating is Rating.AGAIN)
 
 
-def test_undo_takes_back_the_whole_word_and_asks_it_again(
+def test_a_wrong_answer_is_recorded_as_not_correct_and_rated_again(
     engine: LearningService, database: Database
 ) -> None:
     flow = ReviewFlow(engine)
     flow.start()
-    word = flow.current.word
-    say(flow, "", response_ms=4000)
-    flow.choose(next(i for i, o in enumerate(flow.current.options) if o.id == word.id))
-    assert flow.can_undo()
-    assert flow.undo().id == word.id
-    assert flow.current.word.id == word.id and flow.current.role is Role.PRIMARY
-    assert [s for s in flow._steps if s.word.id == word.id and s.phase is not Phase.REVIEW] == []
-    assert _logs(database, word.id) == []
-    assert AttemptRepository(database).for_word(word.id) == []
-    assert flow.answered == 0
-
-
-def test_the_session_ends_when_every_word_is_rated_and_practised(
-    engine: LearningService,
-) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    total = flow.total
-    assert total == len(WORDS) + 1
-    finished = False
-    while not finished:
-        step = flow.current
-        if step.kind is StepKind.RECALL:
-            finished = flow.assess(SelfReport.REMEMBERED).finished
-        elif step.kind is StepKind.TEACH:
-            flow.proceed()
-            finished = flow.current is None
-        else:
-            finished = say(flow, step.prompt.accepted[0], response_ms=6000).finished
-    assert flow.position == total
-    summary = flow.finish()
-    assert summary.answered == total and not flow.active
-
-
-def test_an_open_session_is_restored_with_the_words_not_yet_rated(
-    engine: LearningService,
-) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    first = flow.current.word
-    say(flow, first.word, response_ms=6000)
-    again = ReviewFlow.restore(engine, flow.session_id)
-    assert again is not None
-    assert again.total == flow.total and again.position == 1
-    assert again.current.word.id == flow.current.word.id
-    assert first.id not in {s.word.id for s in again._steps}
-
-
-def test_an_easy_recall_is_followed_next_time_by_a_sentence(
-    engine: LearningService, database: Database, clock: FrozenClock
-) -> None:
-    ids = _ids(database)
-    word_id = ids["arid"]
-    ContentRepository(database).add_contexts([
-        WordContext(word_id=word_id, text="The land was {{arid}} after years without rain."),
-    ])
-    flow = ReviewFlow(engine)
-    flow.start()
-    _to(flow, "arid")
     step = flow.current
-    assert step.prompt.task is Task.MEANING_TO_WORD
-    assert step.reason.startswith("First question")
-    say(flow, "arid", response_ms=1500)  # at once: Easy
-    flow.finish()
-
-    card = CardRepository(database).get(word_id)
-    clock.advance_to_day_start(engine.clock.days_between(clock.now_utc(), card.due_at) + 1)
-    clock.advance(hours=4)
-    again = ReviewFlow(engine)
-    assert again.start()
-    _to(again, "arid")
-    step = again.current
-    assert step.prompt.task is Task.CONTEXT_CLOZE
-    assert "one step harder" in step.reason
+    feedback = wrong(flow)
+    assert not feedback.correct and not feedback.awaiting
+    assert feedback.outcome.rating is Rating.AGAIN and feedback.again_later
+    (log,) = _logs(database, step.word.id)
+    assert (log.correct, log.rating, log.task) == (False, Rating.AGAIN, "definition_to_word")
+    (attempt,) = AttemptRepository(database).for_word(step.word.id)
+    assert attempt.correct is False and attempt.effort is None
 
 
-def test_the_meaning_is_asked_in_the_learners_chosen_language(
+def test_after_a_wrong_answer_the_right_word_and_its_definition_are_shown(
     engine: LearningService, database: Database
 ) -> None:
-    """One word, two learner languages: the setting decides which one asks."""
-    word_id = _ids(database)["barn"]
-    content = ContentRepository(database)
-    for language, meaning in (("de", "Scheune"), ("es", "granero")):
-        content.save_localization(
-            WordLocalization(word_id=word_id, learner_language=language, core_meaning=meaning)
-        )
-
-    def first_prompt() -> str:
-        flow = ReviewFlow(engine)
-        flow.start()
-        _to(flow, "barn")
-        text = flow.current.prompt.text
-        flow.finish()
-        return text
-
-    engine.save_settings({Setting.LEARNER_LANGUAGE: "es"})
-    assert first_prompt() == "granero"
-    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
-    assert first_prompt() == "Scheune"
-    engine.save_settings({Setting.LEARNER_LANGUAGE: ""})
-    assert first_prompt() == WORDS["barn"], "no language chosen: the definition"
-    assert database.connection.execute(
-        "SELECT COUNT(*) FROM words WHERE normalized_word = 'barn'"
-    ).fetchone()[0] == 1
-
-
-
-def test_no_kind_of_question_comes_three_times_in_a_row(
-    engine: LearningService, database: Database, monkeypatch
-) -> None:
-    """Three words that could each be asked by a sentence to complete: the
-    third is asked another way — a situation — never a harder question."""
-    from lexitrack.models.attempt import Level
-    from lexitrack.models.content import ContextKind
-    from lexitrack.models.skill import SkillStage, WordSkill
-    from lexitrack.services.skill_tracker import SkillTracker
-
-    ids = _ids(database)
-    repo = ContentRepository(database)
-    for word in ("arid", "attic", "avenue"):
-        repo.add_contexts([
-            WordContext(word_id=ids[word], text=f"It was {{{{{word}}}}} there."),
-            WordContext(word_id=ids[word], text=f"Somewhere you would call {{{{{word}}}}}.",
-                        kind=ContextKind.SITUATION),
-        ])
-    # Each of them can already do level 3.
-    monkeypatch.setattr(
-        SkillTracker, "skill",
-        lambda self, word_id: WordSkill(word_id, SkillStage.RECALLED,
-                                        level=Level.CONTEXT_TO_WORD),
-    )
     flow = ReviewFlow(engine)
-    assert flow.start(include_new=False)
-    firsts = {step.word.word: step for step in flow._steps if step.role is Role.PRIMARY}
-    ordered = [firsts[w] for w in ("arid", "attic", "avenue")]
-    tasks = [step.prompt.task for step in ordered]
-    # The queue orders the words; check wherever the three stand together.
-    in_session = [s.prompt.task for s in flow._steps
-                  if s.role is Role.PRIMARY and s.prompt is not None]
-    for first, second, third in zip(in_session, in_session[1:], in_session[2:], strict=False):
-        assert not (first is second is third), in_session
-    assert Task.SITUATION_TO_WORD in tasks
-    assert all(step.prompt.task.level <= Level.CONTEXT_TO_WORD for step in ordered)
+    flow.start()
+    step = flow.current
+    feedback = wrong(flow)
+    text = feedback_text(step, feedback)
+    assert text.title == "Incorrect"
+    assert text.lines == (
+        ("Correct answer", step.word.word),
+        ("Definition", step.word.definition),
+    )
+    assert feedback.answer == step.question.answer
+    assert feedback.picked != feedback.answer
 
 
-# -- a session restored whole (flow state version 2) --------------------------------
+def test_a_wrong_context_answer_names_the_word_and_its_definition(
+    engine: LearningService, database: Database
+) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "sleep in")
+    right(flow)
+    flow.finish()
+    engine.clock.advance_to_day_start(30)
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "sleep in")
+    step = flow.current
+    assert step.question.task is Task.CONTEXT_TO_DEFINITION
+    feedback = wrong(flow)
+    text = feedback_text(step, feedback)
+    assert text.lines == (
+        ("Word", "sleep in"),
+        ("Correct definition", "to sleep later than usual"),
+    )
 
 
-def _restored(engine: LearningService, flow: ReviewFlow) -> ReviewFlow:
+def test_a_missed_word_comes_back_as_practice_the_other_way_round(
+    engine: LearningService, database: Database
+) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    _to(flow, "sleep in")
+    word_id = flow.current.word.id
+    wrong(flow)
+    later = [s for s in flow._steps if s.word.id == word_id]
+    assert len(later) == 1
+    (again,) = later
+    assert again.phase is Phase.RELEARN and again.role is Role.RETRIEVAL
+    assert again.task is Task.CONTEXT_TO_DEFINITION
+    # A few cards later, not at once.
+    assert flow._steps.index(again) == 3
+    _to(flow, "sleep in")
+    step = flow.current
+    assert not step.rated and step.question.task is Task.CONTEXT_TO_DEFINITION
+    feedback = right(flow)
+    assert feedback.practice and feedback.outcome is None
+    # Still one rating today: the practice changed nothing.
+    assert len(_logs(database, word_id)) == 1
+    attempts = AttemptRepository(database).for_word(word_id)
+    assert [a.role for a in attempts] == [Role.PRIMARY, Role.RETRIEVAL]
+    assert attempts[1].review_log_id == attempts[0].review_log_id
+
+
+def test_a_word_is_asked_again_at_most_twice(engine: LearningService, database: Database) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    word_id = flow.current.word.id
+    wrong(flow)
+    asked = 1
+    while flow.current is not None:
+        if flow.current.word.id == word_id:
+            wrong(flow)
+            asked += 1
+        else:
+            right(flow)
+    assert asked == 3
+
+
+def test_one_word_one_task_a_day(engine: LearningService, database: Database) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    wrong(flow)
+    _asked(flow)
+    for word in WORDS:
+        word_id = _id(database, word)
+        assert len(_logs(database, word_id)) == 1
+        primaries = [a for a in AttemptRepository(database).for_word(word_id)
+                     if a.role is Role.PRIMARY]
+        assert len(primaries) == 1
+    # A second session the same day asks nothing more.
+    assert not ReviewFlow(engine).start()
+
+
+# -- new words -------------------------------------------------------------------------
+
+
+def test_new_words_are_shown_then_asked_both_ways_and_learned(
+    database: Database, clock: FrozenClock
+) -> None:
+    engine = _setup(database, clock, introduce=False)
+    flow = ReviewFlow(engine)
+    assert flow.start()
+    steps = _asked(flow)
+    first_group = [s.word.word for s in steps[:4]]
+    assert all(s.kind is StepKind.TEACH for s in steps[:4])
+    assert first_group == list(WORDS)[:4]
+    # Shown whole: the word's contexts on its page.
+    assert steps[0].contexts and steps[0].contexts[0].text in CONTEXTS["sleep in"]
+    tasks = {(s.word.word, s.task) for s in steps if s.kind is StepKind.QUESTION}
+    assert ("sleep in", Task.CONTEXT_TO_DEFINITION) in tasks
+    assert ("barn", Task.CONTEXT_TO_DEFINITION) not in tasks
+    assert all(not s.rated for s in steps)
+    assert flow.learned == len(WORDS)
+    # Practice only: nothing is rated before the first review, tomorrow.
+    assert database.connection.execute("SELECT COUNT(*) FROM review_logs").fetchone()[0] == 0
+    assert len(CardRepository(database).all_cards()) == len(WORDS)
+
+
+def test_a_word_without_a_definition_is_never_asked(
+    database: Database, clock: FrozenClock
+) -> None:
+    engine = _setup(database, clock, introduce=False)
+    bare = WordRepository(database).add_entries(
+        [entry("gizmo")],
+        SourceRepository(database).upsert(Source(key="t2", name="T2", parser_type="generic")).id,
+    ).word_ids[0]
+    lists = ListRepository(database)
+    lists.add_words(lists.all()[0].id, [bare])
+    StateRepository(database).set_status_many([bare], ReviewStatus.UNKNOWN)
+    plan = engine.daily_plan()
+    assert bare not in {w.id for w in plan.new_words}
+    assert plan.without_definition == 1
+    flow = ReviewFlow(engine)
+    flow.start()
+    assert all(step.word.id != bare for step in _asked(flow))
+
+
+# -- undo and restoring ----------------------------------------------------------------
+
+
+def test_undo_takes_the_answer_back_and_asks_it_again(
+    engine: LearningService, database: Database
+) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    step = flow.current
+    wrong(flow)
+    assert flow.can_undo()
+    assert flow.undo().id == step.word.id
+    assert flow.current.word.id == step.word.id and flow.current.rated
+    assert _logs(database, step.word.id) == []
+    # The ask-again step that followed the miss is gone with it.
+    assert sum(1 for s in flow._steps if s.word.id == step.word.id) == 1
+    right(flow, Rating.EASY)
+    (log,) = _logs(database, step.word.id)
+    assert log.rating is Rating.EASY and log.correct is True
+
+
+def test_a_session_is_restored_as_it_stood(engine: LearningService, database: Database) -> None:
+    flow = ReviewFlow(engine)
+    flow.start()
+    right(flow)
+    wrong(flow)
+    step = flow.current
+    flow.choose(step.question.answer)
+    assert flow.awaiting
+
     again = ReviewFlow.restore(engine, flow.session_id)
     assert again is not None
-    return again
+    assert again.current.word.id == step.word.id
+    assert again.current.question == step.question
+    assert again.awaiting and again.pending_feedback().correct
+    assert again.position == flow.position and again.total == flow.total
+    assert again.step_number > flow.step_number
+    again.rate(Rating.GOOD)
+    (log,) = _logs(database, step.word.id)
+    assert log.correct is True
+    # The rest of the session, asked-again steps included, is still there.
+    assert [s.word.id for s in again._steps] == [s.word.id for s in flow._steps[1:]]
 
 
-def test_a_word_interrupted_between_its_probes_goes_on_from_there(
+def test_a_session_saved_by_an_earlier_version_is_not_restored(
     engine: LearningService, database: Database
 ) -> None:
-    """Not back to its first question: the learner has seen the choices."""
     flow = ReviewFlow(engine)
     flow.start()
-    word = flow.current.word
-    flow.submit("no idea", response_ms=5000)
-    probe = flow.current
-    assert probe.kind is StepKind.CHOOSE
-
-    again = _restored(engine, flow)
-    assert again.current.kind is StepKind.CHOOSE and again.current.word.id == word.id
-    assert [o.id for o in again.current.options] == [o.id for o in probe.options]
-    assert again.step_number > flow.step_number, "a card from before is not this one"
-    right = next(i for i, o in enumerate(again.current.options) if o.id == word.id)
-    feedback = again.choose(right)
-    assert feedback.resolution.memory is MemoryResult.RECOGNIZED
-    attempts = AttemptRepository(database).for_word(word.id)
-    assert [(a.role, a.success) for a in attempts] == [
-        (Role.PRIMARY, False), (Role.PROBE, True)
-    ], "the missed first question was kept through the restart"
+    engine.save_flow_state(flow.session_id, '{"version": 2, "route": "v2", "steps": []}')
+    assert ReviewFlow.restore(engine, flow.session_id) is None
 
 
-def test_a_right_answer_waiting_for_its_report_survives_a_restart(
-    engine: LearningService,
-) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    first = flow.current
-    assert flow.submit(first.word.word, response_ms=7000).awaiting
-    again = _restored(engine, flow)
-    assert again.awaiting and again.pending_feedback().answer == first.prompt.answer
-    assert again.assess(SelfReport.INSTANT).outcome.rating is Rating.EASY
-
-
-def test_repair_owed_and_the_order_to_come_are_restored(engine: LearningService) -> None:
-    flow = ReviewFlow(engine)
-    flow.start()
-    word = flow.current.word
-    flow.submit("", response_ms=4000)
-    right = next(i for i, o in enumerate(flow.current.options) if o.id == word.id)
-    flow.choose(right)
-    assert flow.current.kind is StepKind.TEACH
-    before = [(s.word.id, s.kind, s.phase, s.role) for s in flow._steps]
-    again = _restored(engine, flow)
-    assert [(s.word.id, s.kind, s.phase, s.role) for s in again._steps] == before
-    assert again._runs[word.id].rated and again._runs[word.id].cycles == 1
-    assert again.answered == flow.answered and again.can_undo() == flow.can_undo()
-
-
-def test_a_state_saved_by_version_one_still_restores(engine: LearningService) -> None:
-    import json
-
-    flow = ReviewFlow(engine)
-    flow.start()
-    old = {key: value for key, value in flow.state().items()
-           if key in ("route", "kind", "order", "pending", "new_pending", "answered",
-                      "learned", "last_answer")}
-    old["version"] = 1
-    engine.save_flow_state(flow.session_id, json.dumps(old))
-    again = _restored(engine, flow)
-    assert again.current.role is Role.PRIMARY and again.total == flow.total
-
-
-# -- repair is short and about the skill; relearning is whole -------------------------
-
-
-def _teach_word(database: Database) -> int:
-    from lexitrack.models.content import WordContent
-
-    word_id = _ids(database)["reluctant"]
-    repo = ContentRepository(database)
-    repo.save_content(WordContent(word_id=word_id, pattern="reluctant to do sth",
-                                  collocations=("a reluctant hero",)))
-    repo.save_localization(WordLocalization(word_id=word_id, learner_language="de",
-                                            core_meaning="widerwillig", nuance="nuance-de",
-                                            encoding_cue="cue-de"))
-    repo.add_contexts([
-        WordContext(word_id=word_id, text="She was {{reluctant}} to leave."),
-        WordContext(word_id=word_id, text="A {{reluctant}} yes, after a long sigh."),
-    ])
-    return word_id
-
-
-def test_a_forgotten_word_is_relearned_in_full(
+def test_a_word_deleted_during_a_session_is_left_out_on_restore(
     engine: LearningService, database: Database
 ) -> None:
-    from lexitrack.services.review_wording import teaching_page
-
-    word_id = _teach_word(database)
-    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
     flow = ReviewFlow(engine)
     flow.start()
-    _to(flow, "reluctant")
-    flow.submit("", response_ms=4000)
-    flow.choose(next(i for i, o in enumerate(flow.current.options) if o.id != word_id))
-    teach = flow.current
-    assert teach.phase is Phase.RELEARN and teach.focus is None
-    titles = [title for title, _ in teaching_page(teach).sections]
-    assert "Nuance" in titles and "To remember" in titles
-
-
-def test_a_repair_page_is_short_and_keeps_back_the_context_asked_next(
-    engine: LearningService, database: Database
-) -> None:
-    from lexitrack.models.attempt import Level
-    from lexitrack.services.review_wording import teaching_page
-
-    word_id = _teach_word(database)
-    engine.save_settings({Setting.LEARNER_LANGUAGE: "de"})
-    # Recalled once, so today's first question is a context.
-    AttemptRepository(database).add(LearningAttempt(
-        word_id=word_id, at=datetime(2026, 9, 17, 5, tzinfo=UTC), on_day="2026-09-17",
-        phase=Phase.REVIEW, role=Role.PRIMARY, task=Task.MEANING_TO_WORD, success=True,
-    ))
-    flow = ReviewFlow(engine)
-    flow.start()
-    _to(flow, "reluctant")
-    assert flow.current.prompt.task is Task.CONTEXT_CLOZE
-    flow.submit("unwilling", response_ms=5000)  # the context missed
-    say(flow, "reluctant")                     # the meaning held: repair
-    teach = flow.current
-    assert teach.phase is Phase.REPAIR and teach.focus is Level.CONTEXT_TO_WORD
-    page = teaching_page(teach)
-    titles = [title for title, _ in page.sections]
-    assert titles == ["Meaning", "Definition", "Pattern"], "short: no nuance, no mnemonic"
-    reask = next(s for s in flow._steps if s.word.id == word_id and s.role is Role.RETRIEVAL)
-    assert teach.hold_back == (reask.prompt.context_id,)
-    shown = [sentence for sentence, _ in page.examples]
-    assert len(shown) == 1 and "{{" not in reask.prompt.text
-    held = next(c for c in teach.teaching.contexts if c.id == reask.prompt.context_id)
-    assert held.plain not in shown, "the page never gives away the question after it"
+    later = flow._steps[2].word.id
+    WordRepository(database).delete([later])
+    again = ReviewFlow.restore(engine, flow.session_id)
+    assert again is not None
+    assert all(step.word.id != later for step in again._steps)
+    assert again.total == flow.total - 1

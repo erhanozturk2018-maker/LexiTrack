@@ -498,8 +498,20 @@ QScrollArea#PanelScroll, QScrollArea#PanelScroll > QWidget > QWidget {{
     font-weight: 600;
     color: {p.text};
 }}
-#PanelExample {{ color: {p.text_muted}; font-style: italic; }}
-#PanelNote {{ color: {p.text_muted}; }}
+#ContextNumber {{ color: {p.text_faint}; font-size: 12px; padding-top: 1px; }}
+#ContextText {{ color: {p.text}; font-size: 13px; }}
+#PanelMessage {{ color: {p.text_muted}; font-size: 12px; }}
+#PanelMessage[tone="bad"] {{ color: {p.unknown_text}; }}
+QPlainTextEdit#DefinitionField {{ font-size: 13px; }}
+QPushButton#DangerLink {{
+    font-size: 12px;
+    color: {p.danger};
+    background: transparent;
+    border: none;
+    padding: 2px 0;
+    text-align: left;
+}}
+QPushButton#DangerLink:hover, QPushButton#DangerLink:focus {{ text-decoration: underline; }}
 #NoteLabel {{ color: {p.text_faint}; font-size: 13px; }}
 
 QPushButton[variant="danger"] {{

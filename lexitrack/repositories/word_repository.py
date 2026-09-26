@@ -7,8 +7,9 @@ import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from ..core.errors import StorageError
+from ..core.errors import StorageError, WordError
 from ..database.connection import Database
+from ..models.context import clean_context, word_length
 from ..models.language import UNDETERMINED
 from ..models.user_word_state import ReviewStatus
 from ..models.word_entry import WordEntry
@@ -18,7 +19,9 @@ from ..models.word_entry import WordEntry
 class StoredWord:
     """A vocabulary identity as it exists in the database.
 
-    Metadata is flattened from every source the word appears in: the first
+    A word is its text, its length, its CEFR level, its part of speech and
+    one definition; its contexts are read separately (ContextRepository).
+    Details are flattened from every source the word appears in: the first
     source that supplied a given field wins, so a word found in a plain text
     PDF after being imported from Oxford keeps its CEFR level.
 
@@ -33,15 +36,17 @@ class StoredWord:
     status: ReviewStatus = ReviewStatus.NOT_REVIEWED
     part_of_speech: str | None = None
     cefr_level: str | None = None
+    #: Every sense the word is learned in, in one text.
     definition: str | None = None
-    example: str | None = None
-    #: A short note: a sense (``money`` for *bank*), a UK/US variant, an
-    #: opposite. From a JSON ``note`` or an Oxford-format sense in brackets.
-    note: str | None = None
     sources: tuple[str, ...] = ()
     language: str = UNDETERMINED
     lists: tuple[str, ...] = ()
     reviewed_at: str | None = None
+
+    @property
+    def length(self) -> int:
+        """How many letters the word has (spaces and hyphens not counted)."""
+        return word_length(self.word)
 
     @property
     def source_label(self) -> str:
@@ -71,6 +76,8 @@ class ImportResult:
     #: How many of the words were not yet in those lists.
     added_to_lists: int = 0
     language: str = UNDETERMINED
+    #: Contexts the file gave that the words did not have yet.
+    contexts_added: int = 0
 
     @property
     def total_words(self) -> int:
@@ -118,6 +125,7 @@ class WordRepository:
         new_words = 0
         existing_words = 0
         new_links = 0
+        contexts_added = 0
         word_ids: list[int] = []
         fallback = language or UNDETERMINED
 
@@ -157,6 +165,8 @@ class WordRepository:
                     )
                     if already_linked is None:
                         new_links += 1
+                    if entry.contexts:
+                        contexts_added += _add_contexts(conn, word_id, entry.contexts)
         except sqlite3.Error as exc:
             raise StorageError("The imported words could not be saved.") from exc
 
@@ -167,6 +177,7 @@ class WordRepository:
             new_links=new_links,
             word_ids=tuple(word_ids),
             language=fallback,
+            contexts_added=contexts_added,
         )
 
     @staticmethod
@@ -276,8 +287,77 @@ class WordRepository:
         ).fetchall()
         return [_row_to_word(row) for row in rows]
 
+    def choice_candidates(self) -> list[Candidate]:
+        """Every word with a definition, in a light form, for choosing the
+        other three options of a question."""
+        rows = self._db.connection.execute(_SELECT_CANDIDATES).fetchall()
+        return [
+            Candidate(
+                id=int(row["id"]),
+                word=row["display_word"],
+                normalized=row["normalized_word"],
+                language=row["language"],
+                part_of_speech=row["part_of_speech"],
+                cefr_level=row["cefr_level"],
+                definition=row["definition"],
+            )
+            for row in rows
+            if row["definition"]
+        ]
+
+    # -- the definition --------------------------------------------------------
+
+    def set_definition(self, word_id: int, definition: str) -> None:
+        """Replace the word's definition.
+
+        The definition shown is the first one its sources give; that one is
+        replaced, so the new text is the one shown. A word none of whose
+        sources gives one gets it on its first source.
+        """
+        text = clean_context(definition)
+        if not text:
+            raise WordError("A definition cannot be empty.")
+        try:
+            with self._db.transaction() as conn:
+                row = conn.execute(
+                    "SELECT source_id FROM word_sources WHERE word_id = ? "
+                    "AND trim(COALESCE(definition, '')) <> '' ORDER BY source_id LIMIT 1",
+                    (int(word_id),),
+                ).fetchone() or conn.execute(
+                    "SELECT source_id FROM word_sources WHERE word_id = ? "
+                    "ORDER BY source_id LIMIT 1",
+                    (int(word_id),),
+                ).fetchone()
+                if row is None:
+                    raise WordError("That word no longer exists.")
+                conn.execute(
+                    "UPDATE word_sources SET definition = ? WHERE word_id = ? AND source_id = ?",
+                    (text, int(word_id), int(row["source_id"])),
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("The definition could not be saved.") from exc
+
+    def delete(self, word_ids: Sequence[int]) -> int:
+        """Delete words outright, from every list, with everything about them:
+        their sources' details, status, card, answers and contexts (all by
+        ON DELETE CASCADE). Returns how many were deleted."""
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        deleted = 0
+        try:
+            with self._db.transaction() as conn:
+                for chunk in _chunks(ids):
+                    placeholders = ",".join("?" * len(chunk))
+                    deleted += conn.execute(
+                        f"DELETE FROM words WHERE id IN ({placeholders})", chunk
+                    ).rowcount
+        except sqlite3.Error as exc:
+            raise StorageError("The words could not be deleted.") from exc
+        return deleted
+
     def all_ids(self) -> list[int]:
-        return [int(row[0]) for row in self._db.connection.execute("SELECT id FROM words")]
+        return [
+            int(row[0]) for row in self._db.connection.execute("SELECT id FROM words ORDER BY id")
+        ]
 
     def count(self) -> int:
         row = self._db.connection.execute("SELECT COUNT(*) AS n FROM words").fetchone()
@@ -349,17 +429,8 @@ SELECT
       WHERE ws.word_id = w.id AND ws.cefr_level IS NOT NULL
       ORDER BY ws.source_id LIMIT 1) AS cefr_level,
     (SELECT ws.definition FROM word_sources ws
-      WHERE ws.word_id = w.id AND ws.definition IS NOT NULL
+      WHERE ws.word_id = w.id AND trim(COALESCE(ws.definition, '')) <> ''
       ORDER BY ws.source_id LIMIT 1) AS definition,
-    (SELECT ws.example FROM word_sources ws
-      WHERE ws.word_id = w.id AND ws.example IS NOT NULL
-      ORDER BY ws.source_id LIMIT 1) AS example,
-    (SELECT COALESCE(json_extract(ws.metadata, '$.note'), json_extract(ws.metadata, '$.sense'))
-       FROM word_sources ws
-      WHERE ws.word_id = w.id AND ws.metadata IS NOT NULL
-        AND COALESCE(json_extract(ws.metadata, '$.note'),
-                     json_extract(ws.metadata, '$.sense')) IS NOT NULL
-      ORDER BY ws.source_id LIMIT 1) AS note,
     (SELECT GROUP_CONCAT(s.name, '|') FROM word_sources ws
       JOIN sources s ON s.id = ws.source_id
       WHERE ws.word_id = w.id) AS source_names,
@@ -382,13 +453,58 @@ def _row_to_word(row: sqlite3.Row) -> StoredWord:
         part_of_speech=row["part_of_speech"],
         cefr_level=row["cefr_level"],
         definition=row["definition"],
-        example=row["example"],
-        note=row["note"],
         sources=tuple(dict.fromkeys(sources.split("|"))) if sources else (),
         language=row["language"],
         lists=tuple(sorted(dict.fromkeys(lists.split("|")), key=str.casefold)) if lists else (),
         reviewed_at=row["reviewed_at"],
     )
+
+
+def _add_contexts(conn: sqlite3.Connection, word_id: int, texts: Sequence[str]) -> int:
+    """Add the sentences a word does not have yet (case and spacing ignored)."""
+    have = {
+        " ".join(row[0].casefold().split())
+        for row in conn.execute("SELECT text FROM word_contexts WHERE word_id = ?", (word_id,))
+    }
+    added = 0
+    for text in texts:
+        clean = clean_context(text)
+        key = " ".join(clean.casefold().split())
+        if not clean or key in have:
+            continue
+        conn.execute("INSERT INTO word_contexts (word_id, text) VALUES (?, ?)", (word_id, clean))
+        have.add(key)
+        added += 1
+    return added
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    """A word as a question's option needs it, and no more."""
+
+    id: int
+    word: str
+    normalized: str
+    language: str
+    part_of_speech: str | None
+    cefr_level: str | None
+    definition: str
+
+
+_SELECT_CANDIDATES = """
+SELECT w.id, w.display_word, w.normalized_word, w.language,
+       (SELECT ws.part_of_speech FROM word_sources ws
+         WHERE ws.word_id = w.id AND ws.part_of_speech IS NOT NULL
+         ORDER BY ws.source_id LIMIT 1) AS part_of_speech,
+       (SELECT ws.cefr_level FROM word_sources ws
+         WHERE ws.word_id = w.id AND ws.cefr_level IS NOT NULL
+         ORDER BY ws.source_id LIMIT 1) AS cefr_level,
+       (SELECT ws.definition FROM word_sources ws
+         WHERE ws.word_id = w.id AND trim(COALESCE(ws.definition, '')) <> ''
+         ORDER BY ws.source_id LIMIT 1) AS definition
+FROM words w
+ORDER BY w.id
+"""
 
 
 def _chunks(values: Sequence, size: int = 500):

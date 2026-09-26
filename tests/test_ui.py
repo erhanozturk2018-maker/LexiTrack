@@ -558,15 +558,26 @@ def test_add_word_dialog_adds_and_stays_open(qapp, service) -> None:
     target = service.create_list("German", "de")
     dialog = AddWordDialog(service, target)
     dialog.word_field.setText("Haus")
-    dialog.definition_field.setText("house")
+    assert dialog.length_label.text() == "4 letters"
+    dialog._add()
+    assert "definition" in dialog.message.text()
+    assert service.list_words(target.id) == []
+
+    dialog.definition_field.setPlainText("house")
+    dialog.contexts_field.setPlainText("Das Haus ist groß.\n\nWir kaufen ein Haus.")
     dialog._add()
 
     assert "Added" in dialog.message.text()
     assert dialog.word_field.text() == ""
+    assert dialog.contexts_field.toPlainText() == ""
     (stored,) = service.list_words(target.id)
     assert (stored.word, stored.definition, stored.language) == ("Haus", "house", "de")
+    assert [c.text for c in service.contexts(stored.id)] == [
+        "Das Haus ist groß.", "Wir kaufen ein Haus.",
+    ]
 
     dialog.word_field.setText("123")
+    dialog.definition_field.setPlainText("a number")
     dialog._add()
     assert "cannot be added" in dialog.message.text()
 
@@ -710,7 +721,9 @@ def test_export_dialog_writes_the_chosen_scope_and_format(
     dialog._export()
 
     assert dialog.written == target
-    assert json.loads(target.read_text(encoding="utf-8"))["words"] == [words[0].word]
+    assert [w["word"] for w in json.loads(target.read_text(encoding="utf-8"))["words"]] == [
+        words[0].word
+    ]
 
 
 def test_export_dialog_refuses_an_empty_scope(qapp, loaded) -> None:
@@ -1289,21 +1302,54 @@ def test_the_unknown_tile_opens_unknown_words(qtbot, window) -> None:
     assert window.current_page == UNKNOWN
 
 
-def test_notes_show_in_the_panel_and_on_the_card(qtbot, table) -> None:
-    table.model.set_words([word(id=9, word="crisps", normalized_word="crisps",
-                                note="UK; chips in US")])
-    table.select_ids([9])
-    assert not table.panel.note.isHidden()
-    assert table.panel.note.text() == "UK; chips in US"
-    table.search.setText("chips in us")
-    assert visible_words(table) == ["crisps"]
+def test_the_panel_shows_a_word_and_edits_its_contexts(qtbot, service) -> None:
+    from lexitrack.ui.components.word_panel import WordPanel
 
-    card = ReviewWidget()
-    qtbot.addWidget(card)
-    card.show_item(item(note="UK; chips in US"), can_go_back=False)
-    assert card._note_label.text() == "UK; chips in US"
-    card.show_item(item(), can_go_back=False)
-    assert card._note_label.isHidden()
+    lst = service.create_list("English", "en")
+    stored, _ = service.add_word(
+        lst.id, "sleep in", part_of_speech="verb", cefr_level="B1",
+        definition="to sleep later than usual",
+        contexts=["I usually sleep in on Sundays."],
+    )
+    panel = WordPanel()
+    qtbot.addWidget(panel)
+    panel.set_editor(service)
+    panel.show_word(stored)
+
+    assert panel.title.text() == "sleep in"
+    assert panel.meta.text() == "7 letters  ·  B1  ·  verb"
+    assert panel.definition.text() == "to sleep later than usual"
+    assert panel.context_texts() == ["I usually sleep in on Sundays."]
+
+    panel.context_field.setText("We can sleep in tomorrow.")
+    panel._add_context()
+    assert panel.context_texts() == [
+        "I usually sleep in on Sundays.", "We can sleep in tomorrow.",
+    ]
+    assert panel.context_field.text() == ""
+    # The same sentence again is refused, and said so.
+    panel.context_field.setText("we can sleep in tomorrow.")
+    panel._add_context()
+    assert "already" in panel.context_message.text()
+    assert len(service.contexts(stored.id)) == 2
+
+    first = service.contexts(stored.id)[0]
+    panel._delete_context(first.id)
+    assert panel.context_texts() == ["We can sleep in tomorrow."]
+
+    changed = []
+    panel.word_changed.connect(changed.append)
+    panel._edit_definition()
+    panel.definition_field.setPlainText("to stay in bed later than usual")
+    panel._save_definition()
+    assert panel.definition.text() == "to stay in bed later than usual"
+    assert changed and changed[0].definition == "to stay in bed later than usual"
+
+    deleted = []
+    panel.word_deleted.connect(deleted.append)
+    panel._delete_word()
+    assert deleted == [stored.id]
+    assert service.get_word(stored.id) is None
 
 
 def test_cefr_order_asks_the_pdf_for_level_headings(qapp, loaded) -> None:

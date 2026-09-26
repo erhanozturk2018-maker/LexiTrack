@@ -275,7 +275,10 @@ def test_export_writes_only_what_a_person_would(service: VocabularyService) -> N
         "name": "German A1",
         "language": "de",
         "description": "German A1 vocabulary",
-        "words": [{"word": "Haus", "part_of_speech": "noun", "definition": "house"}, "gehen"],
+        "words": [
+            {"word": "Haus", "length": 4, "part_of_speech": "noun", "definition": "house"},
+            {"word": "gehen", "length": 5},
+        ],
     }
 
 
@@ -291,8 +294,8 @@ def test_export_keeps_per_word_language_in_a_mixed_list(service: VocabularyServi
 
     assert "language" not in document
     assert document["words"] == [
-        {"word": "Haus", "language": "de"},
-        {"word": "gift", "language": "en"},
+        {"word": "Haus", "length": 4, "language": "de"},
+        {"word": "gift", "length": 4, "language": "en"},
     ]
 
 
@@ -302,7 +305,7 @@ def test_export_file_is_utf8_and_readable(service: VocabularyService, tmp_path: 
     path = service.export(service.export_content_for_list(lst.id), tmp_path / "out.json", "json")
 
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["words"] == ["Straße"]
+    assert data["words"] == [{"word": "Straße", "length": 6}]
     assert "Straße" in path.read_text(encoding="utf-8")  # not \u-escaped
 
 
@@ -315,10 +318,12 @@ def test_round_trip_through_a_fresh_database(
             "language": "de",
             "description": "Basics",
             "words": [
-                {"word": "Haus", "part_of_speech": "noun", "definition": "house",
-                 "example": "Das Haus ist groß.", "cefr_level": "A1"},
-                "gehen",
-                {"word": "kommen", "definition": "to come"},
+                {"word": "Haus", "length": 4, "part_of_speech": "noun", "cefr_level": "A1",
+                 "definition": "house",
+                 "contexts": ["Das Haus ist groß.", "Wir kaufen ein Haus."]},
+                {"word": "gehen", "length": 5},
+                {"word": "kommen", "length": 6, "definition": "to come",
+                 "contexts": ["Kommst du mit?"]},
             ],
         },
         name="german_a1.json",
@@ -336,14 +341,17 @@ def test_round_trip_through_a_fresh_database(
             "German A1", "de", "Basics",
         )
         before = [
-            (w.word, w.part_of_speech, w.cefr_level, w.definition, w.example, w.language)
+            (w.word, w.part_of_speech, w.cefr_level, w.definition, w.language,
+             [c.text for c in service.contexts(w.id)])
             for w in service.list_words(first_list.id)
         ]
         after = [
-            (w.word, w.part_of_speech, w.cefr_level, w.definition, w.example, w.language)
+            (w.word, w.part_of_speech, w.cefr_level, w.definition, w.language,
+             [c.text for c in second.contexts(w.id)])
             for w in second.list_words(restored.id)
         ]
         assert after == before
+        assert after[0][-1] == ["Das Haus ist groß.", "Wir kaufen ein Haus."]
 
     assert json.loads(exported.read_text(encoding="utf-8")) == json.loads(
         original.read_text(encoding="utf-8")
@@ -389,31 +397,30 @@ def test_every_scope_exports_to_json(service: VocabularyService, tmp_path: Path)
     }
 
 
-def test_notes_import_export_and_fill_in_a_word_that_had_none(
+def test_a_list_fills_in_a_definition_and_adds_contexts_to_a_word_it_had(
     service: VocabularyService, write_json, tmp_path: Path
 ) -> None:
     lst = service.create_list("English", "en")
     word, _ = service.add_word(lst.id, "crisps")
-    assert service.get_word(word.id).note is None
+    assert service.get_word(word.id).definition is None
 
-    notes = write_json(
+    update = write_json(
         {
             "name": "English",
             "language": "en",
             "words": [
                 {"word": "crisps", "definition": "thin fried potato slices",
-                 "note": "UK; chips in US"},
-                {"word": "chips", "notes": "US; crisps in UK"},
+                 "contexts": ["A packet of crisps, please.", "a packet of crisps, please."]},
             ],
         },
-        name="notes.json",
+        name="crisps.json",
     )
-    service.import_document(notes)
+    result = service.import_document(update)
 
     crisps = service.get_word(word.id)
-    assert (crisps.definition, crisps.note) == ("thin fried potato slices", "UK; chips in US")
-    document = build_json_document(service.list_words(lst.id), name="English", language="en")
-    assert document["words"] == [
-        {"word": "crisps", "definition": "thin fried potato slices", "note": "UK; chips in US"},
-        {"word": "chips", "note": "US; crisps in UK"},
-    ]
+    assert crisps.definition == "thin fried potato slices"
+    # The same sentence twice (case aside) is one context.
+    assert [c.text for c in service.contexts(word.id)] == ["A packet of crisps, please."]
+    assert result.contexts_added == 1
+    # Imported again, nothing new is added.
+    assert service.import_document(update).contexts_added == 0

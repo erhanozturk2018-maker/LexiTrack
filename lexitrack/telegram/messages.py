@@ -15,9 +15,8 @@ Callback data is kept short (Telegram allows 64 bytes) and self-describing:
 ``intro:<date>``        mark the day's new words as studied — only on that date
 ``start``               begin (or resume) the day's session
 ``st:<s>:<n>:<v>``      step ``n`` of session ``s``: ``v`` is an option (0–3),
-                        a report (``forgot``, ``effortful``, ``remembered``,
-                        ``instant``), ``go`` (continue) or ``dk`` (Forgot,
-                        before answering)
+                        a rating after a right answer (``again``, ``hard``,
+                        ``good``, ``easy``) or ``go`` (continue)
 ``known:<s>:<w>``       mark word ``w`` Known, as offered after its answer
 ``end:<s>``             stop the session and keep what was answered
 ``undo:<s>``            take back the last answer in session ``s``
@@ -27,10 +26,12 @@ The date on ``intro`` is what stops an old morning message from confirming
 the *next* day's words, which the user has never seen; the step number on
 ``st`` is what makes a tap on an older card do nothing.
 
-A session is the desktop's (services/review_flow.py), step by step: typed
-answers are sent as replies, a sentence is written as a reply and then
-graded, the rest are buttons. The wording of feedback and of a teaching page
-is shared with the desktop (services/review_wording.py).
+A session is the desktop's (services/review_flow.py), step by step, all
+buttons: a new word is shown, then continued; a question has four options —
+words as buttons, definitions listed A to D with a button each; a right
+answer to the day's question is followed by Again / Hard / Good / Easy. The
+wording after an answer is shared with the desktop
+(services/review_wording.py).
 """
 
 from __future__ import annotations
@@ -40,11 +41,12 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from html import escape
 
-from ..models.attempt import SUCCESS_REPORTS, SelfReport
+from ..models.attempt import Task
+from ..models.context import find_word
 from ..models.srs import Rating
 from ..services.learning_service import AnswerOutcome, DailyPlan
 from ..services.review_flow import Step, StepKind
-from ..services.review_wording import teaching_page, when_text, write_checklist
+from ..services.review_wording import FeedbackText, interval_text, when_text
 
 #: One row of buttons: ``(label, callback data)`` pairs.
 ButtonRow = tuple[tuple[str, str], ...]
@@ -189,8 +191,11 @@ def introduced(count: int, first_due_on: str | None) -> str:
     return f"✅ {count} new words marked as studied. First review: {escape(when)}."
 
 
-def _reports(session_id: str, number: int, reports) -> ButtonRow:
-    return tuple((report.label, step_data(session_id, number, report.value)) for report in reports)
+#: The ratings after a right answer, as buttons: the callback value is the
+#: rating's name.
+RATING_VALUES = {rating.name.lower(): rating for rating in Rating}
+#: The letters the options of Context → Definition are listed by.
+LETTERS = "ABCD"
 
 
 def step_card(
@@ -204,20 +209,18 @@ def step_card(
     note: str | None = None,
     can_undo: bool = False,
     known_word: tuple[int, str] | None = None,
-    more: bool = False,
 ) -> Message:
     """One step of the session, sent as a message of its own.
 
-    ``feedback`` says what the previous step did; ``known_word`` offers to
-    mark a word that just reached long-term memory as Known. A RECALL card's
-    meaning is a spoiler when the setting asks for it hidden: tapping it
-    reveals it in place. Every card is a new message, because an edited one
-    keeps a spoiler revealed.
+    ``feedback`` says what the previous step did (one line or several);
+    ``known_word`` offers to mark a word just answered right after a long
+    gap as Known.
     """
     lines: list[str] = []
-    for line in (note, feedback):
-        if line:
-            lines += [f"<i>{escape(line)}</i>", ""]
+    if note:
+        lines += [f"<i>{escape(note)}</i>", ""]
+    if feedback:
+        lines += [f"<i>{escape(line)}</i>" for line in feedback.splitlines()] + [""]
     header = escape(step.label.upper()) if step.label else ""
     if step.is_struggling:
         header += "  ·  ⚠ hard for you"
@@ -226,49 +229,29 @@ def step_card(
 
     rows: list[ButtonRow] = []
     act = lambda value: step_data(session_id, number, value)  # noqa: E731
-    prompt = step.prompt
+    question = step.question
     if step.kind is StepKind.TEACH:
         lines += ["", _headword(step)]
-        page = teaching_page(step)
-        for title, text in page.sections:
-            lines += ["", f"<b>{escape(title)}</b>", escape(text)]
-        if page.examples:
-            lines += ["", "<b>In use</b>"]
-            for sentence, translated in page.examples:
-                lines.append(f"“{escape(sentence)}”")
-                if translated:
-                    lines.append(f"<i>{escape(translated)}</i>")
-        if page.note:
-            lines += ["", f"<i>{escape(page.note)}</i>"]
-        elif page.empty:
-            lines += ["", "<i>No more is stored about this word yet.</i>"]
-        if step.reason:
-            lines += ["", f"<i>{escape(step.reason)}</i>"]
+        if step.word.definition:
+            lines += ["", "<b>Definition</b>", escape(step.word.definition)]
+        if step.contexts:
+            lines += ["", "<b>Contexts</b>"]
+            lines += [f"• {_marked(context.text, step.word.word)}" for context in step.contexts]
         rows.append((("Continue →", act("go")),))
-        if more:
-            rows.append((("More about this word", act("more")),))
-    elif step.kind is StepKind.TYPE and prompt is not None:
-        lines += ["", escape(prompt.text)]
-        if prompt.detail:
-            lines.append(f"<i>{escape(prompt.detail)}</i>")
-        lines += ["", "<i>Reply with the word.</i>"]
-        rows.append((("Forgot", act("dk")),))
-    elif step.kind is StepKind.CHOOSE and prompt is not None:
-        lines += ["", escape(prompt.text)]
-        if prompt.detail:
-            lines.append(f"<i>{escape(prompt.detail)}</i>")
-        options = [(option.word, act(str(index))) for index, option in enumerate(step.options)]
+    elif question is not None and question.task is Task.CONTEXT_TO_DEFINITION:
+        lines += ["", f"“{_marked(question.prompt, step.word.word)}”", "",
+                  "<i>Which definition fits the word in bold?</i>", ""]
+        lines += [
+            f"<b>{LETTERS[index]}</b>  {escape(option.text)}"
+            for index, option in enumerate(question.options)
+        ]
+        rows.append(tuple(
+            (LETTERS[index], act(str(index))) for index in range(len(question.options))
+        ))
+    elif question is not None:
+        lines += ["", escape(question.prompt), "", "<i>Which word is it?</i>"]
+        options = [(option.text, act(str(index))) for index, option in enumerate(question.options)]
         rows += [tuple(options[i : i + 2]) for i in range(0, len(options), 2)]
-    elif step.kind is StepKind.WRITE:
-        lines += ["", _headword(step)]
-        if prompt is not None:
-            lines += ["", escape(prompt.text)]
-        lines += ["", "<i>Reply with a sentence of your own.</i>"]
-    else:  # RECALL: a word with no meaning to ask from, and the four reports
-        lines += ["", _headword(step), "",
-                  "<i>No meaning is stored for this word yet. Do you know it?</i>"]
-        reports = _reports(session_id, number, tuple(SelfReport))
-        rows += [reports[:2], reports[2:]]
     lines += ["", f"{position} / {total}"]
     if known_word is not None:
         rows.append(((f"Mark “{known_word[1]}” Known", known_data(session_id, known_word[0])),))
@@ -281,56 +264,60 @@ def step_card(
     return Message(_fit("\n".join(lines)), tuple(rows))
 
 
-def assess_card(
-    step: Step, session_id: str, number: int, feedback: str, position: int, total: int
+def rate_card(
+    step: Step,
+    session_id: str,
+    number: int,
+    text: FeedbackText,
+    intervals: dict[Rating, int],
+    position: int,
+    total: int,
 ) -> Message:
-    """After a right typed answer: how it came, before anything is recorded."""
-    lines = [
-        f"<b>{escape(step.label.upper())}</b>",
-        "",
-        f"<i>{escape(feedback)}</i>",
-        "",
-        "How did it come?",
-        "",
-        f"{position} / {total}",
-    ]
+    """After a right answer to the day's question: the word and its
+    definition again, and how it went — Again, Hard, Good or Easy."""
+    lines = [f"<b>{escape(step.label.upper())}</b>", "", f"✓ <b>{escape(text.title)}</b>"]
+    lines += [f"{escape(label)}: <b>{escape(value)}</b>" if label == "Word"
+              else f"{escape(label)}: {escape(value)}" for label, value in text.lines]
+    lines += ["", "How did it go?", "", f"{position} / {total}"]
+    buttons = tuple(
+        (_rating_label(rating, intervals), step_data(session_id, number, name))
+        for name, rating in RATING_VALUES.items()
+    )
     return Message(
         "\n".join(lines),
-        (_reports(session_id, number, SUCCESS_REPORTS), (("Stop here", end_data(session_id)),)),
+        (buttons[:2], buttons[2:], (("Stop here", end_data(session_id)),)),
     )
 
 
-def write_check(step: Step, sentence: str, session_id: str, number: int) -> Message:
-    """A written sentence beside the stored examples, and the four reports."""
-    lines = [
-        f"<b>{escape(step.label.upper())}</b>",
-        "",
-        _headword(step),
-        "",
-        "<b>Yours</b>",
-        f"“{escape(sentence)}”",
-    ]
-    checklist = write_checklist(step)
-    if checklist:
-        lines += ["", "<b>Check it against</b>"] + [
-            f"☐ {escape(title)}: {escape(text)}" for title, text in checklist
-        ]
-    teaching = step.teaching
-    examples = [context.plain for context in teaching.contexts[:2]] if teaching else []
-    if examples:
-        lines += ["", "<b>Examples</b>"] + [f"“{escape(text)}”" for text in examples]
-    lines += ["", "<i>Did you use it the way the examples do? How did it come?</i>"]
-    reports = _reports(session_id, number, tuple(SelfReport))
-    return Message(
-        _fit("\n".join(lines)),
-        (reports[:2], reports[2:], (("Stop here", end_data(session_id)),)),
-    )
+def feedback_lines(text: FeedbackText) -> str:
+    """What an answer did, as plain lines for the top of the next card."""
+    mark = "✓" if text.tone == "good" else "✗"
+    lines = [f"{mark} {text.title}"] + [f"{label}: {value}" for label, value in text.lines]
+    if text.note:
+        lines.append(text.note)
+    return "\n".join(lines)
+
+
+def _rating_label(rating: Rating, intervals: dict[Rating, int]) -> str:
+    days = intervals.get(rating)
+    return rating.label if days is None else f"{rating.label} · {interval_text(days)}"
 
 
 def _headword(step: Step) -> str:
     word = step.word
-    meta = " · ".join(part for part in (word.part_of_speech, word.cefr_level) if part)
+    meta = " · ".join(
+        part for part in (f"{word.length} letters", word.part_of_speech, word.cefr_level) if part
+    )
     return f"<b>{escape(word.word)}</b>" + (f"  <i>{escape(meta)}</i>" if meta else "")
+
+
+def _marked(text: str, word: str) -> str:
+    """A context with the word in bold, where it can be found."""
+    span = find_word(text, word)
+    if span is None:
+        return escape(text)
+    start, end = span
+    return escape(text[:start]) + f"<b>{escape(text[start:end])}</b>" + escape(text[end:])
 
 
 def answer_line(outcome: AnswerOutcome) -> str:
@@ -339,7 +326,7 @@ def answer_line(outcome: AnswerOutcome) -> str:
     when = when_text(outcome.interval_days)
     text = f"{mark} {outcome.word.word}: {outcome.rating.label} — back {when}"
     if outcome.suggest_known:
-        text += " · in long-term memory"
+        text += " · right after a long gap"
     elif outcome.became_struggling:
         text += " · flagged as hard"
     return text
@@ -420,8 +407,7 @@ def welcome(bound: bool) -> str:
         return (
             "<b>LexiTrack is connected.</b>\n"
             "You will get today's words each morning. /today shows them now, "
-            "/review starts a session. Typed questions are answered by replying "
-            "with the word."
+            "/review starts a session. Every question is answered with its buttons."
         )
     return "LexiTrack is running. /today shows today's words, /review starts a session."
 

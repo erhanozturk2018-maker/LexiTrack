@@ -252,7 +252,7 @@ class Maintenance:
                    r.channel, r.state_before, r.state_after, r.elapsed_days,
                    r.scheduled_days, r.stability_after, r.difficulty_after,
                    r.due_after, r.session_id, r.undone_at, r.params_hash,
-                   r.memory_result, r.route_version
+                   r.memory_result, r.route_version, r.task, r.correct
             FROM review_logs r
             JOIN words w ON w.id = r.word_id
             WHERE r.reviewed_on >= ?
@@ -267,16 +267,17 @@ class Maintenance:
             writer = csv.writer(handle)
             writer.writerow(
                 [
-                    "date", "time_utc", "word", "rating", "answer", "channel",
-                    "state_before", "state_after", "elapsed_days", "interval_days",
-                    "stability", "difficulty", "next_due_utc", "session",
+                    "date", "time_utc", "word", "task", "correct", "rating", "answer",
+                    "channel", "state_before", "state_after", "elapsed_days",
+                    "interval_days", "stability", "difficulty", "next_due_utc", "session",
                     "undone_utc", "parameters", "memory_result", "route",
                 ]
             )
             for row in rows:
                 writer.writerow(
                     [
-                        row["reviewed_on"], row["reviewed_at"], row["word"], row["rating"],
+                        row["reviewed_on"], row["reviewed_at"], row["word"], row["task"] or "",
+                        _yes_no(row["correct"]), row["rating"],
                         labels.get(int(row["rating"]), ""), row["channel"],
                         row["state_before"] or "", row["state_after"] or "",
                         _num(row["elapsed_days"]), _num(row["scheduled_days"]),
@@ -289,15 +290,15 @@ class Maintenance:
         return len(rows)
 
     def export_attempts(self, path: Path | str, since: date | None = None) -> int:
-        """Write every learning attempt — the skill record — as a CSV row.
+        """Write every question answered — practice included — as a CSV row.
 
         With ``since``, only the attempts of that learning day and after.
         """
         rows = self._db.connection.execute(
             """
             SELECT a.on_day, a.at, w.display_word AS word, a.phase, a.role, a.task,
-                   a.level, a.success, a.effort, a.response_ms, a.novel_context,
-                   a.depth, a.route_version, a.review_log_id, a.session_id, a.undone_at
+                   a.correct, a.effort, a.response_ms, a.context_id, a.route_version,
+                   a.review_log_id, a.session_id, a.undone_at
             FROM learning_attempts a
             JOIN words w ON w.id = a.word_id
             WHERE a.on_day >= ?
@@ -310,20 +311,23 @@ class Maintenance:
         with target.open("w", newline="", encoding="utf-8-sig") as handle:
             writer = csv.writer(handle)
             writer.writerow([
-                "date", "time_utc", "word", "phase", "role", "task", "level", "success",
-                "effort", "response_ms", "new_context", "depth", "route", "answer_id",
+                "date", "time_utc", "word", "phase", "role", "task", "correct",
+                "effort", "response_ms", "context_id", "route", "answer_id",
                 "session", "undone_utc",
             ])
             for row in rows:
                 writer.writerow([
                     row["on_day"], row["at"], row["word"], row["phase"], row["role"],
-                    row["task"], row["level"], "yes" if row["success"] else "no",
-                    row["effort"] or "", row["response_ms"] or "",
-                    "yes" if row["novel_context"] else "no", row["depth"] or "",
+                    row["task"], _yes_no(row["correct"]),
+                    row["effort"] or "", row["response_ms"] or "", row["context_id"] or "",
                     row["route_version"], row["review_log_id"] or "",
                     row["session_id"] or "", row["undone_at"] or "",
                 ])
         return len(rows)
+
+
+def _yes_no(value: int | None) -> str:
+    return "" if value is None else ("yes" if value else "no")
 
 
 def _num(value: float | None) -> str:

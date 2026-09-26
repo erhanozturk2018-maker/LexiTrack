@@ -89,6 +89,9 @@ class PlanOutlook:
     learned_here: int = 0
     #: The new-word pool: words that will be offered, not yet introduced.
     to_introduce: int = 0
+    #: Words that would be in the pool but have no definition to ask from:
+    #: they wait until one is added.
+    without_definition: int = 0
 
     def days_at(self, per_day: int) -> int:
         return -(-self.to_introduce // max(per_day, 1))
@@ -178,9 +181,15 @@ class ReviewLogEntry:
     params_hash: str | None = None
     #: Set when the answer was taken back. The row stays, for the record.
     undone_at: datetime | None = None
-    #: What the review showed about the memory (MemoryResult value), or
-    #: None for an answer given before version 5 recorded it.
+    #: What an earlier version's review said about the memory (RECALLED,
+    #: RECOGNIZED, ...); None for answers before version 5 and from version 7.
     memory_result: str | None = None
-    #: Which learning route produced the answer: 'v1' before version 5.
+    #: Which learning route produced the answer: 'v1' before version 5,
+    #: 'v3' for Definition → Word and Context → Definition.
     route_version: str = "v1"
+    #: The question asked (a Task value), from version 7 on.
+    task: str | None = None
+    #: Whether the option chosen was right, from version 7 on. A correct
+    #: answer's rating is the effort the learner chose; a wrong one is Again.
+    correct: bool | None = None
     id: int | None = None

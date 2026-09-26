@@ -51,19 +51,27 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **Study plans teach what you don't know.** A plan takes the Unknown words of
   the lists you choose — or of **All my lists**, including lists added later.
   A word in two lists is learned once; words you know are never offered.
-- **New words every day.** 25 by default, lowest CEFR level first. You study
-  them however you like and confirm; LexiTrack never invents an answer for you.
-- **Spaced repetition with FSRS.** You say how each retrieval went — Forgot,
-  Effortful, Remembered or Instant — and that becomes the answer FSRS hears:
-  Again, Hard, Good or Easy. The word comes back when you are about to forget
-  it, and a word is never rated twice on the same day.
+- **A word is its definition and its contexts.** Word, length, CEFR level,
+  part of speech, one definition covering every sense it is learned in, and
+  sentences that show it in use — on the word's page, where contexts are
+  added or deleted and the definition changed.
+- **New words every day.** 25 by default, lowest CEFR level first. Each is
+  shown whole, then asked; LexiTrack never invents an answer for you.
+- **Two questions, four options.** **Definition → Word**, and — for a word
+  with contexts — **Context → Definition**, the word picked out in a sentence.
+  One question per word a day. Right: you say how it went — Again, Hard, Good
+  or Easy — and FSRS hears it. Wrong: the right word and its definition are
+  shown, it is rated Again and asked again later as practice. Right or wrong
+  and how it went are recorded apart.
+- **Spaced repetition with FSRS.** The word comes back when you are about to
+  forget it, and a word is never rated twice on the same day.
 - **A day with a shape.** The Today page shows today's two steps, the week
   ahead as day tiles, the words you keep missing, and the last 30 days.
 - **A workload brake.** When a day's reviews go over your limit (250 by
   default), new words pause until you catch up, and the page says why.
-- **Mastery.** Once a word is expected to stick for 21 days it is offered as
-  Known; you mark it, on the card or on Progress. Nothing becomes Known on
-  its own.
+- **Mastery.** A word answered right after 21 days or more without a review
+  is offered as Known; you mark it, on the card or on Progress. Nothing
+  becomes Known on its own.
 - **Missed days are harmless.** Nothing is owed for a day you skipped. Overdue
   reviews come first, and you still get today's new words.
 - **Undo.** `Ctrl+Z`, or the button under the card, takes back your last
@@ -74,8 +82,8 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 - **Progress tab.** Words learned here, in progress, marked Known by hand and
   known before your plan, kept apart; the words ready to be marked Known;
-  where the words stand in memory and in skill, on two bars; words
-  introduced and learned over time.
+  where the words stand in memory; how the answers go, right at the day's
+  question and by task; words introduced and learned over time.
 - **Every answer and every change of status**, with its cause, in two complete
   tables. Nothing the app records is out of your sight.
 - **A word's history.** When it was introduced and in which plan, every
@@ -92,9 +100,9 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **The day's words at 06:00**, each with a short meaning, and a button to
   start the day's session.
 - **The whole session on your phone**, the same as at the desk: reviews
-  first, then the new words taught and practised. Type the word as a reply,
-  choose among four with buttons, write a sentence and grade it. One card at
-  a time, each opening with how the last answer went.
+  first, then the new words shown and practised. Four options as buttons,
+  then Again / Hard / Good / Easy after a right answer. One card at a time,
+  each opening with how the last answer went.
 - **Picks up where you left off.** The session is saved after every step: if
   LexiTrack restarts, `/review` or any tap shows the step you were on.
 - **An evening reminder**, only if something is still waiting.
@@ -115,7 +123,8 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **List mode.** A searchable, sortable table with CEFR level filters, a
   details panel, and a floating bar for bulk Known / Unknown / Reset and
   Copy to / Move to another list with Undo.
-- **Definitions and notes** on the card, in the details panel and in exports.
+- **Definitions and contexts** on the card, in the details panel and in
+  exports; contexts imported from a JSON file, too.
 - **Unknown Words manager.** Every word you did not know, across all lists.
 - **Import PDF and JSON**, several files at once, with a preview first.
 - **Export with a preview**: PDF, CSV or JSON, alphabetically or by CEFR level.
@@ -248,7 +257,7 @@ you want the day's words on your phone. **Start learning** creates the plan.
 If nothing is Unknown yet, it says so: sort a list on **Sort words** first.
 
 **How LexiTrack Works** (`Shift+F1`, the **⋯** menu, or `Ctrl+K`) explains
-the pages, your day, the four answers and what is recorded.
+a word, the pages, your day, the four ratings and what is recorded.
 
 ### Finding your way
 
@@ -260,7 +269,7 @@ The sidebar on the left reaches every page:
 - Under **Library**: **Lists** (your lists), **Sort words** (going through a
   list to mark what you already know) and **Unknown** (every word you did not
   know, with their count).
-- At the foot: **Export and backup** (words, word content, your learning
+- At the foot: **Export and backup** (words, word contexts, your learning
   data, backups and restoring them), **Settings**, the light/dark switch and
   the **⋯** menu with everything else.
 
@@ -274,35 +283,31 @@ about 15 min", with how many are reviews, how many new, and how many you
 find hard — and has one button, **Start session**. The session does the
 reviews first, then the new words:
 
-1. **Review.** Words due today come one at a time, and you **type** them: from
-   their meaning (in your own language if you chose one in *Settings →
-   Learning* and the word has content in it, otherwise its definition, with
-   the word itself hidden), and once you can do that, from a
-   sentence or a phrase with a gap. **Enter** checks it; small slips are
-   accepted. **Ctrl+H** shows the first letter; **Enter** with nothing typed
-   means you don't know.
+1. **Review.** Words due today come one at a time, each with one question and
+   four options: **Definition → Word** (the definition, four words) or, for a
+   word with contexts, **Context → Definition** (a sentence with the word in
+   bold, four definitions). A word with contexts is asked the other way from
+   last time. Choose with **1**–**4** or **A**–**D**, or click.
 
-   Missed it? The answer stays hidden and you get an easier question — the
-   word from its meaning, then the word among four (keys **1**–**4**). Then the
-   card says what happened and when the word comes back, and **Enter** moves
-   on. A word you forgot, or could only pick out, is shown again in full and
-   asked once more a few cards later, in a different way. That practice
-   never changes its schedule.
-
-   A word with no meaning stored is reviewed as before: **Space** shows the
-   meaning, then **1** Again, **2** Hard, **3** Good or **4** Easy.
+   Right? The word and its definition are shown, and you say how it went:
+   **1** Again, **2** Hard, **3** Good, **4** Easy — each button says when
+   the word would come back. Wrong? The right word and its definition are
+   shown, the answer is rated Again, and **Enter** moves on; the word comes
+   back a few cards later, asked the other way when it has contexts. That
+   practice never changes its schedule.
 
    **Esc** stops and keeps everything answered so far. **Ctrl+Z**, or the
-   *Undo* under the card, takes back the last word — its answer and every
-   question about it — and asks it again. The full rules are in
-   [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md#review-route-v2).
-2. **Learn the new words.** Four at a time: each is shown — its meaning, and,
-   when content has been added, how it is used and an example — then the
-   four are asked, typed, from their meaning. Words with more to them are
-   asked a second time a little later, differently. Missed one? It is shown
-   again, in more detail, and asked again. None of this is scored: a word's
-   first real question is its first review, tomorrow. Leave early and the
-   words you finished are learned; the rest wait for next time.
+   *Undo* under the card, takes back the last word — its answer and the
+   practice after it — and asks it again. The full rules are in
+   [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md#the-two-questions).
+2. **Learn the new words.** Four at a time: each is shown whole — the word,
+   its length, level, part of speech, definition and contexts — then the
+   four are asked, Definition → Word. Words with contexts are asked a second
+   time a little later, Context → Definition. Missed one? It is asked again a
+   few cards later. None of this is rated: a word's first real question is
+   its first review, tomorrow. Leave early and the words you finished are
+   learned; the rest wait for next time. A word with no definition is not
+   offered until it has one.
 
    The new words are also listed below the card, grouped by CEFR level, to
    look over, copy with their meanings or export as a PDF. Studied them
@@ -317,14 +322,25 @@ history.
 
 ### How a word is learned
 
-The four answers do not move a word along a fixed track; they change one
-number, how long LexiTrack expects you to remember the word. Everything else
-follows from it. You say how each retrieval went — **Instant**, **Remembered**,
-**Effortful** or **Forgot** — after typing the word right, after writing a
-sentence, or for a word shown without a meaning, and that becomes the answer:
-**Easy**, **Good**, **Hard** or **Again**. A wrong answer is followed by an
-easier question; picking the word out among four only after missing it is
-**Hard**, and missing that too is **Again**. With the default settings:
+Every question has four options and one right answer: the word for its
+definition (**Definition → Word**), or — for a word with contexts — its
+definition for a sentence that uses it (**Context → Definition**). A word due
+for review is asked once a day, one of the two, and that answer is the day's
+answer for the word:
+
+- **Right:** the word and its definition are shown again, and you say how it
+  went — **Again**, **Hard**, **Good** or **Easy**. That is the rating.
+- **Wrong:** the right word and its definition are shown, the answer is
+  recorded as wrong and rated **Again**, and the word is asked again a few
+  cards later, the other way round when it has contexts. That second question
+  is practice: it never changes the schedule.
+
+Whether an answer was right and how it went are kept apart: a right answer
+you rate Again is recorded as right, rated Again.
+
+The rating does not move a word along a fixed track; it changes one number,
+how long LexiTrack expects you to remember the word. Everything else follows
+from it. With the default settings:
 
 | Day | You answer | Remembered for | Comes back |
 | --- | --- | --- | --- |
@@ -337,11 +353,9 @@ A word is in **long-term memory** when that number passes 21 days — three
 Goods, or two Easys, but never on the day you first study it. Answering Easy
 every time gets there on day 9; Hard alone never does, because it barely moves
 the number. That is a forecast, not yet a reason to call the word Known.
-LexiTrack offers to mark it Known when the record makes the case: you have
-**used it well in two different ways** — a collocation, a sentence of your own
-— and **recalled it after 21 days or more without a review**. It never marks a
-word Known itself, because Known is your judgement, and until you say yes the
-word keeps coming back.
+LexiTrack offers to mark it Known when you **answer it right after 21 days or
+more without a review**. It never marks a word Known itself, because Known is
+your judgement, and until you say yes the word keeps coming back.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not
@@ -352,48 +366,44 @@ go back into the new-word list and never uses up one of your 25:
 | 14 | Again | 11 days → **1.5 days** |
 | 15 | Good | 3.6 days |
 | 19 | Good | 9.7 days |
-| 29 | Good | 22.9 days → **Known** |
+| 29 | Good | 22.9 days → **long-term memory** |
 
 Note day 15: Good brings the word back to normal intervals immediately, but
-not to where it was. One slip on day 14 moved Known from day 14 to day 29.
-Miss the same word again later and it recovers more slowly each time, because
-LexiTrack has learned the word is hard for you — after the second slip it also
-joins *Words you find hard* and comes first in every session.
+not to where it was. One slip on day 14 moved long-term memory from day 14 to
+day 29. Miss the same word again later and it recovers more slowly each time,
+because LexiTrack has learned the word is hard for you — after the second slip
+it also joins *Words you find hard* and comes first in every session.
 
 These days come from the scheduler with the default settings. Change
-*Count as known after* or, in Developer mode, the target retention, and they
-move with it.
+*Long-term evidence after* or, in Developer mode, the target retention, and
+they move with it.
 
 ### Progress
 
 **Progress** (`Alt+P`) is everything since your first new word, in four
 tabs:
 
-- **Overview** — four numbers kept apart: **learned here** (reached
-  long-term memory and you marked it Known), **in progress**, **marked Known
+- **Overview** — four numbers kept apart: **learned here** (answered right
+  after a long gap and you marked it Known), **in progress**, **marked Known
   by hand** and **known before your plan**. Then the words **ready to mark
-  Known**: used well in two ways and recalled after 21+ days without a review,
-  offered, marked only when you say so — one by one or all at once. Then **memory and skill** on two bars: how long each
-  word is expected to be remembered, and what your answers on later days have
-  shown you can do with it (recognise it, recall it, use it). Beside them,
-  evidence that is neither: words retrieved instantly on several days, words
-  remembered after 30 days or more without a review, words recognised in a
-  sentence they had not been seen in. Then **how retrieval goes**, each rate
-  with the answers it counts: first-attempt recall, productive recall,
-  recall after a long gap, recall in a new sentence, answers relearned, and
-  words forgotten twice or more. Then **the last 30 days** and the words
-  introduced and learned **over time**.
+  Known**: answered right after 21+ days without a review, offered, marked
+  only when you say so — one by one or all at once. Then **memory**: how long
+  each word is expected to be remembered. Then **how the answers go**, each
+  rate with the answers it counts: right at the day's question, Definition →
+  Word right, Context → Definition right, right after a long gap, answers
+  rated Again, and words missed twice or more. Then **the last 30 days** and
+  the words introduced and learned **over time**.
 - **Words** — every studied word, filterable (learned here, in progress,
   marked Known, ready for Known, hard for you), with when it was introduced
-  and became Known, its answers and Agains, how long it is remembered for,
-  and its skill.
+  and became Known, its answers and Agains, and how long it is remembered
+  for.
 - **Answers** — every answer from Today and Telegram, newest first: what it
-  asked, your answer, what it showed about the memory. Filter to the Agains
-  or the answers taken back, find a word, or export them all as CSV.
+  asked, whether it was right, and its rating. Filter to the Agains or the
+  answers taken back, find a word, or export them all as CSV.
 - **Scheduler** — does the schedule fit you: for each band of predicted
   recall, how often you actually remembered, a one-line verdict, and which
-  parameters are in use; and the answers of each route (v1, v2) with their
-  share of Again.
+  parameters are in use; and the answers of each route (v1, v2, v3) with
+  their share of Again.
 
 Double-click any row, or select a word in any table and choose *Show history*
 in the details panel, for that word's whole history.
@@ -429,9 +439,10 @@ teach, and its row says so: sort it on Sort words first, or turn on
 
 The bot sends the day's words at 06:00 and a reminder at 21:00 if something is
 left (both hours are settings). `/today` shows today's words and `/review`
-starts the day's session — or resumes the one in progress. A question that
-asks for the word is answered by replying with it; a sentence is written as
-a reply, then graded with a button. *Mark the new words as studied* skips
+starts the day's session — or resumes the one in progress. Every question is
+answered with buttons: words as buttons, or definitions listed A to D with a
+button each; after a right answer, Again, Hard, Good or Easy — each with when
+the word would come back. *Mark the new words as studied* skips
 their practice, as *Mark as studied* does on the desktop. It works only while LexiTrack is running, so turn on *Start
 with Windows* to have it come back after a restart. If the computer was off at
 06:00, the message comes when it starts — once, never a pile of old ones.
@@ -445,8 +456,8 @@ revoke it in @BotFather with `/revoke` and paste the new one.
 ### Settings
 
 **Settings** (`Ctrl+,`) groups everything into pages: **Learning** (new words
-a day, the review limit, when a word is offered as known, the language words
-are explained in, the day boundary and the message hours), **Telegram**,
+a day, the review limit, when a word is offered as known, the day boundary
+and the message hours), **Telegram**,
 **Appearance**, **Data** (Start with Windows, backups, the review history as
 CSV, starting over), **Advanced** (the scheduler, the session order, the
 simulator) and **About**. Each setting has a one-line explanation beside it.
@@ -502,8 +513,11 @@ and says so; nothing changes unless you answer again or press R.
 Switch to **List** (`Ctrl+2`). Search, filter by status or CEFR level (click
 A1, B2… to combine levels), sort by any column, select rows
 (`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. The **details panel**
-on the right follows the current row: definition, note, example, lists and
-source. Looking at a word never marks it — only an action does.
+on the right follows the current row: the word, its length, CEFR level, part
+of speech, definition and contexts. Change the definition, add or delete a
+context, or delete the word from LexiTrack altogether (it can be added again
+later, starting afresh). Looking at a word never marks it — only an action
+does.
 
 ![List mode with a selection](docs/screenshots/list-mode.png)
 
@@ -536,15 +550,12 @@ you make: format, order (A → Z, CEFR level, or as in the list) and columns. A
 PDF in CEFR order starts each level with a heading. Press **Enter** to keep
 the defaults and choose where to save.
 
-**Columns** are ticked one by one: part of speech, CEFR level and the
-definition, and the teaching content — the meaning and the nuance in the
-language words are explained in, the pattern, collocations, examples and
-their translations. With teaching content, a PDF lists each word as an entry
-with its fields under small labels and the word in bold in its examples; the
-summary says how many of the words have content, so a sheet of dashes is no
-surprise. Nothing about scheduling is ever in a word export. A JSON word list
-always holds every dictionary field — it is the file that imports back — and
-teaching content leaves through **Word Content** instead.
+**Columns** are ticked one by one: part of speech, CEFR level, length,
+definition and contexts. With contexts, a PDF lists each word as an entry —
+its definition, then its contexts with the word in bold; the summary says how
+many of the words have contexts. Nothing about scheduling is ever in a word
+export. A JSON word list always holds every field — length and contexts
+included — and is the file that imports back.
 
 ![Export with a live preview](docs/screenshots/export-preview.png)
 
@@ -559,17 +570,17 @@ back in:
 
 - **Words**, chosen by list (every list, one, or several ticked), status,
   CEFR level, where they are in your plan (not started, in progress, hard for
-  you, in long-term memory) and how much teaching content they have, as PDF,
-  CSV or JSON through the preview above.
-- **Word content** — the batches described below.
+  you, in long-term memory) and whether they have contexts, as PDF, CSV or
+  JSON through the preview above.
+- **Word contexts** — described below.
 - **Learning data** as CSV, for all time or the last 7, 30, 90 or 365 days:
-  every answer, with its rating, what it showed about the memory and the
-  schedule it produced; and every attempt — task, level, success, effort and
-  time — the record your skills are read from.
+  every answer, with its question, whether it was right, its rating and the
+  schedule it produced; and every question asked — task, right or wrong,
+  effort, time — practice included.
 - **Backups**: the daily copy (and *Back up now*); **everything in one file**,
   a `.lexitrack` file with words, lists, statuses, plans, cards, every review
-  and attempt, content in every language and settings, as readable JSON in a
-  ZIP; and restoring either kind.
+  and attempt, contexts and settings, as readable JSON in a ZIP; and restoring
+  either kind.
 
 A PDF or CSV is for reading, not a backup. A restore replaces everything,
 asks first, and saves a copy of what is there now before it starts; it either
@@ -577,21 +588,33 @@ all happens or none of it does. A `.lexitrack` file must come from the same
 version of the data (a newer or older one is refused, and says so); a daily
 copy from an older version is upgraded as it is restored. The bot token is in
 neither; a `.lexitrack` file also leaves out what belongs to one machine, such
-as the Telegram chat link and the content batches still out.
+as the Telegram chat link.
 
-### Word content
+### Word contexts
 
-Meanings in your own language, how a word is used, examples and memory cues
-are added in batches, from any tool you like — an LLM, a dictionary, your own
-notes. **Export and backup → Word Content…** writes the next batch of words
-that still need content to a file, with instructions for whoever fills it
-in; the filled file comes back through the same window, which shows what it
-would change and replaces nothing you already have unless you tick it, with
-warnings about entries worth a second look. Batches can cover **all your
-words**, a waiting batch can be **sent again**, and **Export all** keeps every
-word's content as one versioned file that imports back the same way.
-LexiTrack itself never calls an LLM. The format is in
-[docs/formats/content-enrichment.md](docs/formats/content-enrichment.md).
+A word's contexts are sentences that show its definition in use; a word with
+one common use needs one, a word whose definition covers several senses one
+for each. Add them on the word's page, or in bulk from a JSON file written by
+hand or with any tool you like — an LLM, a dictionary, your own notes:
+
+```json
+[
+  {"word": "sleep in", "contexts": ["I don't have to work tomorrow, so I can sleep in.",
+                                    "I usually sleep in on Sundays."]},
+  {"word": "acquire", "contexts": ["She acquired valuable experience in her first year."]}
+]
+```
+
+**Export and backup → Word Contexts…** exports words — all of them, a list,
+your plan or a selection, optionally only those without contexts — with their
+length, level, part of speech, definition and contexts, to be filled in; the
+filled file comes back through the same window, which shows what it would add
+before anything is written. Each entry is found among your words — a word is
+never created — a sentence it already has is not added twice, a word it
+cannot find is listed, and a context that does not seem to contain its word
+is flagged. A `definition` in the file replaces the word's. LexiTrack itself
+never calls an LLM and never writes a context. The format is in
+[docs/formats/contexts.md](docs/formats/contexts.md).
 
 ### Search and commands
 
@@ -608,9 +631,9 @@ key in one place, with a filter.
 
 | Where | Key | Action |
 | --- | --- | --- |
-| Today's session | `Enter` | Check the word you typed; empty: Forgot; after the result: next |
-| | `Ctrl+H` | Show the first letter |
-| | `1` / `2` / `3` / `4` | Choose among four; or say how it went: Forgot / Effortful / Remembered / Instant |
+| Today's session | `1`–`4` or `A`–`D` | Choose an option |
+| | `1` / `2` / `3` / `4` | After a right answer: Again / Hard / Good / Easy |
+| | `Enter` | After a wrong answer, or on a new word: next |
 | | `Esc` | Stop and keep what you answered |
 | | `Ctrl+Z` | Take back your last answer |
 | Flashcards | `K` | I Know |
@@ -646,7 +669,7 @@ key in one place, with a filter.
 | Format | Parser | What it extracts |
 | --- | --- | --- |
 | Oxford 3000 / 5000 "by CEFR level" PDF | `OxfordParser` | Word, part of speech, CEFR level; English |
-| LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, example, note, language; list name, language, description, source |
+| LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, contexts, language; list name, language, description, source |
 | Any other text-based PDF | `GenericTextParser` | Every distinct word, nothing else |
 
 The JSON format is documented in
@@ -659,8 +682,9 @@ required; a typical file looks like:
 ```
 
 Importing a JSON file into a list whose words you already have fills in the
-details they lack — a file of definitions for an Oxford list adds the
-definitions and changes nothing you have answered.
+details they lack and adds the contexts they do not have — a file of
+definitions for an Oxford list adds the definitions and changes nothing you
+have answered.
 
 Limitations: the Oxford PDFs contain no definitions or examples; the generic
 parser cannot tell headwords from inflected forms; scanned PDFs are detected
@@ -718,7 +742,7 @@ lexitrack/
 examples/            JSON word lists to try
 tools/               screenshot, design-mockup and icon generators
 docs/                architecture, learning engine, decisions, status, log, formats
-tests/               581 tests
+tests/               824 tests
 data/                your database, backups and exports (not committed)
 logs/                debug logs, only when turned on (not committed)
 pdfs/                put your PDFs here (not committed)
@@ -732,7 +756,7 @@ pytest
 ruff check lexitrack tests tools
 ```
 
-581 tests. None of them needs a Telegram token or a network: the bot is tested
+824 tests. None of them needs a Telegram token or a network: the bot is tested
 through a fake outbox, and every rule about days runs on a frozen clock. Tests
 that need the real Oxford PDFs skip when `pdfs/` does not contain them.
 
@@ -772,6 +796,7 @@ For a non-PDF, non-JSON format, add a document class and set `document_types`.
 | [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) | Chronological technical log |
 | [docs/TODO.md](docs/TODO.md) | Next, later, ideas |
 | [docs/formats/json-import-export.md](docs/formats/json-import-export.md) | The JSON format |
+| [docs/formats/contexts.md](docs/formats/contexts.md) | Word contexts: the JSON file |
 | [docs/design/](docs/design) | The three design directions explored for 0.2 |
 
 ## Known limitations
@@ -782,7 +807,8 @@ For a non-PDF, non-JSON format, add a document class and set `document_types`.
   belong to one person.
 - **The time zone is Europe/Istanbul by default** and has no control in
   Settings yet; the day boundary and message hours do.
-- **Word details cannot be edited after they are added** — status can.
+- **Only a word's definition and contexts can be edited after it is added**
+  — its spelling, level and part of speech come from its sources.
 - **What you know is shared across lists.** A word cannot be known in one list
   and unknown in another.
 - **Deleting a list deletes words that are in no other list**, with their

@@ -4,10 +4,10 @@ One window instead of scattered menu items. What is in it answers four
 questions:
 
 * **Which words?** Any set — one list, several or all of them, by status, by
-  level, by where they are in learning, by how much teaching content they
-  have — as a PDF, CSV or JSON file, previewed before it is saved, with the
-  columns chosen there (the Export dialog).
-* **Word content** — batches out to be enriched, filled files back in.
+  level, by where they are in learning, by whether they have contexts — as a
+  PDF, CSV or JSON file, previewed before it is saved, with the columns
+  chosen there (the Export dialog).
+* **Word contexts** — words out with their contexts, a file of contexts in.
 * **Learning data** — every answer and every attempt, as CSV, to look at in a
   spreadsheet: all of it, or the last so many days.
 * **Backup** — a copy now, the daily copies, and the portable ``.lexitrack``
@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
 
 from ..core import paths
 from ..core.errors import LexiTrackError
-from ..models.content import ContentStatus
 from ..models.user_word_state import ReviewStatus
 from ..models.vocabulary_list import VocabularyList
 from ..models.word_entry import CEFR_ORDER
@@ -210,17 +209,13 @@ class ExportCenter(QDialog):
             self.state.addItem(state.label, state)
         self.content = QComboBox()
         self.content.addItem("Any", None)
-        for status, name in (
-            (ContentStatus.COMPLETE, "Complete"),
-            (ContentStatus.PARTIAL, "Partial"),
-            (ContentStatus.NONE, "None yet"),
-        ):
-            self.content.addItem(name, status)
+        self.content.addItem("With contexts", "yes")
+        self.content.addItem("Without contexts", "no")
         for combo, title, hint in (
             (self.status, "Status", "Known, Unknown or not yet sorted."),
             (self.level, "Level", "CEFR level, where the word has one."),
             (self.state, "Learning", "Where the word is in your study plan."),
-            (self.content, "Content", "Meanings and examples: how much the word has."),
+            (self.content, "Contexts", "Sentences showing the word in use."),
         ):
             combo.setFixedWidth(_WIDE)
             combo.currentIndexChanged.connect(self._refresh_words)
@@ -233,12 +228,12 @@ class ExportCenter(QDialog):
         layout.addWidget(words)
 
         if self._open_content is not None:
-            content = SettingsGroup("WORD CONTENT")
-            button = QPushButton("Word content…")
+            content = SettingsGroup("WORD CONTEXTS")
+            button = QPushButton("Word contexts…")
             button.clicked.connect(self._content)
             content.add(
-                "Meanings and examples",
-                "Send words out to be enriched, and import the filled file.",
+                "Contexts",
+                "Export words with their contexts as JSON, and import a file of contexts.",
                 button,
             )
             layout.addWidget(content)
@@ -253,7 +248,7 @@ class ExportCenter(QDialog):
         answers.clicked.connect(self._export_answers)
         data.add(
             "Every answer",
-            "Each review with its rating, what it showed about the memory, and the "
+            "Each day's answer: the task, whether it was right, its rating, and the "
             "schedule it produced, as CSV. Answers taken back are included and marked.",
             answers,
         )
@@ -261,8 +256,8 @@ class ExportCenter(QDialog):
         attempts.clicked.connect(self._export_attempts)
         data.add(
             "Every attempt",
-            "Each question asked — task, level, success, effort, time — as CSV: the "
-            "record your skills are read from.",
+            "Each question asked — task, right or wrong, effort, time — practice "
+            "included, as CSV.",
             attempts,
         )
         layout.addWidget(data)
@@ -277,7 +272,7 @@ class ExportCenter(QDialog):
         backup.add(
             "Everything, in one file",
             "A .lexitrack file: words, lists, statuses, plans, cards, every review and "
-            "attempt, content in every language, settings. Readable JSON inside.",
+            "attempt, contexts, settings. Readable JSON inside.",
             export_all,
         )
         restore_file = QPushButton("Restore…")
@@ -331,13 +326,13 @@ class ExportCenter(QDialog):
         # Qt hands enum values back as plain strings: turned back into enums
         # here, or "any" would compare unequal to LearningState.ANY.
         status = self.status.currentData()
-        content = self.content.currentData()
+        contexts = self.content.currentData()
         return WordFilter(
             lists=self.from_list.selected(),
             status=ReviewStatus(status) if status else None,
             cefr=self.level.currentData(),
             state=LearningState(self.state.currentData() or LearningState.ANY),
-            content=ContentStatus(content) if content else None,
+            contexts=None if contexts is None else contexts == "yes",
         )
 
     def _refresh_words(self) -> None:

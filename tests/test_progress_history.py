@@ -41,7 +41,7 @@ from lexitrack.services.review_session import ReviewSession
 from lexitrack.services.srs_scheduler import SrsScheduler
 
 from .conftest import entry
-from .flow_helpers import record_known_evidence
+from .flow_helpers import answer, record_known_evidence
 
 
 def _name(index: int) -> str:
@@ -60,7 +60,9 @@ def words(database: Database) -> list[int]:
         Source(key="test", name="Test source", parser_type="generic")
     )
     result = WordRepository(database).add_entries(
-        [entry(_name(index), cefr_level="A1") for index in range(30)], source.id
+        [entry(_name(index), cefr_level="A1", definition=f"meaning {index}")
+         for index in range(30)],
+        source.id
     )
     ids = list(result.word_ids)
     a_list = ListRepository(database).create("Test list")
@@ -82,16 +84,15 @@ def engine(database: Database, clock: FrozenClock, words: list[int]) -> Learning
 def answer_all(engine: LearningService, rating: Rating, session_id: str | None = None) -> int:
     done = 0
     for item in engine.review_queue():
-        engine.answer(item.word.id, rating, session_id=session_id)
+        answer(engine, item.word.id, rating, session_id=session_id)
         done += 1
     return done
 
 
 def confirm_suggested(engine: LearningService) -> int:
     """Say yes to every "mark Known?" suggestion, as the user would — after
-    giving the words in long-term memory the evidence a suggestion needs
-    (productive use and a recall after a long gap), which these tests take
-    as given."""
+    giving the words in long-term memory the evidence a suggestion needs (a
+    right answer after a long gap), which these tests take as given."""
     threshold = engine.settings.mastery_stability_days
     stable = [card.word_id for card in CardRepository(engine.database).all_cards()
               if (card.stability or 0) >= threshold]
@@ -241,7 +242,7 @@ class TestUndo:
         clock.advance(hours=9)
         first = engine.review_queue()[0]
         before = CardRepository(database).get(first.word.id)
-        engine.answer(first.word.id, Rating.EASY)
+        answer(engine, first.word.id, Rating.EASY)
         assert engine.can_undo()
         word = engine.undo_last_answer()
         assert word is not None and word.id == first.word.id
@@ -282,7 +283,7 @@ class TestUndo:
         session = engine.start_session(Channel.TELEGRAM, chat_id="1")
         item = engine.review_queue()[0]
         key = f"ans:{session.id}:{item.word.id}"
-        engine.answer(item.word.id, Rating.GOOD, session_id=session.id, update_key=key)
+        answer(engine, item.word.id, Rating.GOOD, session_id=session.id, update_key=key)
         assert engine.session(session.id).done_count == 1
         engine.undo_last_answer(session_id=session.id)
         assert engine.session(session.id).done_count == 0
@@ -295,12 +296,11 @@ class TestUndo:
         engine.introduce()
         clock.advance_to_day_start(1)
         answer_all(engine, Rating.EASY)
-        # Used well in two ways already; what is missing is a long-gap recall.
-        record_known_evidence(engine, engine.plan_word_ids(), gap_days=None)
+        # What is missing is a right answer after a long gap.
         assert engine.known_suggestions() == []
         clock.advance_to_day_start(30)
         queue = engine.review_queue()
-        outcome = engine.answer(queue[0].word.id, Rating.EASY)
+        outcome = answer(engine, queue[0].word.id, Rating.EASY)
         assert outcome.suggest_known, "recalled after 29 days: the case is made"
         assert queue[0].word.id in {word.id for word in engine.known_suggestions()}
         engine.undo_last_answer()
@@ -318,10 +318,10 @@ class TestUndo:
         engine.introduce()
         clock.advance_to_day_start(1)
         item = engine.review_queue()[0]
-        engine.answer(item.word.id, Rating.GOOD)
+        answer(engine, item.word.id, Rating.GOOD)
         other = LearningService(database, clock)
         clock.advance_to_day_start(2)
-        other.answer(item.word.id, Rating.GOOD)
+        answer(other, item.word.id, Rating.GOOD)
         assert engine.undo_last_answer() is None
 
 
@@ -354,7 +354,7 @@ class TestJourney:
         engine.introduce()
         clock.advance_to_day_start(1)
         clock.advance(hours=9)
-        engine.answer(words[0], Rating.EASY)
+        answer(engine, words[0], Rating.EASY)
         engine.undo_last_answer()
         journey = ProgressService(database, engine).journey(words[0])
         answers = [s for s in journey.steps if s.kind == "answer"]
@@ -427,7 +427,7 @@ class TestProgressViews:
             clock.advance_to_day_start(1)
             engine.introduce()
             for index, item in enumerate(engine.review_queue()):
-                engine.answer(item.word.id, Rating.AGAIN if index % 4 == 0 else Rating.GOOD)
+                answer(engine, item.word.id, Rating.AGAIN if index % 4 == 0 else Rating.GOOD)
         calibration = ProgressService(database, engine).calibration()
         assert calibration.reviews > 0
         assert 0 < calibration.predicted <= 1 and 0 <= calibration.actual <= 1
@@ -461,7 +461,7 @@ class TestPersonalising:
             # ones, whatever order the queue asks in.
             for item in engine.review_queue():
                 recalled = rng.random() < (engine.retrievability(item.word.id) or 0.0)
-                engine.answer(item.word.id, Rating.GOOD if recalled else Rating.AGAIN)
+                answer(engine, item.word.id, Rating.GOOD if recalled else Rating.AGAIN)
 
     def test_readiness_counts_what_the_optimizer_counts(
         self, engine: LearningService, clock: FrozenClock, database: Database
@@ -481,7 +481,7 @@ class TestPersonalising:
         before = Personaliser(database, engine).readiness().usable
         clock.advance_to_day_start(1)
         item = engine.review_queue()[0]
-        engine.answer(item.word.id, Rating.GOOD)
+        answer(engine, item.word.id, Rating.GOOD)
         engine.undo_last_answer()
         assert Personaliser(database, engine).readiness().usable == before
 

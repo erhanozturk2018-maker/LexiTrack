@@ -1,7 +1,7 @@
-"""The word-content window (ui/content_dialog.py).
+"""The word-contexts window (ui/content_dialog.py).
 
-Exporting a batch lists it as waiting and leaves its words out of the next;
-the import preview shows what would change, and replaces only what is ticked.
+It counts the words with contexts, exports words with their definition and
+contexts as JSON, and previews an import before anything is written.
 """
 
 from __future__ import annotations
@@ -10,18 +10,16 @@ import json
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from lexitrack.database.connection import Database
-from lexitrack.models.content import WordLocalization
 from lexitrack.models.user_word_state import ReviewStatus
-from lexitrack.repositories import ContentRepository
 from lexitrack.services.content_service import ContentService
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.vocabulary_service import VocabularyService
 from lexitrack.ui import content_dialog as module
-from lexitrack.ui.content_dialog import ContentDialog, ContentImportDialog
+from lexitrack.ui.content_dialog import ContentDialog, ContextImportDialog
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +36,9 @@ def setup(qapp, database: Database):
     QSettings().clear()
     service = VocabularyService(database)
     list_id = service.create_list("Words", language="en").id
-    for word in ("reluctant", "cramped", "apple"):
+    service.add_word(list_id, "reluctant", definition="not willing",
+                     contexts=["She was reluctant to leave."])
+    for word in ("cramped", "apple"):
         service.add_word(list_id, word, definition=f"about {word}")
     ids = [w.id for w in service.list_words(list_id)]
     service.set_status(ids, ReviewStatus.UNKNOWN)
@@ -48,63 +48,48 @@ def setup(qapp, database: Database):
     QSettings().clear()
 
 
-def test_a_selection_is_exported_and_waits(setup, qtbot, tmp_path: Path, monkeypatch) -> None:
+def test_the_window_counts_contexts_and_exports_the_words_chosen(
+    setup, qtbot, tmp_path: Path, monkeypatch
+) -> None:
     service, engine, ids = setup
     dialog = ContentDialog(service, engine, word_ids=ids[:2])
     qtbot.addWidget(dialog)
     assert dialog.source.currentData() == "selection"
-    assert "3 with nothing yet" not in dialog.status_label.text()
-    assert dialog.status_scope.text() == "2 words"
-    assert dialog.export_summary.text().startswith("batch_001: 2 words")
+    assert dialog.status_label.text().startswith("1 of 2 words have contexts")
+    assert dialog.export_summary.text().startswith("2 words")
+
+    dialog.only_missing.setChecked(True)
+    assert dialog.export_summary.text().startswith("1 word ")
 
     target = tmp_path / "out.json"
-    monkeypatch.setattr(
-        module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), "")
-    )
-    dialog.languages.setText("de")
+    monkeypatch.setattr(module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
     dialog._export()
     document = json.loads(target.read_text(encoding="utf-8"))
-    assert [w["word_id"] for w in document["words"]] == ids[:2]
-    assert document["learner_languages"] == ["de"]
-    assert dialog.open_group.isVisibleTo(dialog)
-    assert "Written to out.json" in dialog.export_summary.text()
-
-    # From the whole plan, the words out in batch 1 are skipped.
-    dialog.source.setCurrentIndex(dialog.source.findData("plan"))
-    assert dialog._candidates == [ids[2]]
-    assert dialog.export_summary.text().startswith("batch_002: 1 word ")
+    assert document == [
+        {"word": "cramped", "length": 7, "definition": "about cramped", "contexts": []},
+    ]
+    assert "written to out.json" in dialog.export_summary.text()
 
 
-def test_the_import_preview_replaces_only_what_is_ticked(
+def test_the_import_preview_shows_what_would_be_added(
     setup, qtbot, tmp_path: Path, database: Database
 ) -> None:
-    _service, _engine, ids = setup
-    repo = ContentRepository(database)
-    for word_id in ids[:2]:
-        repo.save_localization(
-            WordLocalization(word_id=word_id, learner_language="de", core_meaning="old")
-        )
+    service, _engine, ids = setup
     path = tmp_path / "filled.json"
-    path.write_text(json.dumps({
-        "format": "lexitrack-content", "schema_version": 2, "batch": "batch_001",
-        "words": [
-            {"word_id": ids[0], "word": "reluctant",
-             "localizations": {"de": {"core_meaning": "widerwillig"}}},
-            {"word_id": ids[1], "word": "cramped",
-             "localizations": {"de": {"core_meaning": "eng"}}},
-            {"word_id": 999, "word": "ghost"},
-        ],
-    }), encoding="utf-8")
+    path.write_text(json.dumps([
+        {"word": "cramped", "contexts": ["The room was cramped.", "It felt cramped."]},
+        {"word": "reluctant", "contexts": ["She was reluctant to leave."]},
+        {"word": "ghost", "contexts": ["A ghost."]},
+    ]), encoding="utf-8")
     content = ContentService(database)
-    dialog = ContentImportDialog(content, content.preview_import(path))
+    dialog = ContextImportDialog(content, content.preview_import(path))
     qtbot.addWidget(dialog)
-    assert dialog.table.rowCount() == 2
-    assert "reluctant · core meaning (German)" in dialog.table.item(0, 1).text()
-    assert dialog.chosen() == [], "nothing replaced unless chosen"
-    assert "Rejected" in dialog.notes.toPlainText()
+    assert dialog.table.rowCount() == 1
+    assert dialog.table.item(0, 0).text() == "cramped"
+    assert "not in your vocabulary" in dialog.notes.toPlainText()
 
-    dialog.table.item(0, 0).setCheckState(Qt.CheckState.Checked)
     dialog.import_button.click()
-    assert "1 replaced" in dialog.result_text
-    assert repo.localization(ids[0], "de").core_meaning == "widerwillig"
-    assert repo.localization(ids[1], "de").core_meaning == "old"
+    assert "Imported 2 contexts for 1 words" in dialog.result_text
+    assert [c.text for c in service.contexts(ids[1])] == [
+        "The room was cramped.", "It felt cramped.",
+    ]

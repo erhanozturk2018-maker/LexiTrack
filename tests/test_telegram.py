@@ -15,6 +15,8 @@ import pytest
 
 from lexitrack.core.clock import FrozenClock
 from lexitrack.database.connection import Database
+from lexitrack.models.attempt import Task
+from lexitrack.models.context import WordContext
 from lexitrack.models.settings import Setting
 from lexitrack.models.source import Source
 from lexitrack.models.srs import Channel, Rating
@@ -30,6 +32,8 @@ from lexitrack.repositories import (
 from lexitrack.repositories.word_repository import StoredWord
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.review_flow import Step, StepKind
+from lexitrack.services.review_tasks import Option, Question
+from lexitrack.services.review_wording import FeedbackText
 from lexitrack.telegram import config as telegram_config
 from lexitrack.telegram.config import load_config, read_env_file
 from lexitrack.telegram.core import BotCore
@@ -40,15 +44,15 @@ from lexitrack.telegram.messages import (
     intro_data,
     known_data,
     parse_callback,
+    rate_card,
     step_card,
     step_data,
     undo_data,
-    write_check,
 )
 from lexitrack.telegram.schedule import Notification, due_notifications, mark_sent
 
 from .conftest import entry
-from .flow_helpers import record_known_evidence
+from .flow_helpers import answer
 
 OWNER = "4242"
 STRANGER = "9999"
@@ -190,9 +194,9 @@ class TestConfig:
 class TestCallbackData:
     def test_round_trips(self) -> None:
         assert parse_callback(intro_data("2026-09-17")).local_date == "2026-09-17"
-        parsed = parse_callback(step_data("abc", 12, "remembered"))
+        parsed = parse_callback(step_data("abc", 12, "good"))
         assert (parsed.action, parsed.session_id, parsed.step, parsed.value) == (
-            "step", "abc", 12, "remembered"
+            "step", "abc", 12, "good"
         )
         known = parse_callback(known_data("abc", 7))
         assert (known.action, known.word_id) == ("known", 7)
@@ -311,32 +315,25 @@ def _session_of(message: Message) -> str:
     return parse_callback(data).session_id
 
 
-def respond(bot: BotCore, outbox: FakeOutbox, session: str, right: bool = True) -> Step:
+def respond(
+    bot: BotCore, outbox: FakeOutbox, session: str, right: bool = True, rating: str = "good"
+) -> Step:
     """Answer the step on screen as the learner would, from the phone."""
     flow = bot._flows[session]
-    step, number, card = flow.current, flow.step_number, outbox.last_id()
+    step, number = flow.current, flow.step_number
 
     def press(value: str) -> None:
         run(bot.callback(OWNER, outbox.last_id(), step_data(session, number, value), ""))
 
-    if step.kind is StepKind.TYPE:
-        run(bot.text(OWNER, step.prompt.accepted[0] if right else "nothing like it"))
-        if right and step.phase.value == "review":
-            # A right answer: the card asks how it came.
-            assert "How did it come?" in outbox.sent[-1][1].text
-            press("remembered")
-    elif step.kind is StepKind.CHOOSE:
-        ids = [option.id for option in step.options]
-        right_index = ids.index(step.word.id)
-        press(str(right_index if right else (right_index + 1) % len(ids)))
-    elif step.kind is StepKind.RECALL:
-        press("remembered" if right else "forgot")
-    elif step.kind is StepKind.TEACH:
+    if step.kind is StepKind.TEACH:
         press("go")
-    else:  # WRITE: the sentence as a reply, then the grade
-        run(bot.text(OWNER, "A sentence of my own."))
-        press("remembered" if right else "forgot")
-    assert card  # the card answered was the one on screen
+        return step
+    question = step.question
+    press(str(question.answer if right else (question.answer + 1) % len(question.options)))
+    if right and step.rated:
+        # A right answer: the card asks how it went, the same step still on screen.
+        assert "How did it go?" in outbox.sent[-1][1].text
+        press(rating)
     return step
 
 
@@ -364,25 +361,39 @@ class TestReviews:
         assert flow.channel is Channel.TELEGRAM
         card = outbox.sent[-1][1]
         assert "1 / 25" in card.text
-        assert flow.current.label.upper() in card.text
+        assert "DEFINITION → WORD" in card.text
+        question = flow.current.question
+        assert question.prompt in card.text
+        labels = [label for row in card.buttons for label, _ in row]
+        assert labels[:4] == [option.text for option in question.options]
         assert end_data(session) in FakeOutbox.callbacks(card)
 
-    def test_a_typed_reply_answers_and_the_next_card_replaces_it(
+    def test_a_right_answer_asks_how_it_went_then_moves_on(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
         session = self.start(due, outbox)
         first_card = outbox.last_id()
-        step = respond(due, outbox, session)
-        assert due.engine.rating_counts()[int(Rating.GOOD)] + due.engine.rating_counts()[
-            int(Rating.EASY)
-        ] == 1
+        flow = due._flows[session]
+        step = flow.current
+        run(due.callback(OWNER, first_card,
+                         step_data(session, flow.step_number, str(step.question.answer)), ""))
+        rate = outbox.sent[-1][1]
+        assert "Correct" in rate.text and step.word.word in rate.text
+        assert step.word.definition in rate.text
+        labels = [label.split(" ·")[0] for row in rate.buttons for label, _ in row][:4]
+        assert labels == ["Again", "Hard", "Good", "Easy"]
+        assert sum(due.engine.rating_counts().values()) == 0, "not recorded before the rating"
+
+        run(due.callback(OWNER, outbox.last_id(),
+                         step_data(session, flow.step_number, "hard"), ""))
+        assert due.engine.rating_counts()[int(Rating.HARD)] == 1
         channel = seeded.connection.execute(
             "SELECT channel FROM review_logs WHERE session_id = ?", (session,)
         ).fetchone()[0]
         assert channel == Channel.TELEGRAM.value
         card = outbox.sent[-1][1]
         assert "2 / 25" in card.text
-        assert "✓" in card.text and step.word.word in card.text, "it opens with the result"
+        assert f"“{step.word.word}”: Hard" in card.text, "it opens with the result"
         assert (OWNER, first_card) in outbox.deleted
         assert due.engine.session(session).message_id == outbox.last_id()
 
@@ -392,44 +403,51 @@ class TestReviews:
         session = self.start(due, outbox)
         respond(due, outbox, session)
         row = seeded.connection.execute(
-            "SELECT a.route_version, a.role FROM learning_attempts a "
-            "JOIN review_logs r ON r.id = a.review_log_id WHERE r.session_id = ?",
+            "SELECT a.route_version, a.role, a.task, a.correct, a.effort, r.correct "
+            "FROM learning_attempts a JOIN review_logs r ON r.id = a.review_log_id "
+            "WHERE r.session_id = ?",
             (session,),
         ).fetchone()
-        assert tuple(row) == ("v2", "primary")
+        assert tuple(row) == ("v3", "primary", "definition_to_word", 1, "good", 1)
+
+    def test_a_wrong_answer_names_the_right_word_and_its_definition(
+        self, due: BotCore, outbox: FakeOutbox
+    ) -> None:
+        session = self.start(due, outbox)
+        step = respond(due, outbox, session, right=False)
+        card = outbox.sent[-1][1]
+        assert "✗ Incorrect" in card.text
+        assert f"Correct answer: {step.word.word}" in card.text
+        assert f"Definition: {step.word.definition}" in card.text
+        assert due.engine.rating_counts()[int(Rating.AGAIN)] == 1
 
     def test_a_double_tap_counts_once(self, due: BotCore, outbox: FakeOutbox) -> None:
         """Telegram re-delivers a tap it was unsure about."""
         session = self.start(due, outbox)
         flow = due._flows[session]
-        number = flow.step_number
-        data = step_data(session, number, "dk")
+        wrong = (flow.current.question.answer + 1) % 4
+        data = step_data(session, flow.step_number, str(wrong))
         run(due.callback(OWNER, outbox.last_id(), data, ""))
         sent = len(outbox.sent)
         run(due.callback(OWNER, outbox.last_id(), data, ""))
         assert len(outbox.sent) == sent, "the second tap found an older step number"
+        assert sum(due.engine.rating_counts().values()) == 1
 
     def test_a_tap_on_an_old_card_is_ignored(self, due: BotCore, outbox: FakeOutbox) -> None:
         session = self.start(due, outbox)
-        old = step_data(session, due._flows[session].step_number, "dk")
+        old = step_data(session, due._flows[session].step_number, "0")
         respond(due, outbox, session)
         before = sum(due.engine.rating_counts().values())
         run(due.callback(OWNER, "1", old, ""))
         assert sum(due.engine.rating_counts().values()) == before
 
-    def test_a_reply_with_no_session_or_on_a_button_card_says_what_to_do(
-        self, due: BotCore, outbox: FakeOutbox
-    ) -> None:
+    def test_a_message_says_to_use_the_buttons(self, due: BotCore, outbox: FakeOutbox) -> None:
         run(due.text(OWNER, "hello"))
         assert "/review" in outbox.sent[-1][1].text
-        session = self.start(due, outbox)
-        flow = due._flows[session]
-        # Wrong on purpose until a button step (choose among four) is on screen.
-        respond(due, outbox, session, right=False)
-        # A missed "meaning to word" is probed by choosing among four.
-        assert flow.current.kind is StepKind.CHOOSE
+        self.start(due, outbox)
         run(due.text(OWNER, "a word"))
         assert "buttons" in outbox.sent[-1][1].text
+        assert sum(due.engine.rating_counts().values()) == 0
 
     def test_undo_puts_the_word_back(self, due: BotCore, outbox: FakeOutbox) -> None:
         session = self.start(due, outbox)
@@ -513,7 +531,7 @@ class TestInterruptions:
         session = _session_of(outbox.sent[-1][1])
         respond(due, outbox, session)
         respond(due, outbox, session)
-        old = step_data(session, due._flows[session].step_number, "dk")
+        old = step_data(session, due._flows[session].step_number, "0")
         answered = sum(due.engine.rating_counts().values())
 
         # The app is closed and opened again: a new bot, the same database.
@@ -528,16 +546,6 @@ class TestInterruptions:
         respond(restarted, outbox, session)
         assert sum(restarted.engine.rating_counts().values()) == answered + 1
 
-    def test_a_reply_after_a_restart_is_not_taken_as_an_answer(
-        self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
-    ) -> None:
-        """The question on screen may have changed: the reply is not guessed at."""
-        run(due.command(OWNER, "/review"))
-        restarted = BotCore(seeded, outbox, clock=clock)
-        run(restarted.text(OWNER, "anything"))
-        assert "restarted" in outbox.sent[-1][1].text
-        assert sum(restarted.engine.rating_counts().values()) == 0
-
     def test_review_after_a_restart_resumes(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
@@ -549,31 +557,32 @@ class TestInterruptions:
         assert _session_of(outbox.sent[-1][1]) == session
         assert "Picking up where you left off" in outbox.sent[-1][1].text
 
-    def test_a_restart_between_probes_shows_the_same_probe(
+    def test_a_restart_shows_the_same_question(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
         run(due.command(OWNER, "/review"))
         session = _session_of(outbox.sent[-1][1])
-        respond(due, outbox, session, right=False)  # the first question missed
-        probe = due._flows[session].current
-        assert probe.kind is StepKind.CHOOSE
+        respond(due, outbox, session, right=False)
+        question = due._flows[session].current.question
         restarted = BotCore(seeded, outbox, clock=clock)
         run(restarted.command(OWNER, "/review"))
         card = outbox.sent[-1][1]
         options = [label for row in card.buttons for label, _ in row][:4]
-        assert options == [o.word for o in probe.options], "the same four, not a new question"
+        assert options == [o.text for o in question.options], "the same four, not new ones"
 
-    def test_a_right_answer_waiting_for_its_report_comes_back_after_a_restart(
+    def test_a_right_answer_waiting_for_its_rating_comes_back_after_a_restart(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
         run(due.command(OWNER, "/review"))
         session = _session_of(outbox.sent[-1][1])
-        step = due._flows[session].current
-        run(due.text(OWNER, step.prompt.accepted[0]))
-        assert "How did it come?" in outbox.sent[-1][1].text
+        flow = due._flows[session]
+        run(due.callback(OWNER, outbox.last_id(),
+                         step_data(session, flow.step_number, str(flow.current.question.answer)),
+                         ""))
+        assert "How did it go?" in outbox.sent[-1][1].text
         restarted = BotCore(seeded, outbox, clock=clock)
         run(restarted.command(OWNER, "/review"))
-        assert "How did it come?" in outbox.sent[-1][1].text
+        assert "How did it go?" in outbox.sent[-1][1].text
         assert sum(restarted.engine.rating_counts().values()) == 0, "not yet recorded"
 
     def test_the_next_day_starts_afresh(
@@ -590,14 +599,14 @@ class TestInterruptions:
 
 
 class TestLearningOnThePhone:
-    def test_new_words_are_taught_and_practised_in_the_session(
+    def test_new_words_are_shown_and_practised_in_the_session(
         self, bot: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
         SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 4)
         run(bot.callback(OWNER, "1", START_DATA, ""))
         session = _session_of(outbox.sent[-1][1])
         card = outbox.sent[-1][1]
-        assert "NEW WORD" in card.text
+        assert "NEW WORD" in card.text and "Definition" in card.text
         assert any(label.startswith("Continue") for row in card.buttons for label, _ in row)
         for _ in range(100):
             if session not in bot._flows:
@@ -608,24 +617,22 @@ class TestLearningOnThePhone:
         # Practice is recorded, never rated.
         assert sum(bot.engine.rating_counts().values()) == 0
 
-    def test_a_word_in_long_term_memory_is_offered_as_known(
+    def test_a_word_right_after_a_long_gap_is_offered_as_known(
         self, bot: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
         run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
-        clock.advance_to_day_start(1)
-        clock.advance(hours=18)
-        SettingsRepository(seeded).set_many(
-            {Setting.NEW_WORDS_PER_DAY: 0, Setting.MASTERY_STABILITY_DAYS: 1}
-        )
-        # Used well in two ways already; today's recall comes after the gap.
+        SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 0)
         bot.engine.refresh_settings()
-        record_known_evidence(bot.engine, bot.engine.plan_word_ids(), gap_days=None)
+        clock.advance_to_day_start(1)
+        for word_id in bot.engine.plan_word_ids()[:26]:
+            answer(bot.engine, word_id, Rating.GOOD)
+        clock.advance_to_day_start(30)
         run(bot.command(OWNER, "/review"))
         session = _session_of(outbox.sent[-1][1])
         step = respond(bot, outbox, session)
         offer = known_data(session, step.word.id)
         assert offer in FakeOutbox.callbacks(outbox.sent[-1][1])
-        assert "long-term memory" in outbox.sent[-1][1].text
+        assert "right after a long gap" in outbox.sent[-1][1].text
         run(bot.callback(OWNER, outbox.last_id(), offer, ""))
         status = seeded.connection.execute(
             "SELECT status FROM user_word_state WHERE word_id = ?", (step.word.id,)
@@ -640,52 +647,78 @@ class TestCards:
     word = StoredWord(id=1, word="reluctant", normalized_word="reluctant",
                       part_of_speech="adjective", cefr_level="B2",
                       definition="unwilling to do something")
+    options = (Option(1, "reluctant"), Option(2, "eager"), Option(3, "careful"),
+               Option(4, "sudden"))
 
-    def test_a_shown_word_is_reported_on_before_anything_is_revealed(self) -> None:
-        card = step_card(Step(self.word, StepKind.RECALL), "s", 1, 1, 1)
-        assert "<tg-spoiler>" not in card.text and self.word.definition not in card.text
+    def test_a_new_word_is_shown_whole(self) -> None:
+        contexts = (WordContext(1, "She was reluctant to leave.", 5),)
+        card = step_card(Step(self.word, StepKind.TEACH, contexts=contexts), "s", 1, 1, 9)
+        assert "<b>reluctant</b>" in card.text
+        assert "9 letters · adjective · B2" in card.text
+        assert "unwilling to do something" in card.text
+        assert "She was <b>reluctant</b> to leave." in card.text
+        assert step_data("s", 1, "go") in FakeOutbox.callbacks(card)
+
+    def test_definition_to_word_offers_the_words_as_buttons(self) -> None:
+        question = Question(Task.DEFINITION_TO_WORD, "unwilling to do something",
+                            self.options, 0)
+        step = Step(self.word, StepKind.QUESTION, task=question.task, question=question)
+        card = step_card(step, "s", 2, 1, 9)
+        assert "unwilling to do something" in card.text
         labels = [label for row in card.buttons for label, _ in row]
-        assert labels[:4] == ["Forgot", "Effortful", "Remembered", "Instant"]
+        assert labels[:4] == ["reluctant", "eager", "careful", "sudden"]
+        assert step_data("s", 2, "3") in FakeOutbox.callbacks(card)
 
-    def test_a_right_reply_is_followed_by_how_it_came(self) -> None:
-        from lexitrack.telegram.messages import assess_card
-
-        card = assess_card(Step(self.word, StepKind.TYPE), "s", 4, "✓ “reluctant”", 1, 9)
+    def test_context_to_definition_lists_the_definitions_by_letter(self) -> None:
+        definitions = (Option(2, "wanting to do something"), Option(1, "unwilling <to> act"),
+                       Option(3, "taking care"), Option(4, "happening quickly"))
+        question = Question(Task.CONTEXT_TO_DEFINITION, "He was reluctant to go.",
+                            definitions, 1, context_id=5, highlight=(7, 16))
+        step = Step(self.word, StepKind.QUESTION, task=question.task, question=question)
+        card = step_card(step, "s", 3, 1, 9)
+        assert "He was <b>reluctant</b> to go." in card.text
+        assert "<b>B</b>  unwilling &lt;to&gt; act" in card.text, "escaped"
         labels = [label for row in card.buttons for label, _ in row]
-        # No Forgot after a right answer.
-        assert labels[:3] == ["Effortful", "Remembered", "Instant"]
-        assert step_data("s", 4, "instant") in FakeOutbox.callbacks(card)
+        assert labels[:4] == ["A", "B", "C", "D"]
 
-    def test_a_written_sentence_is_graded_beside_the_examples(self) -> None:
-        step = Step(self.word, StepKind.WRITE)
-        check = write_check(step, "I was <reluctant> to go.", "s", 3)
-        assert "&lt;reluctant&gt;" in check.text, "the learner's text is escaped"
-        labels = [label for row in check.buttons for label, _ in row]
-        assert labels[:4] == ["Forgot", "Effortful", "Remembered", "Instant"]
-        assert step_data("s", 3, "remembered") in FakeOutbox.callbacks(check)
+    def test_after_a_right_answer_the_four_ratings_say_when_it_comes_back(self) -> None:
+        question = Question(Task.DEFINITION_TO_WORD, "unwilling to do something",
+                            self.options, 0)
+        step = Step(self.word, StepKind.QUESTION, task=question.task, question=question)
+        text = FeedbackText("Correct", "good", (("Word", "reluctant"),
+                                                ("Definition", "unwilling to do something")))
+        card = rate_card(step, "s", 4, text, {Rating.AGAIN: 1, Rating.HARD: 3,
+                                               Rating.GOOD: 8, Rating.EASY: 21}, 1, 9)
+        assert "How did it go?" in card.text and "unwilling to do something" in card.text
+        labels = [label for row in card.buttons for label, _ in row][:4]
+        assert labels == ["Again · tomorrow", "Hard · 3 days", "Good · 8 days", "Easy · 21 days"]
+        assert step_data("s", 4, "easy") in FakeOutbox.callbacks(card)
 
-    def test_a_report_reaches_the_flow_as_it_was_given(self, bot: BotCore) -> None:
-        from lexitrack.models.attempt import SelfReport
-
-        reported = []
+    def test_a_button_reaches_the_flow_as_it_was_pressed(self, bot: BotCore) -> None:
+        calls = []
 
         class Flow:
             session_id = "s"
             awaiting = False
-            written = "a sentence"
-            current = Step(TestCards.word, StepKind.WRITE)
+            current = Step(TestCards.word, StepKind.QUESTION, task=Task.DEFINITION_TO_WORD,
+                           question=Question(Task.DEFINITION_TO_WORD, "p", TestCards.options, 0))
 
-            def assess(self, report):
-                reported.append(report)
+            def choose(self, index):
+                calls.append(("choose", index))
                 return True
 
-        for value in ("forgot", "effortful", "remembered", "instant"):
-            bot._act(Flow(), value)
-        assert reported == list(SelfReport)
-        # Without a sentence written first, a report is not taken.
-        unwritten = Flow()
-        unwritten.written = None
-        assert bot._act(unwritten, "instant") is None
+            def rate(self, rating):
+                calls.append(("rate", rating))
+                return True
+
+        flow = Flow()
+        assert bot._act(flow, "2")
+        assert bot._act(flow, "9") is None, "no such option"
+        assert bot._act(flow, "good") is None, "nothing waits for a rating"
+        flow.awaiting = True
+        assert bot._act(flow, "good")
+        assert bot._act(flow, "1") is None, "a rating is waited for, not an option"
+        assert calls == [("choose", 2), ("rate", Rating.GOOD)]
 
 
 # -- notifications -------------------------------------------------------------
@@ -817,7 +850,7 @@ class TestWeeklySummary:
             clock.advance(hours=7)
             engine.introduce()
             for index, item in enumerate(engine.review_queue()):
-                engine.answer(item.word.id, Rating.AGAIN if index % 3 == 0 else Rating.GOOD)
+                answer(engine, item.word.id, Rating.AGAIN if index % 3 == 0 else Rating.GOOD)
 
     def test_it_is_owed_on_sunday_evening_once(
         self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
@@ -854,22 +887,3 @@ class TestWeeklySummary:
         clock.set(self.SUNDAY_EVENING)
         assert Notification.WEEKLY in run(bot.tick()), "counted as done for the week"
         assert not [m for _, m in outbox.sent if "Your week" in m.text]
-
-
-def test_a_new_words_page_offers_more_when_there_is_more() -> None:
-    word = StoredWord(id=1, word="arid", normalized_word="arid", definition="very dry")
-    step = Step(word, StepKind.TEACH)
-    with_more = step_card(step, "s", 3, 1, 4, more=True)
-    assert step_data("s", 3, "more") in FakeOutbox.callbacks(with_more)
-    assert step_data("s", 3, "more") not in FakeOutbox.callbacks(step_card(step, "s", 3, 1, 4))
-
-
-def test_a_written_sentence_is_checked_against_the_pattern_and_collocations() -> None:
-    from lexitrack.models.content import WordContent, WordTeaching
-
-    word = StoredWord(id=1, word="reluctant", normalized_word="reluctant", definition="unwilling")
-    teaching = WordTeaching(WordContent(word_id=1, pattern="reluctant to do sth",
-                                        collocations=("a reluctant hero", "reluctantly agree")))
-    check = write_check(Step(word, StepKind.WRITE, teaching=teaching), "I was reluctant.", "s", 2)
-    assert "☐ Pattern: reluctant to do sth" in check.text
-    assert "☐ Goes with: a reluctant hero · reluctantly agree" in check.text

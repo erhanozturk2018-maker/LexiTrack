@@ -262,7 +262,7 @@ def test_csv_export_has_the_expected_columns(reviewed: VocabularyService, tmp_pa
     with target.open(encoding="utf-8-sig", newline="") as handle:
         header = next(csv.reader(handle))
     assert header == [
-        "Word", "Part of Speech", "CEFR", "Definition", "Example", "Note", "Sources",
+        "Word", "Part of Speech", "CEFR", "Definition", "Sources",
     ]
 
 

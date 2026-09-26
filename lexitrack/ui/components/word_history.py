@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...models.skill import SkillStage
 from ...models.srs import CardState, Channel, Rating
 from ...models.user_word_state import ReviewStatus, StatusCause
 from ...services.progress import Group, JourneyStep, WordJourney
@@ -96,34 +95,11 @@ def status_sentence(step: JourneyStep) -> str:
     return text
 
 
-def skill_sentence(journey: WordJourney) -> str:
-    """What the record shows can be done with the word, in one line."""
-    skill = journey.skill
-    if skill is None or skill.stage is SkillStage.NONE:
-        return ""
-    counts = []
-    if skill.recognized:
-        counts.append(f"recognised {_times(skill.recognized)}")
-    if skill.recalled:
-        counts.append(f"recalled {_times(skill.recalled)}")
-    if skill.produced_in:
-        counts.append(f"used in {skill.produced_in} "
-                      f"{'context' if skill.produced_in == 1 else 'contexts'}")
-    text = f"Skill: {skill.stage.label}"
-    if counts:
-        text += " — " + ", ".join(counts) + " on later days"
-    if skill.automatic:
-        text += f"; instant on {skill.automatic_days} days, so automatic"
-    if skill.from_v1 and not skill.recalled and not skill.produced_in:
-        text += ". Answers from before this version asked for the meaning only"
-    return text + "."
-
-
 def milestones_sentence(journey: WordJourney) -> str:
-    """The firsts in the word's record, and how often it was forgotten."""
+    """The firsts in the word's record, and how often it was rated Again."""
     parts = [f"{m.label} {pretty_day(m.day)}" for m in journey.milestones]
     if journey.forgotten:
-        parts.append(f"forgotten {_times(journey.forgotten)}")
+        parts.append(f"rated Again {_times(journey.forgotten)}")
     return ("Milestones: " + " · ".join(parts) + ".") if parts else ""
 
 
@@ -138,6 +114,12 @@ def why_sentence(journey: WordJourney) -> str:
         if journey.word.status is ReviewStatus.KNOWN:
             return "Known before you studied it here, so it is not on your schedule."
         if journey.word.status is ReviewStatus.UNKNOWN:
+            if not journey.word.definition:
+                return (
+                    "Unknown, and not introduced yet. It has no definition, so it cannot "
+                    "be asked: add one and a study plan that includes one of its lists "
+                    "offers it as a new word."
+                )
             return (
                 "Unknown, and not introduced yet: a study plan that includes one of its "
                 "lists offers it as a new word."
@@ -333,11 +315,7 @@ class WordHistoryView(QWidget):
             self._facts.append((caption, value))
         layout.addLayout(facts)
 
-        # Skill, beside the memory the facts describe: what the answers showed.
-        self.skill = QLabel()
-        self.skill.setObjectName("HistorySkill")
-        self.skill.setWordWrap(True)
-        layout.addWidget(self.skill)
+        # The firsts in its record, beside the memory the facts describe.
         self.milestones = QLabel()
         self.milestones.setObjectName("HistorySkill")
         self.milestones.setWordWrap(True)
@@ -369,7 +347,10 @@ class WordHistoryView(QWidget):
     def show_journey(self, journey: WordJourney) -> None:
         word = journey.word
         self.title.setText(word.word)
-        meta = " · ".join(part for part in (word.part_of_speech, word.cefr_level) if part)
+        meta = " · ".join(
+            part for part in (f"{word.length} letters", word.part_of_speech, word.cefr_level)
+            if part
+        )
         self.meta.setText(meta)
         self.meta.setVisible(bool(meta))
         self.badge.set_status(word.status)
@@ -379,9 +360,6 @@ class WordHistoryView(QWidget):
             caption.setText(title)
             value.setText(text)
 
-        skill = skill_sentence(journey)
-        self.skill.setText(skill)
-        self.skill.setVisible(bool(skill))
         marks = milestones_sentence(journey)
         self.milestones.setText(marks)
         self.milestones.setVisible(bool(marks))
@@ -436,8 +414,8 @@ class _StepRow(QFrame):
             parts = []
             if step.asked is not None:
                 parts.append(step.asked.label)
-            if step.memory_result is not None:
-                parts.append(step.memory_result.label.lower())
+            if step.correct is not None:
+                parts.append("right" if step.correct else "wrong")
             if step.state_before and step.state_after and step.state_before != step.state_after:
                 parts.append(
                     f"{_STATE_WORDS[step.state_before]} → {_STATE_WORDS[step.state_after]}"

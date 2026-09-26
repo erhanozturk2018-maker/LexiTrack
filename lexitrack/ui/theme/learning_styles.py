@@ -246,7 +246,7 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     border-radius: {m.radius_md}px;
 }}
 #SummaryText {{ font-size: 13px; color: {p.text}; background: transparent; }}
-/* ------------------------------------------------------- review card, V2 */
+/* ------------------------------------------------------- review card */
 
 #TaskLabel {{
     font-size: 11px;
@@ -255,8 +255,8 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     color: {p.text_faint};
     background: transparent;
 }}
-/* The question: a meaning, a sentence with a gap, a phrase. Large enough to
-   be the thing on screen, smaller than a word on its own. */
+/* The question: a definition. Large enough to be the thing on screen,
+   smaller than a word on its own. */
 #PromptLabel {{
     font-family: {DISPLAY_FONT_STACK};
     font-size: 24px;
@@ -264,33 +264,18 @@ QPushButton[variant="known-solid"] #AnswerKey {{
     color: {p.text};
     background: transparent;
 }}
-#PromptDetail {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
-QLineEdit#AnswerInput {{
-    font-size: 22px;
-    padding: 10px 14px;
-    border-radius: {m.radius_md}px;
-    border: 1px solid {p.border_strong};
-    min-height: 30px;
-}}
-QLineEdit#AnswerInput:focus {{ border: 2px solid {p.focus_ring}; }}
-QLineEdit#AnswerInput[result="right"], QLineEdit#AnswerInput[result="near"] {{
-    border: 2px solid {p.known};
-    background-color: {p.known_soft};
-    color: {p.known_text};
-}}
-QLineEdit#AnswerInput[result="wrong"] {{
-    border: 2px solid {p.unknown};
-    background-color: {p.unknown_soft};
-    color: {p.unknown_text};
-}}
-QLineEdit#SentenceInput {{ font-size: 16px; padding: 10px 12px; }}
-#HintLabel {{
+/* A context: a sentence, read rather than scanned, the word in bold. */
+#ContextPrompt {{
     font-family: {DISPLAY_FONT_STACK};
-    font-size: 18px;
-    letter-spacing: 1px;
-    color: {p.text_muted};
+    font-size: 20px;
+    color: {p.text};
     background: transparent;
 }}
+#PromptDetail {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
+/* A definition as an option: left-aligned beside its key, wrapped. */
+#OptionText {{ font-size: 14px; color: {p.text}; background: transparent; }}
+QPushButton#AnswerButton[result="right"] #OptionText {{ color: {p.known_text}; }}
+QPushButton#AnswerButton[result="wrong"] #OptionText {{ color: {p.unknown_text}; }}
 QPushButton#AnswerButton[result="right"] {{
     background-color: {p.known_soft};
     border: 2px solid {p.known};
@@ -301,11 +286,19 @@ QPushButton#AnswerButton[result="wrong"] {{
 }}
 QPushButton#AnswerButton[result="right"] #AnswerTitle {{ color: {p.known_text}; }}
 QPushButton#AnswerButton[result="wrong"] #AnswerTitle {{ color: {p.unknown_text}; }}
-#FeedbackLabel {{ font-size: 14px; color: {p.text_muted}; background: transparent; }}
-#FeedbackLabel[tone="good"] {{ color: {p.known_text}; font-weight: 600; }}
-#FeedbackLabel[tone="bad"] {{ color: {p.unknown_text}; }}
-#TeachScroll, #TeachScroll > QWidget#qt_scrollarea_viewport {{ background: transparent; }}
-#ExamplesLabel, #TeachText {{
+/* After an answer: the right word and its definition, on the answer's colour. */
+#ResultPanel {{
+    background-color: {p.surface_sunken};
+    border-radius: {m.radius_md}px;
+}}
+#ResultPanel[tone="good"] {{ background-color: {p.known_soft}; }}
+#ResultPanel[tone="bad"] {{ background-color: {p.unknown_soft}; }}
+#ResultTitle {{ font-size: 15px; font-weight: 700; color: {p.text}; background: transparent; }}
+#ResultPanel[tone="good"] #ResultTitle {{ color: {p.known_text}; }}
+#ResultPanel[tone="bad"] #ResultTitle {{ color: {p.unknown_text}; }}
+#ResultLine {{ font-size: 14px; color: {p.text}; background: transparent; }}
+#ResultNote {{ font-size: 13px; color: {p.text_muted}; background: transparent; }}
+#TeachText {{
     font-size: 14px;
     color: {p.text};
     background-color: {p.surface_sunken};

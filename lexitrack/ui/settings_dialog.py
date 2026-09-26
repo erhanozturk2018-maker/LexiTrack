@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
 from ..core import autostart, paths
 from ..core.errors import LexiTrackError
 from ..core.logging_config import set_file_logging
-from ..models.language import LANGUAGE_NAMES, UNDETERMINED
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
 from ..services.maintenance import KEEP_BACKUPS, Maintenance
@@ -194,22 +193,6 @@ class SettingsDialog(QDialog):
             self.review_known,
         )
         layout.addWidget(known)
-
-        language = _Group("LANGUAGE")
-        self.learner_language = QComboBox()
-        self.learner_language.addItem("None", "")
-        for code, name in sorted(LANGUAGE_NAMES.items(), key=lambda item: item[1]):
-            if code != UNDETERMINED:
-                self.learner_language.addItem(name, code)
-        self.learner_language.setFixedWidth(_CONTROL_WIDTH)
-        language.add(
-            "Explain words in",
-            "Your own language, for meanings, nuances and translations, where content "
-            "in it has been added. None: words are explained by their definitions. The "
-            "words and their examples stay in the language you are learning.",
-            self.learner_language,
-        )
-        layout.addWidget(language)
 
         day = _Group("THE DAY")
         self.day_start = _HourSpin()
@@ -592,8 +575,6 @@ class SettingsDialog(QDialog):
         self.fragile_every.setValue(s.fragile_every)
         self.mastery_days.setValue(int(s.mastery_stability_days))
         self.review_known.setChecked(s.review_known_words)
-        index = self.learner_language.findData(s.learner_language or "")
-        self.learner_language.setCurrentIndex(max(index, 0))
         self.timezone_note.setText(f"Times are in {s.timezone}.")
         self.day_start.setValue(s.day_start_hour)
         self.notify_hour.setValue(s.notify_hour)
@@ -765,7 +746,6 @@ class SettingsDialog(QDialog):
             Setting.REVIEW_CAPACITY_PER_DAY: self.capacity.value(),
             Setting.MASTERY_STABILITY_DAYS: self.mastery_days.value(),
             Setting.REVIEW_KNOWN_WORDS: self.review_known.isChecked(),
-            Setting.LEARNER_LANGUAGE: self.learner_language.currentData() or "",
             Setting.DAY_START_HOUR: self.day_start.value(),
             Setting.NOTIFY_HOUR: self.notify_hour.value(),
             Setting.EVENING_REMINDER_HOUR: self.reminder_hour.value(),
