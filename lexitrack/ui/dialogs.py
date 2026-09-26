@@ -328,14 +328,29 @@ class AddWordDialog(QDialog):
         self.word_field.setFocus()
 
 
+#: Ends every question about something that cannot be taken back.
+IRREVERSIBLE = "This cannot be undone."
+
+
 def confirm(
     parent: QWidget,
     title: str,
     text: str,
     action: str,
     destructive: bool = True,
+    irreversible: bool | None = None,
 ) -> bool:
-    """Ask before doing something that cannot be undone."""
+    """Ask before doing something that cannot be undone.
+
+    ``action`` names what the button does ("Delete word", not "OK"). A
+    question about something that cannot be taken back — by default, anything
+    destructive — always ends by saying so; pass ``irreversible=False`` when a
+    safety copy makes it reversible.
+    """
+    if irreversible is None:
+        irreversible = destructive
+    if irreversible and not text.rstrip().endswith(IRREVERSIBLE):
+        text = f"{text.rstrip()}\n\n{IRREVERSIBLE}"
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning if destructive else QMessageBox.Icon.Question)
     box.setWindowTitle(title)
@@ -347,3 +362,26 @@ def confirm(
         go.setProperty("variant", "danger")
     box.exec()
     return box.clickedButton() is go
+
+
+def ask_unsaved(parent: QWidget, word: str, allow_keep: bool = True) -> str | None:
+    """A word's definition or contexts were edited and not saved: "save",
+    "discard", or None to keep editing (offered only when ``allow_keep``)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle("Unsaved changes")
+    box.setText(f"Save your changes to “{word}”?")
+    box.setInformativeText("Discard throws them away.")
+    save = box.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+    discard = box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+    keep = (
+        box.addButton("Keep editing", QMessageBox.ButtonRole.RejectRole) if allow_keep else None
+    )
+    box.setDefaultButton(save)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is save:
+        return "save"
+    if clicked is discard or keep is None:
+        return "discard"
+    return None

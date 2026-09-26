@@ -12,7 +12,8 @@ exposed, and they keep working unchanged.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.errors import ListError, WordError
@@ -48,6 +49,33 @@ from .import_service import (
 from .review_session import ReviewSession
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class WordEdit:
+    """Everything the details panel's edit mode saves, at once."""
+
+    #: The new definition; None leaves it as it is.
+    definition: str | None = None
+    #: Contexts corrected in place, by id.
+    changed: Mapping[int, str] = field(default_factory=dict)
+    #: Contexts deleted, by id.
+    deleted: Sequence[int] = ()
+    #: New contexts, in order.
+    added: Sequence[str] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StatusChange:
+    """A status change as it was made, so it can be taken back."""
+
+    status: ReviewStatus
+    #: The words it changed, with the status and review time each had.
+    before: Mapping[int, tuple[ReviewStatus, str | None]]
+
+    @property
+    def changed(self) -> int:
+        return len(self.before)
 
 #: Provenance recorded for words the user types in themselves.
 MANUAL_SOURCE = Source(key="manual", name="Added manually", parser_type="manual")
@@ -248,6 +276,31 @@ class VocabularyService:
             raise WordError("That word no longer exists.")
         return stored
 
+    def save_word(self, word_id: int, edit: WordEdit) -> StoredWord:
+        """Save a definition and contexts edited together, in one transaction:
+        either all of it is saved or none of it.
+
+        Deletions go first, so a corrected sentence may take the text of one
+        just deleted; a new sentence the word already has is not added twice.
+        """
+        with self._db.transaction():
+            own = {context.id for context in self._contexts.for_word(word_id)}
+            foreign = (set(edit.deleted) | set(edit.changed)) - own
+            if foreign:
+                raise WordError("Those contexts belong to another word.")
+            if edit.definition is not None:
+                self._words.set_definition(word_id, edit.definition)
+            for context_id in edit.deleted:
+                self._contexts.delete(context_id)
+            for context_id, text in edit.changed.items():
+                self._contexts.update(context_id, text)
+            if edit.added:
+                self._contexts.add_many(word_id, list(edit.added))
+        stored = self._words.get(word_id)
+        if stored is None:
+            raise WordError("That word no longer exists.")
+        return stored
+
     def delete_words(self, word_ids: Sequence[int]) -> int:
         """Delete words from LexiTrack altogether — from every list, with
         their contexts, status, card and answers. Returns how many."""
@@ -292,6 +345,24 @@ class VocabularyService:
         changed = self._state.set_status_many(word_ids, status)
         log.info("Set %d words to %s", changed, status.value)
         return changed
+
+    def change_status(self, word_ids: Sequence[int], status: ReviewStatus) -> StatusChange:
+        """Change the status of many words, remembering what each was so
+        :meth:`undo_status_change` can put it back."""
+        status = ReviewStatus(status)
+        with self._db.transaction():
+            before = self._state.states(word_ids)
+            self._state.set_status_many(word_ids, status)
+        changed = {word_id: was for word_id, was in before.items() if was[0] is not status}
+        log.info("Set %d words to %s", len(changed), status.value)
+        return StatusChange(status, changed)
+
+    def undo_status_change(self, change: StatusChange) -> int:
+        """Put back the statuses a :meth:`change_status` changed. Returns how
+        many words changed back."""
+        restored = self._state.restore(dict(change.before))
+        log.info("Took back a change to %s for %d words", change.status.value, restored)
+        return restored
 
     def get_word(self, word_id: int) -> StoredWord | None:
         return self._words.get(word_id)

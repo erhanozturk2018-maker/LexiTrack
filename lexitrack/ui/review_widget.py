@@ -162,7 +162,9 @@ class ReviewWidget(QWidget):
         self._next_button.clicked.connect(self.forward_requested.emit)
         self._next_button.setVisible(False)
 
-        self._reset_button = _ghost_button("Reset", "Reset this word to Not Reviewed (R)")
+        self._reset_button = _ghost_button(
+            "Clear answer", "Clear your answer: back to Not Reviewed (R)"
+        )
         self._reset_button.clicked.connect(self.reset_requested.emit)
         self._reset_button.setVisible(False)
 

@@ -860,7 +860,7 @@ class SettingsDialog(QDialog):
             "\n\nYour answers are also what LexiTrack would learn your memory "
             "from. To keep a copy, cancel and use Export history first.\n\n"
             "Your words, lists, definitions and plans are kept, and yesterday's "
-            "backup stays in the data folder. This cannot be undone.",
+            "backup stays in the data folder.",
             "Reset progress",
         ):
             return

@@ -915,7 +915,7 @@ def test_selection_bar_menus_list_targets_and_new_list(two_lists) -> None:
 def test_right_click_menu_offers_every_selection_action(two_lists) -> None:
     window, *_ = two_lists
     labels = [a.text() for a in window.review.table.build_context_menu().actions()]
-    for expected in ("Mark Known", "Mark Unknown", "Reset to Not Reviewed", "Copy to",
+    for expected in ("Mark Known", "Mark Unknown", "Mark Not Reviewed", "Copy to",
                      "Move to", "Remove from This List\u2026", "Export\u2026"):
         assert expected in labels
 
@@ -1226,7 +1226,7 @@ def test_unknown_words_has_no_status_column_or_unknown_action(window) -> None:
     assert table.view.isColumnHidden(Column.STATUS)
     assert table.mark_unknown_button.isHidden()
     assert table.panel.buttons[ReviewStatus.UNKNOWN].isHidden()
-    assert table.reset_button.text().endswith("Reset")
+    assert table.reset_button.text().endswith("Not reviewed")
 
 
 # -- app bar, command palette, shortcuts -------------------------------------
@@ -1323,35 +1323,141 @@ def test_the_panel_shows_a_word_and_edits_its_contexts(qtbot, service) -> None:
     assert panel.definition.text() == "to sleep later than usual"
     assert panel.context_texts() == ["I usually sleep in on Sundays."]
 
+    # Reading: no editor, no ×; Edit is the way in.
+    assert not panel.editing
+    assert not panel.definition_field.isVisibleTo(panel)
+    assert panel.edit_button.isVisibleTo(panel)
+
+    # Typing in "Add a sentence" opens edit mode with it as a new context;
+    # nothing is written until Save.
     panel.context_field.setText("We can sleep in tomorrow.")
-    panel._add_context()
+    panel._start_with_sentence()
+    assert panel.editing
     assert panel.context_texts() == [
         "I usually sleep in on Sundays.", "We can sleep in tomorrow.",
     ]
-    assert panel.context_field.text() == ""
-    # The same sentence again is refused, and said so.
-    panel.context_field.setText("we can sleep in tomorrow.")
-    panel._add_context()
-    assert "already" in panel.context_message.text()
-    assert len(service.contexts(stored.id)) == 2
+    assert len(service.contexts(stored.id)) == 1
+    assert not panel.button_row.isVisibleTo(panel)
+    assert not panel.delete_button.isVisibleTo(panel)
 
-    first = service.contexts(stored.id)[0]
-    panel._delete_context(first.id)
-    assert panel.context_texts() == ["We can sleep in tomorrow."]
+    # A saved context marked × is struck through, not deleted: Save asks,
+    # naming it, and a "no" keeps everything as it is on screen.
+    asked: list[list[str]] = []
+    panel.confirm_deletions = lambda word, sentences: asked.append(sentences) or False
+    panel._rows[0].toggle_removed()
+    assert panel._rows[0].removed
+    panel.definition_field.setPlainText("to stay in bed later than usual")
+    assert not panel.save_edit()
+    assert asked == [["I usually sleep in on Sundays."]]
+    assert panel.editing
+    assert len(service.contexts(stored.id)) == 1
 
+    # Yes: definition, deletion and new context are saved together.
     changed = []
     panel.word_changed.connect(changed.append)
-    panel._edit_definition()
-    panel.definition_field.setPlainText("to stay in bed later than usual")
-    panel._save_definition()
+    panel.confirm_deletions = lambda word, sentences: True
+    assert panel.save_edit()
+    assert not panel.editing
     assert panel.definition.text() == "to stay in bed later than usual"
+    assert panel.context_texts() == ["We can sleep in tomorrow."]
+    assert [c.text for c in service.contexts(stored.id)] == ["We can sleep in tomorrow."]
     assert changed and changed[0].definition == "to stay in bed later than usual"
+    assert panel.context_message.text() == "Saved."
+
+    # A correction keeps the context's id; Cancel throws edits away.
+    (context,) = service.contexts(stored.id)
+    panel.start_edit()
+    panel._rows[0].editor.setPlainText("We could sleep in tomorrow.")
+    assert panel.save_edit()
+    assert service.contexts(stored.id) == (
+        type(context)(stored.id, "We could sleep in tomorrow.", context.id),
+    )
+    panel.start_edit()
+    panel.definition_field.setPlainText("something else")
+    panel.add_context_row("And another sleep in.")
+    panel.cancel_edit()
+    assert service.get_word(stored.id).definition == "to stay in bed later than usual"
+    assert len(service.contexts(stored.id)) == 1
+
+    # What cannot be saved is said, and nothing is written.
+    panel.start_edit()
+    panel.definition_field.setPlainText("   ")
+    assert not panel.save_edit()
+    assert "cannot be empty" in panel.context_message.text()
+    panel.cancel_edit()
 
     deleted = []
     panel.word_deleted.connect(deleted.append)
     panel._delete_word()
     assert deleted == [stored.id]
     assert service.get_word(stored.id) is None
+
+
+def test_moving_to_another_word_asks_about_unsaved_edits(two_lists) -> None:
+    window, service, *_ = two_lists
+    table = window.review.table
+    first, second = table.model.words[0], table.model.words[1]
+    table.select_ids([first.id])
+    panel = table.panel
+    panel.start_edit()
+    panel.definition_field.setPlainText("edited, not saved")
+
+    answers = iter([None, "discard"])
+    panel.ask_unsaved = lambda word, allow_keep: next(answers)
+    # Keep editing: the row goes back to the word being edited.
+    table.select_ids([second.id])
+    assert panel.editing and panel.word.id == first.id
+    assert table.selected_ids() == [first.id]
+    # Discard: the move happens, nothing was saved.
+    table.select_ids([second.id])
+    assert not panel.editing and panel.word.id == second.id
+    assert service.get_word(first.id).definition != "edited, not saved"
+
+
+def test_status_keys_change_at_once_and_undo_takes_it_back(two_lists) -> None:
+    window, service, sample, _difficult, ids = two_lists
+    page = window.review
+    before = {w.id: w.status for w in service.get_words(ids)}
+    page.table.mark_known_button.click()
+    assert all(w.status is ReviewStatus.KNOWN for w in service.get_words(ids))
+    assert page.toast.message.text() == "2 words marked Known."
+    assert page.toast.can_undo
+
+    page.toast.undo()
+    assert {w.id: w.status for w in service.get_words(ids)} == before
+    assert "Took back" in page.toast.message.text()
+
+
+def test_a_large_status_change_is_asked_about_first(two_lists, monkeypatch) -> None:
+    from lexitrack.ui import status_changes
+
+    window, service, *_ = two_lists
+    asked = []
+    monkeypatch.setattr(status_changes, "LARGE_CHANGE", 3)
+    monkeypatch.setattr(
+        status_changes, "confirm", lambda *a, **k: asked.append(a[2]) or False
+    )
+    table = window.review.table
+    table.select_all()
+    table.mark_known_button.click()
+    assert asked and asked[0].startswith("Mark 5 words Known?")
+    assert all(w.status is not ReviewStatus.KNOWN for w in table.model.words)
+
+
+def test_a_destructive_question_says_it_cannot_be_undone(qapp, monkeypatch) -> None:
+    from PySide6.QtWidgets import QMessageBox, QWidget
+
+    from lexitrack.ui.dialogs import IRREVERSIBLE, confirm
+
+    texts: list[str] = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: texts.append(self.text()) or 0)
+    parent = QWidget()
+    confirm(parent, "Delete", "Delete it?", "Delete it")
+    confirm(parent, "Restore", "Go back?", "Restore", irreversible=False)
+    confirm(parent, "Delete", f"Delete it?\n\n{IRREVERSIBLE}", "Delete it")
+    assert texts[0].endswith(IRREVERSIBLE)
+    assert IRREVERSIBLE not in texts[1]
+    assert texts[2].count(IRREVERSIBLE) == 1
 
 
 def test_cefr_order_asks_the_pdf_for_level_headings(qapp, loaded) -> None:

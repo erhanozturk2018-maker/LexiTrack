@@ -41,6 +41,7 @@ from .empty_state import EmptyState
 from .list_actions import ListActions
 from .progress_widget import StatsBar
 from .review_widget import ReviewWidget
+from .status_changes import change_status
 from .theme.palette import METRICS
 from .word_transfer import ListPicker, WordTransfer
 
@@ -303,13 +304,12 @@ class ReviewPage(QWidget):
     # -- list mode ---------------------------------------------------------
 
     def _set_status(self, word_ids: list[int], status: ReviewStatus) -> None:
-        try:
-            self._service.set_status(word_ids, ReviewStatus(status))
-        except LexiTrackError as exc:
-            QMessageBox.warning(self, "Could not change status", exc.user_message)
-            return
-        self.table.refresh_words(self._service.get_words(word_ids))
-        self._after_change()
+        """At once, with Undo in the toast; many words are asked about first."""
+        def redraw() -> None:
+            self.table.refresh_words(self._service.get_words(word_ids))
+            self._after_change()
+
+        change_status(self, self._service, self.toast, word_ids, status, redraw)
 
     def _after_transfer(self) -> None:
         """Redraw after a copy, move or undo, keeping whatever is still selected.
@@ -358,13 +358,19 @@ class ReviewPage(QWidget):
         current = self._service.get_list(self.list_id)
         exclusive = self._service.exclusive_word_count(self.list_id, word_ids)
         count = len(word_ids)
-        text = f"Remove {count:,} {'word' if count == 1 else 'words'} from “{current.name}”?"
+        words = f"{count:,} {'word' if count == 1 else 'words'}"
+        text = f"Remove {words} from “{current.name}”?"
         if exclusive:
             text += (
                 f"\n\n{exclusive:,} of them {'is' if exclusive == 1 else 'are'} in no other list, "
                 "so they will be deleted along with whether you know them."
             )
-        if not confirm(self, "Remove words", text, "Remove"):
+        else:
+            text += "\n\nThey stay in your other lists, with their status and history."
+        # Only words deleted with the list entry are lost for good.
+        if not confirm(
+            self, "Remove words", text, f"Remove {words}", irreversible=bool(exclusive)
+        ):
             return
         try:
             self._service.remove_words_from_list(self.list_id, word_ids)

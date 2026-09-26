@@ -94,15 +94,7 @@ class ContextRepository:
         An empty sentence, or one longer than :data:`MAX_CONTEXT_LENGTH`, is
         refused with a :class:`WordError` and nothing is added.
         """
-        cleaned = [clean_context(text) for text in texts]
-        for text in cleaned:
-            if not text:
-                raise WordError("A context cannot be empty.")
-            if len(text) > MAX_CONTEXT_LENGTH:
-                raise WordError(
-                    f"A context can be at most {MAX_CONTEXT_LENGTH} characters: "
-                    "a sentence or two."
-                )
+        cleaned = [_checked(text) for text in texts]
         added: list[WordContext] = []
         try:
             with self._db.transaction() as conn:
@@ -123,6 +115,25 @@ class ContextRepository:
             raise StorageError("The context could not be saved.") from exc
         return added
 
+    def update(self, context_id: int, text: str) -> WordContext:
+        """Correct a context's text in place, keeping its id: an answer that
+        was asked from it still points at it."""
+        clean = _checked(text)
+        try:
+            with self._db.transaction() as conn:
+                context = self.get(context_id)
+                if context is None:
+                    raise WordError("That context no longer exists.")
+                others = [c.text for c in self.for_word(context.word_id) if c.id != context.id]
+                if any(same_context(clean, other) for other in others):
+                    raise WordError("The word already has that sentence.")
+                conn.execute(
+                    "UPDATE word_contexts SET text = ? WHERE id = ?", (clean, int(context_id))
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("The context could not be saved.") from exc
+        return WordContext(context.word_id, clean, context.id)
+
     def delete(self, context_id: int) -> bool:
         """Delete one context. False when it was already gone."""
         try:
@@ -135,6 +146,18 @@ class ContextRepository:
                 )
         except sqlite3.Error as exc:
             raise StorageError("The context could not be deleted.") from exc
+
+
+def _checked(text: str) -> str:
+    """A context cleaned, or a :class:`WordError` saying why it cannot be one."""
+    clean = clean_context(text)
+    if not clean:
+        raise WordError("A context cannot be empty.")
+    if len(clean) > MAX_CONTEXT_LENGTH:
+        raise WordError(
+            f"A context can be at most {MAX_CONTEXT_LENGTH} characters: a sentence or two."
+        )
+    return clean
 
 
 def _to_context(row: sqlite3.Row) -> WordContext:

@@ -30,6 +30,7 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QPoint,
     QSettings,
+    QSize,
     QSortFilterProxyModel,
     Qt,
     Signal,
@@ -359,6 +360,8 @@ class VocabularyTable(QWidget):
         self._noun = noun
         #: Supplies ``(list_id, name)`` targets for the given word ids.
         self._targets: Callable[[list[int]], list[tuple[int, str]]] = lambda _ids: []
+        #: Set while the row goes back to a word whose edits were kept.
+        self._holding_edit = False
         self._build()
 
     # -- construction ------------------------------------------------------
@@ -459,6 +462,7 @@ class VocabularyTable(QWidget):
         self.view.doubleClicked.connect(self._on_open)
         self.view.key_status.connect(self._request_status)
         self.view.key_open.connect(lambda: self._on_open(self.view.currentIndex()))
+        self.view.key_edit.connect(self.edit_current)
         self.view.key_remove.connect(self._on_key_remove)
         self.view.key_pick.connect(self._on_key_pick)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -484,6 +488,8 @@ class VocabularyTable(QWidget):
         )
         self.panel.word_changed.connect(lambda word: self.refresh_words([word]))
         self.panel.word_deleted.connect(self._on_word_deleted)
+        # Editing one word, the bar's actions for the selection step aside.
+        self.panel.editing_changed.connect(self._on_selection_changed)
         body.addWidget(self.panel)
         layout.addLayout(body, 1)
 
@@ -511,9 +517,9 @@ class VocabularyTable(QWidget):
         bar.addSpacing(8)
         bar.addWidget(_divider())
 
-        self.mark_known_button = _bar_button("✓  Known", "Mark Known (K)")
-        self.mark_unknown_button = _bar_button("?  Unknown", "Mark Unknown (U)")
-        self.reset_button = _bar_button("↺  Reset", "Reset to Not Reviewed (R)")
+        self.mark_known_button = _bar_button("✓  Known", "Mark Known (K)", "K")
+        self.mark_unknown_button = _bar_button("?  Unknown", "Mark Unknown (U)", "U")
+        self.reset_button = _bar_button("–  Not reviewed", "Mark Not Reviewed (R)", "R")
         self.mark_known_button.clicked.connect(lambda: self._request_status(ReviewStatus.KNOWN))
         self.mark_unknown_button.clicked.connect(
             lambda: self._request_status(ReviewStatus.UNKNOWN)
@@ -523,10 +529,10 @@ class VocabularyTable(QWidget):
             bar.addWidget(button)
         bar.addWidget(_divider())
 
-        self.copy_button = _bar_button("Copy to  ▾", "Copy to another list (C)")
+        self.copy_button = _bar_button("Copy to  ▾", "Copy to another list (C)", "C")
         self.copy_button.setMenu(self._target_menu(self.copy_button, self.copy_requested))
         bar.addWidget(self.copy_button)
-        self.move_button = _bar_button("Move to  ▾", "Move to another list (M)")
+        self.move_button = _bar_button("Move to  ▾", "Move to another list (M)", "M")
         self.move_button.setMenu(self._target_menu(self.move_button, self.move_requested))
         self.move_button.setVisible(self._allow_move)
         bar.addWidget(self.move_button)
@@ -699,7 +705,7 @@ class VocabularyTable(QWidget):
     def _on_selection_changed(self, *_args) -> None:
         count = len(self.view.selectionModel().selectedRows())
         self.selection_count.setText(f"{count:,} selected")
-        showing = count > 0
+        showing = count > 0 and not self.panel.editing
         self.selection_bar.setVisible(showing)
         if showing:
             self._place_selection_bar()
@@ -743,15 +749,36 @@ class VocabularyTable(QWidget):
         return super().eventFilter(watched, event)
 
     def _on_current_changed(self, *_args) -> None:
+        if self._holding_edit:
+            return
         index = self.view.currentIndex()
         if not index.isValid():
             rows = self.view.selectionModel().selectedRows()
             index = rows[0] if rows else index
-        if not index.isValid():
-            self.panel.show_word(None)
+        word = (
+            self.model.word_at(self.proxy.mapToSource(index).row()) if index.isValid() else None
+        )
+        panel = self.panel
+        editing = panel.word if panel.editing else None
+        if editing is not None and (word is None or word.id != editing.id):
+            # Moving on from a word with unsaved edits: they are saved or
+            # thrown away as the user says, or the row stays where it was.
+            still_here = any(w.id == editing.id for w in self.model.words)
+            if not panel.can_leave(allow_keep=still_here):
+                self._holding_edit = True
+                try:
+                    self.select_ids([editing.id])
+                finally:
+                    self._holding_edit = False
+                return
+        panel.show_word(word)
+
+    def edit_current(self) -> None:
+        """E: edit the current word's definition and contexts."""
+        if self.panel.word is None:
             return
-        source = self.proxy.mapToSource(index)
-        self.panel.show_word(self.model.word_at(source.row()))
+        self.show_details(True)
+        self.panel.start_edit()
 
     def _on_details_toggled(self, visible: bool) -> None:
         self.panel.setVisible(visible)
@@ -820,7 +847,7 @@ class VocabularyTable(QWidget):
         for status, text, key, button in (
             (ReviewStatus.KNOWN, "Mark Known", "K", self.mark_known_button),
             (ReviewStatus.UNKNOWN, "Mark Unknown", "U", self.mark_unknown_button),
-            (ReviewStatus.NOT_REVIEWED, "Reset to Not Reviewed", "R", self.reset_button),
+            (ReviewStatus.NOT_REVIEWED, "Mark Not Reviewed", "R", self.reset_button),
         ):
             # isHidden is the button's own flag: switched off for this table,
             # regardless of whether the bar around it is showing.
@@ -867,13 +894,15 @@ def order_cell_margin(view: QTableView) -> int:
 class _KeyboardTableView(QTableView):
     """A table that turns single keys into actions on the selection.
 
-    K / U / R set status, C / M copy or move, Enter opens, Delete removes.
+    K / U / R set status, C / M copy or move, E edits the definition and
+    contexts, Enter opens, Delete removes.
     Arrows, Shift+arrows, Page Up/Down, Home/End and Ctrl+A keep their
     standard Qt behaviour.
     """
 
     key_status = Signal(object)
     key_open = Signal()
+    key_edit = Signal()
     key_remove = Signal()
     key_pick = Signal(str)
 
@@ -893,6 +922,9 @@ class _KeyboardTableView(QTableView):
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.key_open.emit()
                 return
+            if key == Qt.Key.Key_E:
+                self.key_edit.emit()
+                return
             if key == Qt.Key.Key_Delete:
                 self.key_remove.emit()
                 return
@@ -905,8 +937,43 @@ class _KeyboardTableView(QTableView):
         super().keyPressEvent(event)
 
 
-def _bar_button(text: str, tooltip: str) -> QPushButton:
-    button = QPushButton(text)
+class _KeyedButton(QPushButton):
+    """A bar button drawn as its label and, faint beside it, its key.
+
+    The two are labels inside the button (a QPushButton cannot mix styles in
+    its own text); :meth:`text` still answers the label, for readers and tests.
+    """
+
+    def __init__(self, text: str, key: str) -> None:
+        super().__init__()
+        self._label = text
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 10, 0)
+        layout.setSpacing(6)
+        title = QLabel(text)
+        title.setObjectName("BarButtonText")
+        hint = QLabel(key)
+        hint.setObjectName("BarKey")
+        for label in (title, hint):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            layout.addWidget(label)
+        self.setAccessibleName(text)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        # The labels' width, measured once the stylesheet has set their font.
+        return QSize(self.layout().sizeHint().width(), super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+    def text(self) -> str:  # noqa: D102 - the label, as a reader of the button sees it
+        return self._label
+
+
+def _bar_button(text: str, tooltip: str, key: str | None = None) -> QPushButton:
+    """A button on the selection bar. ``key`` is shown on it, faint, so the
+    single-key shortcut is seen where the action is, not only in a tooltip."""
+    button = _KeyedButton(text, key) if key else QPushButton(text)
     button.setObjectName("BarButton")
     button.setToolTip(tooltip)
     button.setCursor(Qt.CursorShape.PointingHandCursor)

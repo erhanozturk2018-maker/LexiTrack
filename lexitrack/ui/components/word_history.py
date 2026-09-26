@@ -83,11 +83,11 @@ def status_sentence(step: JourneyStep) -> str:
     if cause is StatusCause.MASTERY:
         text = "Marked Known after reaching long-term memory"
     elif cause is StatusCause.UNDO:
-        text = f"Back to {_status_word(to)}: an answer was taken back"
+        text = f"Back to {_status_word(to)}: an answer or a change was taken back"
     elif cause is StatusCause.SORTING:
         text = f"Marked {_status_word(to)} on Sort words"
     elif to is ReviewStatus.NOT_REVIEWED:
-        text = "Reset to not reviewed"
+        text = "Marked not reviewed by hand"
     else:
         text = f"Marked {_status_word(to)} by hand"
     if step.reconstructed:
@@ -126,7 +126,10 @@ def why_sentence(journey: WordJourney) -> str:
             )
         return "Not sorted yet. Mark it Unknown and your study plan will teach it."
     if card.state is CardState.ARCHIVED:
-        return "Marked Known by hand, so it has left the schedule. Reset it to bring it back."
+        return (
+            "Marked Known by hand, so it has left the schedule. "
+            "Mark it Not reviewed to bring it back."
+        )
     last = journey.last_answer
     if last is None:
         return (

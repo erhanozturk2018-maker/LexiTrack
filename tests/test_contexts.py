@@ -378,3 +378,55 @@ def test_contexts_are_cleaned_and_lengths_counted() -> None:
     assert word_length("sleep in") == 7
     assert word_length("well-known") == 9
     assert word_length("o'clock") == 6
+
+
+# -- editing a word in one go, and taking a status change back ---------------------------
+
+
+def test_a_word_is_saved_in_one_go_or_not_at_all(service: VocabularyService, english) -> None:
+    from lexitrack.services.vocabulary_service import WordEdit
+
+    stored, _ = service.add_word(
+        english.id, "arid", definition="dry",
+        contexts=["An arid desert.", "The land is arid.", "Arid summers."],
+    )
+    first, second, third = service.contexts(stored.id)
+    updated = service.save_word(stored.id, WordEdit(
+        definition="very dry, with little rain",
+        changed={second.id: "The land was arid."},
+        deleted=[third.id],
+        added=["An arid climate."],
+    ))
+    assert updated.definition == "very dry, with little rain"
+    assert [(c.id, c.text) for c in service.contexts(stored.id)][:2] == [
+        (first.id, "An arid desert."), (second.id, "The land was arid."),
+    ]
+    assert _texts(service, stored.id)[2:] == ["An arid climate."]
+
+    # A correction that repeats another sentence is refused, and nothing of
+    # the edit is written.
+    with pytest.raises(WordError):
+        service.save_word(stored.id, WordEdit(
+            definition="changed", changed={second.id: "an arid desert."},
+        ))
+    assert service.get_word(stored.id).definition == "very dry, with little rain"
+    assert _texts(service, stored.id)[1] == "The land was arid."
+
+
+def test_a_status_change_can_be_taken_back(service: VocabularyService, english) -> None:
+    from lexitrack.models.user_word_state import ReviewStatus, StatusCause
+
+    a, _ = service.add_word(english.id, "apple", definition="a fruit")
+    b, _ = service.add_word(english.id, "pear", definition="a fruit")
+    service.set_status([a.id], ReviewStatus.UNKNOWN)
+
+    change = service.change_status([a.id, b.id], ReviewStatus.KNOWN)
+    assert change.changed == 2
+    assert all(w.status is ReviewStatus.KNOWN for w in service.get_words([a.id, b.id]))
+
+    assert service.undo_status_change(change) == 2
+    statuses = [w.status for w in service.get_words([a.id, b.id])]
+    assert statuses == [ReviewStatus.UNKNOWN, ReviewStatus.NOT_REVIEWED]
+    # The history shows the change and that it was taken back.
+    causes = [e.cause for e in service._state.events_for_word(a.id)]
+    assert causes[-1] is StatusCause.UNDO

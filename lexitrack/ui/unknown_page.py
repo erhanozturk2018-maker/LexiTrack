@@ -17,14 +17,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ..core.errors import LexiTrackError
 from ..models.user_word_state import ReviewStatus
 from ..services.export_service import ExportFormat
 from ..services.vocabulary_service import VocabularyService
@@ -32,6 +30,7 @@ from .components.toast import Toast
 from .components.vocabulary_table import Column, VocabularyTable
 from .empty_state import EmptyState
 from .export_dialog import ExportDialog, ExportScope
+from .status_changes import change_status
 from .theme.palette import METRICS
 from .widgets import PageColumn
 from .word_transfer import WordTransfer
@@ -144,24 +143,9 @@ class UnknownPage(QWidget):
         status = ReviewStatus(status)
         if status is ReviewStatus.UNKNOWN:
             return
-        try:
-            self._service.set_status(word_ids, status)
-        except LexiTrackError as exc:
-            QMessageBox.warning(self, "Could not change status", exc.user_message)
-            return
-        # They are no longer unknown, so they leave this page.
-        self.table.remove_word_ids(word_ids)
-        self._reload_counts()
-
-    def _reload_counts(self) -> None:
-        total = self._service.unknown_count()
-        self.subtitle.setText(
-            f"{total:,} {'word' if total == 1 else 'words'} "
-            "you marked as unknown, across all lists"
-        )
-        if total == 0:
-            self.stack.setCurrentWidget(self.empty)
-            self.export_button.setEnabled(False)
+        # They are no longer unknown, so they leave this page; Undo brings
+        # them back.
+        change_status(self, self._service, self.toast, word_ids, status, self._reload)
 
     def _copy_to(self, word_ids: list[int], target_id: int) -> None:
         self.transfer.copy(word_ids, target_id)

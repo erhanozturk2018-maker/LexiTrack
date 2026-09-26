@@ -446,6 +446,19 @@ QPushButton#BarButton:hover, QPushButton#BarButton:focus {{
     outline: none;
 }}
 QPushButton#BarButton::menu-indicator {{ image: none; width: 0; }}
+/* A bar button's own text and its single-key shortcut, faint beside it. */
+#BarButtonText {{
+    color: {p.inverse_text};
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+}}
+#BarKey {{
+    color: {p.inverse_muted};
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+}}
 
 /* CEFR filter chips beside the search. */
 QPushButton#LevelChip {{
@@ -503,6 +516,50 @@ QScrollArea#PanelScroll, QScrollArea#PanelScroll > QWidget > QWidget {{
 #PanelMessage {{ color: {p.text_muted}; font-size: 12px; }}
 #PanelMessage[tone="bad"] {{ color: {p.unknown_text}; }}
 QPlainTextEdit#DefinitionField {{ font-size: 13px; }}
+/* Edit mode: the way in, and each context's editor. */
+QPushButton#PanelEdit {{
+    background: transparent;
+    border: 1px solid {p.border_strong};
+    border-radius: 13px;
+    color: {p.text};
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 18px;
+}}
+QPushButton#PanelEdit:hover, QPushButton#PanelEdit:focus {{
+    border-color: {p.accent};
+    color: {p.accent};
+}}
+/* A QTextEdit (see word_panel.ContextEditor), dressed like the inputs. */
+QTextEdit#ContextEditor {{
+    background-color: {p.surface};
+    color: {p.text};
+    border: 1px solid {p.border_strong};
+    border-radius: {m.radius_sm}px;
+    padding: 2px 6px;
+    font-size: 13px;
+    selection-background-color: {p.accent};
+    selection-color: {p.text_on_accent};
+}}
+QTextEdit#ContextEditor:focus {{ border: 1px solid {p.focus_ring}; }}
+QTextEdit#ContextEditor[removed="true"] {{
+    color: {p.text_faint};
+    background-color: {p.surface_sunken};
+    border-style: dashed;
+}}
+QPushButton#ContextRemove {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    color: {p.text_muted};
+    font-size: 16px;
+    padding: 0;
+}}
+QPushButton#ContextRemove:hover, QPushButton#ContextRemove:focus {{
+    border-color: {p.border_strong};
+    color: {p.danger};
+}}
 QPushButton#DangerLink {{
     font-size: 12px;
     color: {p.danger};

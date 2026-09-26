@@ -602,7 +602,10 @@ class MainWindow(QMainWindow):
     def quit(self) -> None:
         """Quit for real: the window, the bot and the process."""
         self._quitting = True
-        self.close()
+        if not self.close():
+            # Unsaved edits the user chose to keep: the window stays.
+            self.bring_forward()
+            return
         app = QApplication.instance()
         if app is not None:
             app.quit()
@@ -672,7 +675,7 @@ class MainWindow(QMainWindow):
             f"Delete “{word.word}” from LexiTrack?{lists}\n\nIt is removed from every "
             "list, with its contexts, its status and its review history. You can add "
             "it again later; it then starts afresh.",
-            "Delete",
+            "Delete word",
         )
 
     def open_content(self, word_ids: list | None = None) -> None:
@@ -718,7 +721,7 @@ class MainWindow(QMainWindow):
             f"{progress.known:,} known and {progress.unknown:,} unknown answers.\n\n"
             "The study schedule and review history are cleared too, so the study "
             "plan starts again from day one. Your lists, words and definitions are "
-            "kept, and yesterday's backup is in the data folder. This cannot be undone."
+            "kept, and yesterday's backup is in the data folder."
         )
         if not confirm(self, "Reset all progress?", text, "Reset everything"):
             return
@@ -855,6 +858,12 @@ class MainWindow(QMainWindow):
                     "The Telegram bot keeps working. Quit from the tray icon to stop it.",
                 )
             return
+        # A definition or contexts being edited are not lost by quitting.
+        for table in (self.review.table, self.unknown.table):
+            if not table.panel.can_leave():
+                event.ignore()
+                self._quitting = False
+                return
         # Stop polling before the database closes under the bot thread.
         self.telegram.shutdown()
         if self.tray is not None:

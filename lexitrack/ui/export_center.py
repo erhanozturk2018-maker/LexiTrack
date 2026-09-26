@@ -443,6 +443,7 @@ class ExportCenter(QDialog):
             "lists, progress, content, settings — is replaced by it.\n\nA copy of what is "
             "here now is saved in the backups folder first.",
             "Replace everything",
+            irreversible=False,
         ):
             return
         try:
@@ -464,6 +465,7 @@ class ExportCenter(QDialog):
             "anything done since is replaced.\n\nA copy of what is here now is saved in "
             "the backups folder first.",
             "Restore",
+            irreversible=False,
         ):
             return
         try:

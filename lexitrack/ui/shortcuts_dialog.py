@@ -41,7 +41,7 @@ FLASHCARD_KEYS: Section = (
         ("→", "Next word, after going back. Its status is not changed."),
         ("Enter / Space", "Repeat your last answer. On an earlier word: move forward without "
                           "changing it."),
-        ("R", "Reset the word on screen to Not Reviewed"),
+        ("R", "Clear your answer to the word on screen: back to Not Reviewed"),
     ),
 )
 
@@ -55,22 +55,22 @@ TABLE_KEYS: Section = (
         ("C / M", "Copy / move the selection to another list"),
         ("Menu / Right-click", "Every action for the selection"),
         ("Enter", "Open the details panel"),
+        ("E", "Edit the word's definition and contexts"),
+        ("Ctrl+S / Ctrl+Enter", "Save while editing"),
         ("Delete", "Remove the selection from this list (asks first)"),
         ("Ctrl+F", "Search"),
-        ("Esc", "Clear the selection"),
-        ("Ctrl+Z", "Undo a copy or move while its message is showing"),
+        ("Esc", "Clear the selection; while editing, cancel (asks if something would "
+                "be lost)"),
+        ("Ctrl+Z", "Undo a status change, copy or move while its message is showing"),
     ),
 )
 
 STUDY_KEYS: Section = (
     "Today's session",
     (
-        ("Enter", "Check the word you typed; with nothing typed, I don't know; "
-                  "after the result, go on"),
-        ("Ctrl+H", "Show the first letter (the answer then counts as effortful)"),
-        ("1 / 2 / 3 / 4", "Choose among four; for a word with no meaning, "
-                          "Again / Hard / Good / Easy"),
-        ("Space", "For a word with no meaning: show it, then answer Good"),
+        ("1 – 4 / A – D", "Choose one of the four options"),
+        ("1 / 2 / 3 / 4", "After a right answer: Again / Hard / Good / Easy"),
+        ("Enter / Space", "After a wrong answer or a new word: go on"),
         ("Esc", "End the session and keep what you answered"),
         ("Ctrl+Z", "Take back your last answer"),
     ),

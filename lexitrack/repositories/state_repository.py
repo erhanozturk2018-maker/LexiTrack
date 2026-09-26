@@ -139,6 +139,63 @@ class StateRepository:
             raise StorageError("Those changes could not be saved.") from exc
         return changed
 
+    def states(self, word_ids: Sequence[int]) -> dict[int, tuple[ReviewStatus, str | None]]:
+        """Each word's status and stored ``reviewed_at`` as they are now: what
+        :meth:`restore` puts back. A word without a state row is Not reviewed."""
+        ids = list(dict.fromkeys(int(word_id) for word_id in word_ids))
+        found: dict[int, tuple[ReviewStatus, str | None]] = {
+            word_id: (ReviewStatus.NOT_REVIEWED, None) for word_id in ids
+        }
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            placeholders = ",".join("?" * len(chunk))
+            for row in self._db.connection.execute(
+                f"SELECT word_id, status, reviewed_at FROM user_word_state "
+                f"WHERE word_id IN ({placeholders})",
+                chunk,
+            ):
+                found[int(row["word_id"])] = (ReviewStatus(row["status"]), row["reviewed_at"])
+        return found
+
+    def restore(
+        self,
+        states: dict[int, tuple[ReviewStatus, str | None]],
+        *,
+        at: datetime | None = None,
+    ) -> int:
+        """Put statuses back as :meth:`states` read them: an Undo.
+
+        Each word that really changes back gets an event with the cause
+        ``undo``, so its history shows the change and that it was taken back.
+        Returns how many words changed.
+        """
+        if not states:
+            return 0
+        changed = 0
+        try:
+            with self._db.transaction() as conn:
+                now = self.states(list(states))
+                for word_id, (status, reviewed_at) in states.items():
+                    current = now[word_id][0]
+                    conn.execute(
+                        """
+                        INSERT INTO user_word_state (word_id, status, reviewed_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(word_id) DO UPDATE SET
+                            status = excluded.status,
+                            reviewed_at = excluded.reviewed_at
+                        """,
+                        (word_id, status.value, reviewed_at),
+                    )
+                    if current is not status:
+                        self._append_events(
+                            conn, [(word_id, current)], status, StatusCause.UNDO, None, at
+                        )
+                        changed += 1
+        except sqlite3.Error as exc:
+            raise StorageError("Those changes could not be taken back.") from exc
+        return changed
+
     # -- history -----------------------------------------------------------
 
     @staticmethod
