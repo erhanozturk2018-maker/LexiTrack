@@ -72,7 +72,7 @@ the bot counts a session's ratings for its summary.
 | `repositories` | All SQL: words, sources, lists, review state; plans, cards and review logs, sessions and Telegram keys, settings and runtime state |
 | `services` | Imports, free review sessions, exports, the `VocabularyService` facade; the learning engine (`LearningService`, `SrsScheduler`, `WorkloadSimulator`); the record (`ProgressService`) and fitting (`Personaliser`); backups and maintenance |
 | `telegram` | The bot: configuration from `.env`, messages as data, when to speak, `BotCore`, the polling runtime |
-| `exporters` | PDF, CSV and JSON writers; `sheet.py`: the columns of a PDF or CSV and the teaching content they read |
+| `exporters` | PDF, CSV and JSON writers; `sheet.py`: the columns of a PDF or CSV (part of speech, CEFR, length, definition, contexts) |
 | `ui` | Pages (Study, Progress, Home, Review, Unknown Words), dialogs, a word's history, the in-app help, shared components, the tray, single instance, the Telegram controller, theme system |
 
 ---
@@ -174,32 +174,35 @@ format everywhere, because `due_at` is compared as text in SQL. Days are
 stored as local dates (`introduced_on`, `reviewed_on`). `state` is one of
 `introduced`, `learning`, `review`, `relearning`, `archived`.
 
-### Teaching content and languages (schemas 5 and 6)
+### A word, its definition and its contexts (schema 7)
 
 A word belongs to one **target language**, the language being learned:
 `words.language`, part of its identity (English "gift" and German "Gift" are
-two words). Teaching content is split by who it is true for:
+two words). A word is its text, its **length** (letters, worked out, never
+stored), its CEFR level and part of speech (from its sources), one
+**definition** — every sense it is learned in, in one text — and its
+**contexts**:
 
 ```text
-words (target language)          one record, one card, one review history
-├── word_content                 shared by every learner: pattern, collocations,
-│                                register, related words, depth
-├── word_contexts                shared: examples in the target language
-│   └── context_translations     per (context, learner language)
-└── word_localizations           per (word, learner language): core meaning,
-                                 nuance, usage note, mnemonic, notes, version
+words                  one record, one card, one review history
+├── word_sources       what each source said: part of speech, CEFR, definition
+└── word_contexts      id, word_id, text — sentences using the word, one per sense
 ```
 
-A **learner language** is data — a code in a row — never a column or a
-table: `tr`, `de`, `es` coexist on the same word without duplicating it
-(tests/test_content.py, tests/test_localization_migration.py). The learner
-chooses theirs in Settings (`learner_language`); the review asks in it when
-the word has content in it and falls back to the target-language definition
-otherwise. Any pair works on this schema: English → Turkish, English →
-German, German → English, Spanish → English.
+The definition shown is the first one the word's sources give;
+`WordRepository.set_definition` replaces that one. A context is plain text —
+no marker, no translation, no note — and a word never has the same sentence
+twice (a `UNIQUE (word_id, text)` constraint, and case and spacing ignored in
+`ContextRepository`). Deleting a word deletes its contexts, sources, status,
+card and answers by `ON DELETE CASCADE`; the same word added again starts
+afresh.
 
-Schema 5 kept one learner language (Turkish) in the shared rows; the 5 → 6
-upgrade moved it into `tr` localizations and dropped those columns.
+Schemas 5 and 6 held teaching content — patterns, collocations, register,
+related words, per-language meanings, notes and translations. Schema 7
+dropped it (the backup taken before the upgrade keeps it), rebuilt
+`word_contexts` without its `{{word}}` markers and rebuilt
+`learning_attempts` with `correct` and `effort` (again, hard, good, easy) in
+place of `success`, the level, the depth and "novel context".
 
 ### Invariants the repositories maintain
 
@@ -438,49 +441,43 @@ no widgets: the steps still to come, which word each belongs to, what Undo
 would take back. The desktop's Today page and the Telegram bot both drive it
 and hold no session state of their own; each says which channel it is, so the
 answers are recorded as coming from there. Every rating goes through
-`LearningService.review` (or `answer` for a shown-and-rated word) and every
-Undo through `undo_last_answer`: the flow decides what to ask next, never
-what an answer means. Each step shown has a number that changes whenever the
+`LearningService.review` — with the task asked and whether the answer was
+right — and every Undo through `undo_last_answer`: the flow decides what to
+ask next, never what an answer means. The questions themselves —
+Definition → Word and Context → Definition, four options each — are built by
+`services/review_tasks.py` from stored content only; the three other options
+come from `OptionPool`, the vocabulary with what likeness is judged by worked
+out once per session. Each step shown has a number that changes whenever the
 step does, so a client can tell a tap on the current step from an older one.
 
 After every step the flow writes its state to `review_sessions.flow_state` as
-versioned JSON, and clears it when the session ends. Version 2 holds the
-session whole: every step still to come exactly as it will be asked (kind,
-phase, role, the prompt with its context, the four options, depth), each
-word's run (attempts and results so far, prompts used, cycles, rated or
-learned), the last question kinds for variety, and a step half answered — a
-right typed answer waiting for its report, a sentence written and not yet
-graded. `ReviewFlow.restore` rebuilds it, so the same question comes back and
-a word part-way through its probes goes on from there with its missed first
-question still counted. A version-1 state (the words not yet rated) is still
-read; another route or a newer version is not guessed at. The desktop's
+versioned JSON, and clears it when the session ends. Version 3 holds the
+session whole: every step still to come (kind, phase, role, task, and the
+question once built — prompt, the four options, the right one, the context
+and where the word stands in it), each word's run (questions asked, contexts
+shown, cycles, rated or learned), and a right answer waiting for its rating.
+`ReviewFlow.restore` rebuilds it, so the same question comes back with the
+same four options. A state saved by an earlier route is not guessed at: that
+session is closed and today's starts afresh. The desktop's
 *Start session* resumes a session left open when the app closed, and the bot
 does the same on `/review` or the first tap after a restart.
 
-What a step says — the feedback after an answer, an interval in words, a
-teaching page — is in `services/review_wording.py`, as plain text each client
-lays out: rich text on the desktop, Telegram HTML on the phone.
+What a step says — the right word and its definition after an answer, an
+interval in words — is in `services/review_wording.py`, as plain text each
+client lays out: rich text on the desktop, Telegram HTML on the phone.
 
-### Content
+### Contexts
 
-`ContentService` (`services/content_service.py`) reads a word's teaching
-content for a learner language and moves it in and out in batches:
-`build_batch` / `export_batch` write the words that need content, asking for
-a block in each learner language given, with an instructions prompt,
-`preview_import` validates a filled file and reports fills, conflicts, new and
-duplicate contexts and rejected entries, and `apply_import` writes it in one
-transaction, replacing a conflicting field only when told to. The format is
-in `docs/formats/content-enrichment.md`.
-
-### Notes
-
-`StoredWord.note` is a short note about a word — a sense (*bank*: money), a
-UK/US variant, an opposite. It is not a column: it lives in
-`word_sources.metadata` as `note` (from a JSON `note` field) or `sense` (from
-an Oxford-format entry such as `bank (money) n.`), and is flattened like every
-other detail — the first source that supplies one wins. No schema change was
-needed. The table search, the details panel, the flashcard, the PDF definition
-column, CSV (a Note column) and JSON (`note`) all carry it.
+`ContentService` (`services/content_service.py`) counts the words with
+contexts and moves contexts in and out as JSON: `export` writes words with
+their length, level, part of speech, definition and contexts;
+`preview_import` reads a file of `{"word", "contexts", "definition"?}`
+entries, finds each word among those already stored (a word is never
+created), and reports new contexts, duplicates, changed definitions,
+warnings (a context that does not seem to contain its word) and entries it
+cannot use; `apply_import` writes it in one transaction. The format is in
+`docs/formats/contexts.md`. A JSON word list may carry `contexts` too; the
+import adds the ones each word lacks.
 
 ---
 
@@ -496,8 +493,9 @@ daily_plan()        → DailyPlan: offered new words, introduced today, due coun
                       reviews done, pool left, the 7-day forecast, intake note
 introduce(ids?)     → cards for the offered words, first due at the next day start
 review_queue()      → due cards in the plan, struggling first, capped at the limit
-answer(word, rating, session, channel, update_key)
-                    → schedule, save the card, append review_logs, maybe Known
+review(word, rating, task, correct, attempts, session, channel, update_key)
+                    → schedule, save the card, append review_logs with the task
+                      and whether it was right, record the attempt, maybe offer Known
 start/finish_session, struggling_words, forecast, preview_intervals,
 mark_known (archives the card), resume, rating and daily statistics
 ```
@@ -718,9 +716,8 @@ its way, and `tests/test_mobile_ready.py` keeps it so:
 
 - **No desktop libraries.** The models, repositories, database layer and the
   learning services (`learning_service`, `srs_scheduler`, `review_flow`,
-  `review_route`, `review_wording`, `review_queue`, `task_selector`,
-  `first_learning`, `skill_tracker`, `progress`, `content_service`,
-  `portable`) import with Qt, ReportLab, PyMuPDF and python-telegram-bot all
+  `review_tasks`, `review_wording`, `review_queue`, `first_learning`,
+  `progress`, `content_service`, `portable`) import with Qt, ReportLab, PyMuPDF and python-telegram-bot all
   blocked. Their only third-party dependency is `fsrs`. `services/__init__`
   resolves its names lazily so that importing one service does not load the
   import and export pipeline.
@@ -820,14 +817,16 @@ MainWindow
 │   ├── the day             one Today card (what waits, how long it takes,
 │   │                       Start session) · New words as CEFR-grouped chips ·
 │   │                       This week (day tiles) · Words you find hard
-│   └── session             one card: progress line, word, meaning behind Space,
-│                           Forgot / Effortful / Remembered / Instant, keys 1–4,
+│   └── session             one card: progress line, a new word shown whole, or
+│                           a question with four options (keys 1–4 / A–D); after
+│                           it the right word and definition, Again / Hard /
+│                           Good / Easy (keys 1–4) or Continue (Enter);
 │                           "Undo <answer> on <word>" in the footer (Ctrl+Z)
 ├── ProgressPage            four tabs, one shown at a time:
-│   ├── Overview            four tiles · ready to mark Known · memory and skill
-│   │                       bars with the evidence · the last 30 days · over time
-│   ├── Words               filters · every studied word with its skill
-│   ├── Answers             filters · what each answer asked and showed · CSV
+│   ├── Overview            four tiles · ready to mark Known · memory · how the
+│   │                       answers go (rates, by task) · the last 30 days · over time
+│   ├── Words               filters · every studied word and its memory
+│   ├── Answers             filters · what each answer asked, right or wrong · CSV
 │   └── Scheduler           does the schedule fit you, and which parameters
 ├── HomePage    (on screen: Lists)
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
@@ -898,9 +897,9 @@ window can start hidden (`--minimized`).
   picker, Enter opens the details panel, Delete removes after confirmation.
   Displaying a row never changes status.
 - **`WordPanel`** — the details panel beside the table, following the current
-  row: status, word, part of speech and level, definition, note, example,
-  lists, source, language, and status buttons that go through the page exactly
-  as K / U / R do. Open or closed is remembered.
+  row: status, word, length, level and part of speech, definition (editable),
+  contexts (add, delete), learning with *Show history*, and status buttons
+  that go through the page exactly as K / U / R do. Open or closed is remembered.
 - **`Toast`** — a short message floating over a page, with Undo or another
   action (Open Folder after an export). It keeps clear of the selection bar.
 - **`StatusDelegate` / `StatusBadge`** — status as symbol plus word

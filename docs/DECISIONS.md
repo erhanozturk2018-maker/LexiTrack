@@ -1315,3 +1315,32 @@ any long gap has actually been survived. The learning plan asks for
 intuitive, usable retrieval, so the case for Known is made by what the
 learner has done — produced the word, and retrieved it after a real long
 interval — rather than by what the scheduler predicts.
+
+## 85. A word is its definition and its contexts; two questions, four options each
+
+**Decision.** A word is its word, length, CEFR level, part of speech, one
+definition covering every sense it is learned in, and one or more contexts —
+plain sentences, one per sense (`word_contexts`: id, word, text). The
+teaching content of schemas 5 and 6 (patterns, collocations, register,
+related words, per-language meanings and notes, translations), the five
+levels, the skill tracker and the task selector are removed. Reviews ask two
+questions only, each a choice among four built from stored content: the word
+for its definition (**Definition → Word**), and — for a word with contexts —
+its definition for a sentence that uses it (**Context → Definition**);
+*Context → Word* is never asked. A word due is asked once a day, the task not
+asked last time. A right answer is followed by the learner's Again / Hard /
+Good / Easy, which is its rating; a wrong one shows the right word and its
+definition, is rated Again, and is asked again later as unrated practice.
+Correctness and effort are recorded apart. Known is offered on a right answer
+after the long-gap threshold. A word without a definition is not offered.
+
+**Reason.** The content the richer design depended on was never there for the
+real 6,825 words: every review was "type the word from its definition", and
+most misses were about typing multi-word entries, not about knowing the
+word. The richer design also asked the learner to judge their own recall
+before seeing any evidence. Four good options test recognition honestly and
+quickly; contexts add the second direction — the word met in use — at the
+cost of one table. Keeping right/wrong apart from the chosen effort keeps a
+lucky guess (right, rated Again) visible in the record. Everything reusable
+stayed: FSRS, the queue, the session and its saved state, Undo, the record
+and the Telegram client.

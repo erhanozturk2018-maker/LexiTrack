@@ -1,4 +1,4 @@
-# Learning Engine — design and as built (version 0.3)
+# Learning Engine — design and as built
 
 This is the design document for turning LexiTrack from a vocabulary manager
 into a learning engine: study plans, a fixed daily intake of new words, an
@@ -52,101 +52,92 @@ read [ARCHITECTURE.md](ARCHITECTURE.md) §10–13; for why, [DECISIONS.md](DECIS
   and marked, a word's history, the Progress tab and a calibration check
   (§60, §61, §64).
 
-### Added in V2 (in progress)
+### Since schema 7: a word, and two questions
 
-Version 2 separates three things that 0.4 kept in one number:
+Version 2 (schemas 5 and 6) taught from rich content — patterns,
+collocations, meanings in the learner's language, mnemonics — and asked five
+levels of question, typed. None of that content existed for the real
+vocabulary, so every word was asked one way: the word typed from its
+definition, which mostly failed for reasons that had little to do with
+knowing it. Schema 7 keeps what worked (FSRS, the queue, the session, Undo,
+the record) and makes the rest simple (DECISIONS §85).
+
+**A word** is its word, its **length** (letters, worked out), its **CEFR
+level**, its **part of speech**, one **definition** — every sense it is
+learned in, in one text — and one or more **contexts**: plain sentences that
+show the definition in use, one per sense (`word_contexts`: id, word, text).
+Nothing else is stored about it: no senses table, no translations, no notes.
+A word without a definition cannot be asked, so it is not offered as a new
+word until it has one (the Today card counts them).
+
+Memory and status stay apart as before:
 
 | | Answers | Kept in | Decided by |
 | --- | --- | --- | --- |
 | **Memory** | *When will this word be forgotten?* | `srs_cards`, `review_logs` | FSRS, unchanged |
-| **Skill** | *What can I do with it?* | `learning_attempts` | derived, never stored |
-| **Status** | *Do I count it as known?* | `user_word_state` | the user |
+| **Answers** | *What was asked, was it right, how did it go?* | `learning_attempts`, `review_logs` | the learner |
+| **Status** | *Do I count it as known?* | `user_word_state` | the learner |
 
-**Skill stages** (`models/skill.py`, `services/skill_tracker.py`), from the
-word's **current level** — the hardest *delayed* retrieval it can do now:
+### The two questions
 
-| Stage | Shown by |
-| --- | --- |
-| Not started | nothing yet |
-| Encountered | introduced or answered, no delayed success |
-| Recognised | the meaning retrieved from the word (level 1) |
-| Recalled | the word retrieved from its meaning or a context (levels 2–3), or used once |
-| Productive | the word used (collocation, sentence: levels 4–5) in **two different** contexts or tasks |
+`services/review_tasks.py` builds them; `services/review_flow.py` runs them.
 
-- Only retrievals in a **review** count — the first attempt, or the probe
-  inside it. Retrievals straight after teaching (introduction, relearning,
-  repair) are recorded as practice but measure working memory, not learning.
-- **Automatic** is evidence, not a stage: instant successes above level 1 on
-  two different days.
-- **Skill can fall.** The evidence (how often each thing succeeded) only grows,
-  but the current level follows the record review by review:
-  - a review that ends **Forgotten** (nothing succeeded, not even a probe)
-    caps the level at recognition until a recall succeeds again;
-  - **two missed first questions in a row at the current level** take it
-    down one; a success at that level in between breaks the run, and a miss
-    above the level is a stretch, not a fall;
-  - a success raises the level to what succeeded. **Productive** must be
-    shown again — two different contexts or tasks — after the level has
-    been below 4.
-- Every answer now records its attempt with its log, in one transaction, and
-  Undo takes both back. A V1 review is recorded as what it is — word to
-  meaning, level 1, route `v1` — with Easy / Good / Hard as instant / normal
-  / effortful and Again as a failure.
-- Answers from before schema 5 have no attempt. They are read from the log,
-  and only as recognition: that is all a V1 review ever asked.
+| Task | Shown | Four options |
+| --- | --- | --- |
+| **Definition → Word** | the word's definition | the word and three other words |
+| **Context → Definition** | one of its contexts, the word picked out in bold | its definition and three other definitions |
 
-### Review route V2
+*Context → Word* is never asked: it would test the sentence as much as the
+word. Nothing is generated at review time; the prompt is stored content and
+the other options are other words of the vocabulary, or their definitions.
 
-A V2 review asks the hard way first and works down only after a failure, so
-that the rating says how well the **memory** held and the attempts say what
-the learner could **do** (`services/review_route.py` for the rules,
-`services/review_flow.py` for the session).
+- **Which task.** No contexts: Definition → Word. With contexts: the task
+  not asked last time for that word, so the two alternate. The context shown
+  is one never shown before, else the one shown longest ago.
+- **The other three options** are chosen to look like the answer, so the
+  choice turns on meaning: the same part of speech, a similar CEFR level, the
+  same shape (a phrase among phrases; a definition with as many senses,
+  of similar length). A random draw among the best dozen keeps them varied.
+  Never used: another form of the same word (*deliberately* for
+  *deliberate*, *sleep* for *sleep in*), a word the definition itself uses, a
+  definition that names the word, a word the context contains, or the same
+  definition twice. The options are seeded by word, day and question, so a
+  restored session shows the same four.
+- **The word is found in a sentence** in its common forms — inflections,
+  irregular verbs and plurals, a phrase with words between its parts ("look
+  it up"), *my/one's* standing for any possessive (`models/context.py`) —
+  for picking it out, and to flag an imported context that does not seem to
+  contain its word.
 
-1. **The first question** is chosen by the TaskSelector
-   (`services/task_selector.py`) — no calendar rule. The **target** starts
-   from the word's **skill level** (what it can do now, after any fall) and
-   the last first question moves it: one harder after an answer without
-   effort (Remembered or Instant); the same after a miss or effort; one
-   easier after forgetting; never harder while FSRS gives less than a 75 %
-   chance of recall today. The question is at the **highest level the
-   content can ask that is not above the target** (a context needs contexts,
-   a collocation collocations, a sentence of one's own an example to compare
-   it with) — missing content never makes a question harder, so a word with
-   no content stays on the short route, the word from its meaning. The
-   context used longest ago comes first, collocations take turns, and **no
-   kind of question comes three times in a row** in a session: the third is
-   asked another way — the other kind of context, or a lower level — when
-   the content allows. The reason is shown on the card
-   (hover the question's name). The meaning is the one in the learner's
-   language when there is one, otherwise the English definition with the word
-   and its forms hidden ("showing ___" for *reluctance*).
-2. **Probes** follow a failure, each a fresh question: after level 3 or
-   above, the word from its meaning; after that, **the word chosen among
-   four**. The answer stays hidden until the word is rated, so no probe can
-   be answered from having just seen it.
-3. **One rating**, from the strongest success before the answer was shown:
+**One word, one task a day.** A word due for review is asked once; that
+answer is the day's rating:
 
-| Case | What happened | Memory result | Rating | Then |
+| Answer | Shown | Recorded | Rating | Then |
 | --- | --- | --- | --- | --- |
-| A | recalled at the first question | Recalled | Good (Easy if instant) | — |
-| B | recalled, with a hint, a slip or slowly | Recalled with effort | Hard | — |
-| C | only chosen among four | Recognised | Hard | repair recall |
-| D | not even chosen | Forgotten | Again | relearn |
-| E | recalled from a context never seen before | Recalled | Good | transfer counted |
-| F | a harder question failed, the meaning → word held | Recalled | Good (Hard if effortful) | repair that skill |
+| right | the word and its definition; Again / Hard / Good / Easy, each with its interval | correct, with the effort chosen | the effort | — (Again: asked again later) |
+| wrong | *Incorrect* — the right word and its definition (for Context → Definition: the word, and its correct definition) | not correct, no effort | Again | asked again later |
 
-4. **Relearning** (D) and **repair** (C, F): the word is taught again at
-   once, and asked again three cards later with a *different* prompt — the
-   other meaning source, another context, another collocation. **Relearning**
-   a forgotten word shows everything stored; **repair** — a skill failed
-   while the memory held — is a short page about that skill: the meaning and
-   the pattern, with one example for a missed context, the collocations for a
-   missed collocation, both for a sentence. The context the re-ask will use
-   is kept off the page, so the page never gives the answer away. At most
-   two cycles. That practice is recorded, linked to the answer, and never
-   changes the rating: a same-session success is not a day's memory.
-5. **One rating per word per day**, from any client: a second answer the same
-   day is recognised as a duplicate and changes nothing.
+**Correctness and effort are kept apart**: `learning_attempts.correct` and
+`.effort` (again, hard, good, easy), and `review_logs.correct` and `.task`
+beside the rating. A right answer rated Again is recorded as right.
+
+**Asked again later.** A word answered wrong, or right and rated Again, comes
+back three cards later, the other task when it has contexts — at most twice
+in a session. That question is practice (phase `relearn`, role `retrieval`):
+recorded, linked to the day's answer so Undo reaches it, never rated.
+
+**Known** is offered — never set — when a word is answered right, and not
+rated Again, after the threshold (21 days by default) or more without a
+review. Stability alone is a forecast and never counts.
+
+**Undo** takes back the last rated word whole — its answer and the practice
+after it — and asks it again.
+
+**Earlier answers.** Answers of the old routes keep their tasks
+(`meaning_to_word`, `choose_word`, …) and are shown as such in a word's
+history; their efforts were carried over as the rating each stood for
+(instant → easy, normal → good, effortful → hard). They count in the memory
+record as before, not in the per-task rates.
 
 ### The day's queue
 
@@ -178,60 +169,22 @@ is **fragile** (flagged as hard, relearning, or under 2 days of stability),
 ### First learning
 
 New words are learned in the same session as the day's reviews, after them
-(`services/first_learning.py`): reviewing first measures each memory before
-new material can interfere with it. Each new word gets a **depth**, decided
-from its content:
+(`services/first_learning.py`, `services/review_flow.py`): reviewing first
+measures each memory before new material can interfere with it.
 
-| Depth | When | Taught | Asked |
-| --- | --- | --- | --- |
-| SHORT | nothing stored beyond the definition (or a bare meaning) | the meaning, and a line saying richer content is not stored yet | the word from its meaning |
-| LIGHT | content, and nothing that says the word is hard | met in a sentence first (meaning held back, to guess); then the meaning, the mnemonic, pattern, collocations, one example | + later, from a context if there is one |
-| DEEP | a `deep` hint, an abstract mnemonic (contrast, relation), or the learner's **More about this word** | the same start, then everything: nuance, usage, register, related words, two examples | + later, a second question in another form |
-
-The LIGHT and DEEP route is **context → guess the meaning → the meaning → a
-way to remember it → how it is used → retrieval**. The guess page shows the
-sentence without its translation, which would give the meaning away. A page
-never shows the sentence its word's later question blanks out; when a word
-has only one sentence, it is met there with the word shown and asked from it
-blanked, cards later. *Failed before* cannot trigger DEEP at introduction: a
-new word has no record yet; a miss right after teaching deepens it instead.
-
-Words go in groups of four: four taught, then four asked, and the second
-questions of a group after the next group is taught, so every question comes
-after a gap. A miss means the word is taught again, one depth deeper when
-there is more to show, and asked again three cards later — twice at most.
+Words go in groups of four. Each is **shown whole** — the word, its length,
+part of speech, level, definition and contexts — then the four are asked,
+Definition → Word; a word with contexts is asked a second time,
+Context → Definition, after the next group is shown, so every question comes
+after a gap. A miss is asked again three cards later — twice at most.
 
 None of it is rated. The answers are recorded as attempts of the
-introduction phase, with the depth; the word gets its card — first review
-tomorrow — the moment its last step is done, so leaving early keeps the
-words finished and offers the rest again. **Mark as studied** introduces the
-day's words without the practice, for a learner who studied them another way.
+introduction phase; the word gets its card — first review tomorrow — the
+moment its last step is done, so leaving early keeps the words finished and
+offers the rest again. **Mark as studied** introduces the day's words without
+the practice, for a learner who studied them another way.
 
-The Today card estimates the session: 20 seconds a review, and 45, 75 or
-120 seconds for a SHORT, LIGHT or DEEP new word.
-
-**Typed answers.** Compared without case, spacing or punctuation; a
-multi-word entry is accepted without its frame ("expelled" for *be
-expelled*). One slip is accepted in four to ten letters, two from eleven,
-is shown as a slip. **After a right answer the learner says how it came** —
-Effortful, Remembered or Instant — and that report is the result (Effortful
-→ Hard, Remembered → Good, Instant → Easy for a first question). The time
-taken, a hint (the first letter and the shape) and a slip are kept as
-telemetry beside the report and never override it. An empty answer is
-Forgot.
-
-**Level 5** (a sentence) cannot be checked by the app: you write one, then
-check it against the word's **pattern** and **collocations** — a checklist,
-not a test — and example sentences, and report how it went (Forgot,
-Effortful, Remembered, Instant).
-
-**No meaning to ask from** — no definition and no meaning in the learner's
-language — means the word is shown and you report whether you knew it
-before anything else is shown; it is recorded as a word-to-meaning
-retrieval (route `v2`).
-
-**Undo** takes back the last rated word whole: its rating, its probes and any
-practice after it, and asks it again from the first question.
+The Today card estimates the session: 12 seconds a review, 40 a new word.
 
 ---
 

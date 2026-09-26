@@ -1045,3 +1045,37 @@ The warm-up takes normal words only; fragile words too many for one in four
 are spread evenly (`review_queue._spread`) instead of appended together.
 A test's expected order changed with it: three fragile words among seven
 others now read …FnnFnnF instead of …FnnnFnF.
+
+## 2026-09-26 — Schema 7: a word, its contexts, two questions
+
+The master spec replaced the V2 learning route. Schema 7 (`contexts.sql`)
+drops `word_content`, `word_localizations` and `context_translations`,
+rebuilds `word_contexts` as id/word_id/text (markers removed, duplicates
+merged) and `learning_attempts` with `correct` and `effort` (old efforts
+mapped instant→easy, normal→good, effortful→hard), and adds `task` and
+`correct` to `review_logs`. Verified on a copy of the real database: schema
+6 → 7, 83 attempts kept, foreign keys clean.
+
+New: `models/context.py` (the word found in a sentence in its forms, for
+highlighting and import warnings), `ContextRepository`,
+`services/review_tasks.py` (the two questions and the distractor rules, with
+an `OptionPool` that precomputes likeness: 16–32 ms a question, built only
+when its step comes on screen), a rewritten `ReviewFlow` (flow state version
+3), `review_wording.feedback_text`, the context import/export in
+`ContentService`, the word panel's definition and context editing and Delete
+word, the Add Word dialog's definition and contexts, Telegram cards with
+option and rating buttons. Removed: `skill_tracker`, `task_selector`,
+`review_route`, `content_repository`, `models/content.py`, `models/skill.py`,
+the learner-language and hide-meaning settings, notes and examples in the
+UI and exports.
+
+**Problems and solutions**
+
+- `pathlib.write_text` on Windows wrote CRLF into files patched by script;
+  `.gitattributes` normalises on commit, and the patch helper now writes LF.
+- Tests built words without definitions, which are no longer offered; their
+  fixtures now give each word one. `engine.answer` (the V1 self-rating) is
+  gone from the app; tests use `flow_helpers.answer`, a real Definition → Word
+  answer with its attempt.
+- The offscreen Qt platform draws no text without `QT_QPA_FONTDIR`; the
+  screenshot tool is run with it pointed at the system fonts.
