@@ -1344,3 +1344,29 @@ cost of one table. Keeping right/wrong apart from the chosen effort keeps a
 lucky guess (right, rated Again) visible in the record. Everything reusable
 stayed: FSRS, the queue, the session and its saved state, Undo, the record
 and the Telegram client.
+
+## 86. Undo for quick actions, a question for what cannot be taken back, edits held until Save
+
+**Decision.** Actions follow one rule. A quick action that can be taken back
+— a status change (K / U / R, the selection bar, the panel's buttons), a
+copy or a move — happens at once and offers **Undo** in a toast; a status
+change to 50 words or more is asked about first. An action that cannot be
+taken back — deleting a word, a list, contexts, words removed with their
+last list, resetting progress — asks first, names what will be lost, puts
+the action on the button ("Delete word", "Remove 3 words") and ends by
+saying it cannot be undone. A word's definition and contexts change only in
+the details panel's **edit mode**: every change is held on screen, a
+deleted context is struck through, and Save writes all of it in one
+transaction — asking first only if contexts would be deleted — while Cancel
+throws it all away. Unsaved edits are never lost silently: moving to
+another word or quitting asks to save them.
+
+**Reason.** Before, the same kind of action behaved three ways: some asked,
+some offered Undo, and some — a status change for a whole selection, a
+context's ×, an edited definition lost by clicking another row — did
+neither. A question before every small change teaches people to click
+through questions; Undo costs nothing when nothing went wrong. Holding
+edits until Save turns a mistaken × into nothing at all, and makes Cancel
+the undo for the whole edit; the one question left is about the one loss
+Save cannot take back. Adding a context now takes two steps (type, Save):
+the price of every change to a word going through the same door.

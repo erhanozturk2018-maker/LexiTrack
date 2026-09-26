@@ -889,17 +889,31 @@ window can start hidden (`--minimized`).
   `QSortFilterProxyModel` for search (word and definition), status filter and
   sorting (CEFR by level order, status by what needs attention first), and CEFR
   level chips built from the levels present. Selecting rows shows a
-  **floating selection bar** — Known, Unknown, Reset, Copy to ▾, Move to ▾,
+  **floating selection bar** — Known, Unknown, Not reviewed, Copy to ▾, Move to ▾,
   More ▾ (Export, Remove), × — a child of the table positioned over the bottom
   of its frame. The frame grows an empty strip under the rows while the bar is
   showing, so no row is hidden under it and nothing above moves. The same
   actions are on a right-click menu. K / U / R set status, C / M open the list
-  picker, Enter opens the details panel, Delete removes after confirmation.
-  Displaying a row never changes status.
+  picker, E edits the current word, Enter opens the details panel, Delete
+  removes after confirmation; the bar shows each key beside its action and
+  steps aside while a word is being edited. Displaying a row never changes
+  status. Moving to another row while the panel holds unsaved edits asks
+  (`WordPanel.can_leave`); "keep editing" puts the row back.
+- **Status changes** (`ui/status_changes.py`) — K / U / R, the bar and the
+  panel's buttons change a status at once through
+  `VocabularyService.change_status`, which remembers each word's previous
+  status; the toast's Undo restores them (`undo_status_change`, recorded with
+  the cause `undo`). A change to `LARGE_CHANGE` (50) words or more is asked
+  about first.
 - **`WordPanel`** — the details panel beside the table, following the current
-  row: status, word, length, level and part of speech, definition (editable),
-  contexts (add, delete), learning with *Show history*, and status buttons
-  that go through the page exactly as K / U / R do. Open or closed is remembered.
+  row: status, word, length, level and part of speech, definition and
+  contexts, learning with *Show history*, and status buttons that go through
+  the page exactly as K / U / R do. Open or closed is remembered. The
+  definition and contexts change only in **edit mode**: every edit is held
+  on screen (a deleted context is struck through) until Save writes it all in
+  one transaction (`VocabularyService.save_word` with a `WordEdit`); Save asks
+  before deleting contexts, Cancel throws everything away. A corrected context
+  keeps its id.
 - **`Toast`** — a short message floating over a page, with Undo or another
   action (Open Folder after an export). It keeps clear of the selection bar.
 - **`StatusDelegate` / `StatusBadge`** — status as symbol plus word

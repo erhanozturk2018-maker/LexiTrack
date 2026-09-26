@@ -1108,3 +1108,27 @@ it is personal content and stays out of the repository.
   the word panel's viewport (to keep content above the selection bar)
   squeezed its labels together instead of scrolling. Left as it was; the bar
   can cover the panel's last line when a word has many contexts.
+
+## 2026-09-26 — Undo, questions and edit mode (DECISIONS §86)
+
+An audit against Norman's principles (with Shneiderman's consistency and
+error prevention) found actions that neither asked nor could be undone.
+New: `VocabularyService.change_status` / `undo_status_change` (with
+`StateRepository.states` / `restore`, cause `undo`), `ui/status_changes.py`,
+`VocabularyService.save_word` with `WordEdit`, `ContextRepository.update`,
+the details panel's edit mode, `dialogs.ask_unsaved`, and `confirm(...,
+irreversible=)`, which ends every irreversible question the same way.
+
+**Problems and solutions**
+
+- A context editor that grows with its sentence: a QPlainTextEdit's document
+  counts lines, but lays them out lazily, so right after a resize it still
+  read one line. A QTextEdit reports its document height in pixels; measured
+  on a laid-out copy at the editor's width, with the stylesheet's padding
+  from `contentsMargins()`, it is right from the first paint.
+- Strike-through set through `QWidget.setFont` is overridden by the
+  stylesheet's font; it is applied as a character format instead.
+- The selection bar floats over the panel's bottom; while a word is edited
+  it steps aside, and Save / Cancel sit at the top of the panel.
+- `MainWindow.quit` called `app.quit()` even when the window refused to
+  close; it now stops when `close()` returns False (unsaved edits kept).

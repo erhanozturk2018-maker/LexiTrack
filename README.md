@@ -121,8 +121,8 @@ local SQLite file. The only network use is the optional Telegram bot.
 - **Flashcard mode.** One large word, two equal answer buttons, keyboard-first.
   ← and → step back and forward through your answers without changing them.
 - **List mode.** A searchable, sortable table with CEFR level filters, a
-  details panel, and a floating bar for bulk Known / Unknown / Reset and
-  Copy to / Move to another list with Undo.
+  details panel, and a floating bar for bulk Known / Unknown / Not reviewed
+  and Copy to / Move to another list — each with Undo.
 - **Definitions and contexts** on the card, in the details panel and in
   exports; contexts imported from a JSON file, too.
 - **Unknown Words manager.** Every word you did not know, across all lists.
@@ -514,10 +514,17 @@ Switch to **List** (`Ctrl+2`). Search, filter by status or CEFR level (click
 A1, B2… to combine levels), sort by any column, select rows
 (`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. The **details panel**
 on the right follows the current row: the word, its length, CEFR level, part
-of speech, definition and contexts. Change the definition, add or delete a
-context, or delete the word from LexiTrack altogether (it can be added again
-later, starting afresh). Looking at a word never marks it — only an action
-does.
+of speech, definition and contexts. Looking at a word never changes it.
+
+To change the definition or contexts, press **Edit** (or `E`), or just start
+typing in *Add a sentence*. The definition and each context become editable;
+**×** strikes a context through rather than deleting it (press it again to
+keep it), **+ Add context** adds another. Nothing is written until **Save**
+(`Ctrl+S`), and **Cancel** (`Esc`) throws every change away. If Save would
+delete contexts, it asks first and names them — deleting a sentence cannot be
+undone. Moving to another word, or quitting, with unsaved changes asks
+whether to save them. **Delete word…** removes the word from LexiTrack
+altogether, after asking (it can be added again later, starting afresh).
 
 ![List mode with a selection](docs/screenshots/list-mode.png)
 
@@ -526,7 +533,9 @@ the rows never move. **Copy to** and **Move to** send the selection to another
 list in one step — the menu lists every list that can take the words, plus
 New List. Copying keeps the words here too; moving takes them out of this
 list, never out of your vocabulary. The result appears briefly at the bottom
-with **Undo**. The **Also In** column shows which other lists each word is in.
+with **Undo** (`Ctrl+Z`). Marking words Known, Unknown or Not reviewed works
+the same way: at once, with Undo; a change to 50 words or more asks first.
+The bar shows each action's key beside it. The **Also In** column shows which other lists each word is in.
 Right-click a row for every action, or press **C** / **M** to pick a list from
 the keyboard. Export and Remove are under **More** on the bar. **Add words**
 types words in by hand; **List actions** in the header edits, exports or
@@ -535,7 +544,7 @@ deletes the list.
 ### Unknown Words
 
 Every word you answered "I Don't Know", across all lists. Mark words Known or
-reset them to Not Reviewed, collect them into a list such as My Difficult
+Not reviewed (with Undo), collect them into a list such as My Difficult
 Words, or export them.
 
 ![Unknown Words manager](docs/screenshots/unknown-words.png)
@@ -641,14 +650,16 @@ key in one place, with a filter.
 | | `←` or `Backspace` | Previous word (status unchanged) |
 | | `→` | Next word, after going back (status unchanged) |
 | | `Enter` / `Space` | Repeat your last answer; on an earlier word, move forward without changing it |
-| | `R` | Reset the word on screen to Not Reviewed |
+| | `R` | Clear your answer to the word on screen: back to Not Reviewed |
 | Tables | `K` / `U` / `R` | Mark the selection Known / Unknown / Not Reviewed |
 | | `Ctrl+A`, `Shift`+arrows | Select |
 | | `Enter` | Open the details panel |
+| | `E` | Edit the word's definition and contexts |
+| | `Ctrl+S` or `Ctrl+Enter` / `Esc` | While editing: save / cancel |
 | | `C` / `M` | Copy / move the selection to another list |
 | | Right-click, `Menu` key | Every action for the selection |
 | | `Delete` | Remove the selection from this list (asks first) |
-| | `Ctrl+Z` | Undo a copy or move while its message shows |
+| | `Ctrl+Z` | Undo a status change, copy or move while its message shows |
 | | `Ctrl+F` | Search |
 | Lists | Arrow keys, `Enter` | Move between lists, open one |
 | Everywhere | `Ctrl+K` | Search commands, lists and words |
