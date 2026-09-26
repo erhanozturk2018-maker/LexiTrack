@@ -77,7 +77,8 @@ def test_the_import_preview_shows_what_would_be_added(
     service, _engine, ids = setup
     path = tmp_path / "filled.json"
     path.write_text(json.dumps([
-        {"word": "cramped", "contexts": ["The room was cramped.", "It felt cramped."]},
+        {"word": "cramped", "definition": "too small for the people in it",
+         "contexts": ["The room was cramped.", "It felt cramped."]},
         {"word": "reluctant", "contexts": ["She was reluctant to leave."]},
         {"word": "ghost", "contexts": ["A ghost."]},
     ]), encoding="utf-8")
@@ -89,7 +90,7 @@ def test_the_import_preview_shows_what_would_be_added(
     assert "not in your vocabulary" in dialog.notes.toPlainText()
 
     dialog.import_button.click()
-    assert "Imported 2 contexts for 1 words" in dialog.result_text
+    assert dialog.result_text.startswith("Imported 2 contexts for 1 word, and 1 definition.")
     assert [c.text for c in service.contexts(ids[1])] == [
         "The room was cramped.", "It felt cramped.",
     ]

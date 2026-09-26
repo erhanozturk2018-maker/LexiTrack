@@ -201,8 +201,8 @@ class ContentDialog(QDialog):
             return
         show_error(self.error, None)
         self.export_summary.setText(
-            f"{count:,} words written to {target.name}. Fill in their contexts, then "
-            "import the file here."
+            f"{_count(count, 'word')} written to {target.name}. Fill in their contexts, "
+            "then import the file here."
         )
 
     def _import(self) -> None:
@@ -252,11 +252,11 @@ class ContextImportDialog(QDialog):
         title.setObjectName("DialogTitle")
         layout.addWidget(title)
         parts = [
-            f"{preview.words:,} words",
-            f"{preview.context_count:,} new contexts",
+            _count(preview.words, "word"),
+            _count(preview.context_count, "new context"),
         ]
         if preview.definition_count:
-            parts.append(f"{preview.definition_count:,} definitions replaced")
+            parts.append(f"{_count(preview.definition_count, 'definition')} replaced")
         if preview.duplicate_count:
             parts.append(f"{preview.duplicate_count:,} already there, not added again")
         if preview.rejected:
@@ -267,7 +267,7 @@ class ContextImportDialog(QDialog):
         layout.addWidget(summary)
 
         changing = [entry for entry in preview.entries if entry.changes_anything]
-        heading = QLabel(f"WHAT IT ADDS · {len(changing):,} WORDS" if changing
+        heading = QLabel(f"WHAT IT ADDS · {_count(len(changing), 'word').upper()}" if changing
                          else "NOTHING NEW TO ADD")
         heading.setObjectName("SectionTitle")
         layout.addWidget(heading)
@@ -323,12 +323,17 @@ class ContextImportDialog(QDialog):
     def _import(self) -> None:
         result = self._content.apply_import(self._preview)
         text = (
-            f"Imported {result.contexts_added:,} contexts for {result.words:,} words"
+            f"Imported {_count(result.contexts_added, 'context')} "
+            f"for {_count(result.words, 'word')}"
         )
         if result.definitions_changed:
-            text += f", and {result.definitions_changed:,} definitions"
+            text += f", and {_count(result.definitions_changed, 'definition')}"
         text += "."
         if result.rejected:
-            text += f" {result.rejected:,} entries were not imported: see the notes."
+            text += f" {_count(result.rejected, 'entry', 'entries')} not imported: see the notes."
         self.result_text = text
         self.accept()
+
+
+def _count(count: int, one: str, many: str | None = None) -> str:
+    return f"{count:,} {one if count == 1 else (many or one + 's')}"
