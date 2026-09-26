@@ -14,6 +14,12 @@ Progress page and a word's history show that week's real record.
 Usage::
 
     python tools/screenshots.py        # writes docs/screenshots/*.png
+    python tools/screenshots.py --content words.json
+
+``--content`` imports a contexts file (the format of docs/formats/contexts.md)
+into the sample first, so the cards show real definitions and contexts; the
+file only adds to the sample's words and is never copied anywhere. Without it,
+a word with no definition gets a stand-in.
 """
 
 from __future__ import annotations
@@ -42,6 +48,7 @@ from lexitrack.database.connection import Database  # noqa: E402
 from lexitrack.models.attempt import Effort, LearningAttempt, Phase, Role, Task  # noqa: E402
 from lexitrack.models.settings import Setting  # noqa: E402
 from lexitrack.models.srs import Rating  # noqa: E402
+from lexitrack.services.content_service import ContentService  # noqa: E402
 from lexitrack.services.learning_service import LearningService  # noqa: E402
 from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E402
 from lexitrack.telegram.config import TelegramConfig  # noqa: E402
@@ -64,7 +71,8 @@ OUT = ROOT / "docs" / "screenshots"
 SIZE = (1180, 780)
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    content_file = Path(argv[argv.index("--content") + 1]) if "--content" in argv else None
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setStyle("Fusion")
     app.setOrganizationName("LexiTrackScreenshots")
@@ -80,6 +88,10 @@ def main() -> int:
     # frozen week the Study screenshots run through; left in, every word's
     # history would show a stray "Marked Unknown by hand" in the middle.
     service.database.connection.execute("DELETE FROM word_status_events")
+    if content_file is not None:
+        content = ContentService(service.database)
+        result = content.apply_import(content.preview_import(content_file))
+        print(f"imported {result.contexts_added} contexts for {result.words} sample words")
     current = lists.get("Oxford 3000") or lists["German A1"]
 
     OUT.mkdir(parents=True, exist_ok=True)
@@ -295,4 +307,4 @@ def study_screens(app, window, engine, clock, list_id, theme, grab) -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
