@@ -557,6 +557,8 @@ def test_list_dialog_explains_a_taken_name_and_keeps_the_input(qapp, service) ->
 def test_add_word_dialog_adds_and_stays_open(qapp, service) -> None:
     target = service.create_list("German", "de")
     dialog = AddWordDialog(service, target)
+    dialog.word_field.setText("a")
+    assert dialog.length_label.text() == "1 letter"
     dialog.word_field.setText("Haus")
     assert dialog.length_label.text() == "4 letters"
     dialog._add()

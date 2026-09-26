@@ -273,7 +273,8 @@ class AddWordDialog(QDialog):
 
     def _show_length(self, text: str) -> None:
         length = word_length(text)
-        self.length_label.setText(f"{length} letters" if length else "—")
+        letters = "letter" if length == 1 else "letters"
+        self.length_label.setText(f"{length} {letters}" if length else "—")
 
     def _contexts(self) -> list[str]:
         return [line.strip() for line in self.contexts_field.toPlainText().splitlines()

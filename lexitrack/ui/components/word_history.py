@@ -347,8 +347,9 @@ class WordHistoryView(QWidget):
     def show_journey(self, journey: WordJourney) -> None:
         word = journey.word
         self.title.setText(word.word)
+        letters = "letter" if word.length == 1 else "letters"
         meta = " · ".join(
-            part for part in (f"{word.length} letters", word.part_of_speech, word.cefr_level)
+            part for part in (f"{word.length} {letters}", word.part_of_speech, word.cefr_level)
             if part
         )
         self.meta.setText(meta)
@@ -410,7 +411,8 @@ class _StepRow(QFrame):
             badge = chip(step.rating.label, tone=_RATING_TONE[step.rating])
             badge.setFixedWidth(64)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(badge)
+            # Its own height, not the row's, when the detail wraps.
+            layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
             parts = []
             if step.asked is not None:
                 parts.append(step.asked.label)
@@ -428,7 +430,7 @@ class _StepRow(QFrame):
             badge = chip("New", tone="done")
             badge.setFixedWidth(64)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(badge)
+            layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
             detail = QLabel("Studied and confirmed as one of the day's new words")
         else:
             spacer = QLabel("")
