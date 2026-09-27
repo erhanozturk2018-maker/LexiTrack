@@ -37,21 +37,23 @@ its icons; hover over one for its name.
 
 ## Your day
 
-**Start session** on Today does the day's reviews first, then its new words.
+Today has two sessions, each with its own button: **Reviews** first, then
+**New words**. A review session never shows a new word.
 
-1. **Review.** Words come one at a time, each with one question and four
+1. **Reviews.** Words come one at a time, each with one question and four
    options: the word for its definition, or the definition of the word picked
    out in a sentence. Choose with **1**–**4** or **A**–**D**. Right: say how
    it went with **1** Again, **2** Hard, **3** Good or **4** Easy. Wrong: the
    right word and its definition are shown, **Enter** moves on, and the word
    comes back a few cards later, asked the other way. **Ctrl+Z** takes back
    the last word.
-2. **Learn the new words.** Four at a time: each shown whole, then asked;
-   words with contexts are asked a second time a little later. None of it is
-   rated — a word's first real question is tomorrow. **Mark as studied**
-   skips the practice if you studied them another way.
+2. **New words.** Four at a time: each shown whole, then asked; words with
+   contexts are asked a second time a little later. None of it is rated — a
+   word's first real question is tomorrow. A word counts as learned only
+   once it has been shown and practised; stop halfway and the rest wait.
 
-On your phone the Telegram bot does the same, if you set it up in
+On your phone the Telegram bot does the same — `/review` and `/learn`, or
+the two buttons on its morning message — if you set it up in
 *Settings → Telegram*.
 
 ## How a word is learned

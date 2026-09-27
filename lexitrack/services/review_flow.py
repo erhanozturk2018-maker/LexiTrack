@@ -1,4 +1,10 @@
-"""A day's study as a session: which step comes next, and what it did.
+"""A day's study as sessions: which step comes next, and what it did.
+
+The day has two kinds of session (:class:`SessionKind`), started apart:
+**reviews** — the words due, asked once each — and **learning** — today's new
+words, shown and practised. A review session never contains a new word, so
+reviewing measures memory undisturbed, and a new word counts as learned only
+once it has been shown and practised in a learning session.
 
 A session is a list of *steps*, each for one word:
 
@@ -186,16 +192,27 @@ class _Awaiting:
     response_ms: int | None = None
 
 
+class SessionKind(StrEnum):
+    """What a session does. Saved with its state."""
+
+    #: The words due for review, asked once each and rated.
+    REVIEW = "review"
+    #: Today's new words, shown and practised; learned when done.
+    LEARN = "learn"
+
+
 class ReviewFlow:
-    """A day's study: new words and reviews, two tasks, four options."""
+    """A session of reviews or of new words: two tasks, four options."""
 
     def __init__(
         self,
         engine: LearningService,
         channel: Channel = Channel.DESKTOP,
         chat_id: str | None = None,
+        kind: SessionKind = SessionKind.REVIEW,
     ) -> None:
         self._engine = engine
+        self._kind = SessionKind(kind)
         self._channel = channel
         self._chat_id = chat_id
         #: Changes whenever the step on screen does; saved with the state.
@@ -224,6 +241,10 @@ class ReviewFlow:
     @property
     def session_id(self) -> str | None:
         return self._session_id
+
+    @property
+    def kind(self) -> SessionKind:
+        return self._kind
 
     @property
     def current(self) -> Step | None:
@@ -303,16 +324,17 @@ class ReviewFlow:
 
     # -- starting and finishing ----------------------------------------------
 
-    def start(self, include_new: bool = True) -> bool:
-        """Open the day's session: its reviews first, then its new words.
-
-        Reviews come first so that each measures the memory before today's
-        new words can interfere with it. False when there is nothing to do.
-        """
-        queue = [item for item in self._engine.review_queue() if item.word.definition]
+    def start(self) -> bool:
+        """Open a session of this flow's kind: the words due, or today's new
+        words. False when there is nothing of that kind to do."""
+        review = self._kind is SessionKind.REVIEW
+        queue = (
+            [item for item in self._engine.review_queue() if item.word.definition]
+            if review else []
+        )
         new_words = (
-            [w for w in self._engine.daily_plan().new_words if w.definition]
-            if include_new else []
+            [] if review
+            else [w for w in self._engine.daily_plan().new_words if w.definition]
         )
         if not queue and not new_words:
             return False
@@ -618,7 +640,7 @@ class ReviewFlow:
         return {
             "version": FLOW_VERSION,
             "route": ROUTE_V3,
-            "kind": "review",
+            "kind": self._kind.value,
             "order": self._order,
             "answered": self._answered,
             "learned": self._learned,
@@ -670,7 +692,10 @@ class ReviewFlow:
 
     @classmethod
     def _restore(cls, engine: LearningService, session, data: dict) -> ReviewFlow:
-        flow = cls(engine, session.channel, session.chat_id)
+        # Sessions saved before the day was split say "review" and may hold
+        # new words too; they carry on as they were saved.
+        kind = SessionKind(data.get("kind", SessionKind.REVIEW.value))
+        flow = cls(engine, session.channel, session.chat_id, kind)
         flow._session_id = session.id
         flow._last_session_id = session.id
         flow._answered = int(data.get("answered", 0))

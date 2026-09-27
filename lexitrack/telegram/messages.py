@@ -12,8 +12,10 @@ reject the whole message. HTML needs three characters escaped and
 Callback data is kept short (Telegram allows 64 bytes) and self-describing:
 
 ======================  ==========================================
-``intro:<date>``        mark the day's new words as studied — only on that date
-``start``               begin (or resume) the day's session
+``start``               begin (or resume) the reviews due
+``learn``               begin (or resume) today's new words
+``later``               not now: the new words wait (after the reviews)
+``intro:<date>``        retired (Mark as studied); an old button only says so
 ``st:<s>:<n>:<v>``      step ``n`` of session ``s``: ``v`` is an option (0–3),
                         a rating after a right answer (``again``, ``hard``,
                         ``good``, ``easy``) or ``go`` (continue)
@@ -22,9 +24,11 @@ Callback data is kept short (Telegram allows 64 bytes) and self-describing:
 ``undo:<s>``            take back the last answer in session ``s``
 ======================  ==========================================
 
-The date on ``intro`` is what stops an old morning message from confirming
-the *next* day's words, which the user has never seen; the step number on
-``st`` is what makes a tap on an older card do nothing.
+The step number on ``st`` is what makes a tap on an older card do nothing.
+
+The day has two sessions, as on the desktop: the reviews (/review) and the
+new words (/learn), each with its own button, reviews first. When the
+reviews are done and new words are waiting, the bot asks: now, or later.
 
 A session is the desktop's (services/review_flow.py), step by step, all
 buttons: a new word is shown, then continued; a question has four options —
@@ -95,6 +99,8 @@ def undo_data(session_id: str) -> str:
 
 
 START_DATA = "start"
+LEARN_DATA = "learn"
+LATER_DATA = "later"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +127,10 @@ def parse_callback(data: str | None) -> Callback | None:
             return Callback("intro", local_date=parts[1])
         if parts == ["start"]:
             return Callback("start")
+        if parts == ["learn"]:
+            return Callback("learn")
+        if parts == ["later"]:
+            return Callback("later")
         if parts[0] == "st" and len(parts) == 4 and parts[3]:
             return Callback("step", session_id=parts[1], step=int(parts[2]), value=parts[3])
         if parts[0] == "known" and len(parts) == 3:
@@ -169,26 +179,52 @@ def morning_brief(plan: DailyPlan) -> Message:
 
 
 def _day_buttons(plan: DailyPlan) -> tuple[ButtonRow, ...]:
-    """Start the session (reviews first, then the new words), or skip the
-    new words' practice, as Mark as studied does on the desktop."""
+    """The day's two sessions, each its own button, reviews first."""
     buttons: list[ButtonRow] = []
-    work = plan.due_count + len(plan.new_words)
-    if work:
-        buttons.append(((f"▶ Start session ({work})", START_DATA),))
+    if plan.due_count:
+        buttons.append(((f"▶ Reviews ({plan.due_count})", START_DATA),))
     if plan.new_words:
-        buttons.append(
-            ((f"Mark the {len(plan.new_words)} new words as studied",
-              intro_data(plan.local_date)),)
-        )
+        buttons.append(((f"▶ New words ({len(plan.new_words)})", LEARN_DATA),))
     return tuple(buttons)
 
 
-def introduced(count: int, first_due_on: str | None) -> str:
-    """What replaces the button once the new words are marked as studied."""
-    if not count:
-        return "Nothing new to mark — today's words are already in."
-    when = _pretty(first_due_on) if first_due_on else "tomorrow"
-    return f"✅ {count} new words marked as studied. First review: {escape(when)}."
+def day_buttons(plan: DailyPlan) -> tuple[ButtonRow, ...]:
+    """What is left today, as buttons, reviews first."""
+    return _day_buttons(plan)
+
+
+def retired_intro() -> str:
+    """An old morning message's Mark as studied, tapped now."""
+    return (
+        "That button is gone: new words are now learned one by one, each shown "
+        "and practised. /learn starts them."
+    )
+
+
+def nothing_to_review(plan: DailyPlan) -> Message:
+    """/review with no word due."""
+    text = "No reviews are due right now."
+    if plan.new_words:
+        text += f" {len(plan.new_words)} new words are waiting."
+    return Message(text, _day_buttons(plan))
+
+
+def nothing_to_learn(plan: DailyPlan) -> Message:
+    """/learn with no new word left today."""
+    if plan.intake_paused and plan.intake_note:
+        text = f"No new words today. <i>{escape(plan.intake_note)}</i>"
+    elif plan.introduced_today:
+        text = f"Today's {len(plan.introduced_today)} new words are learned."
+    else:
+        text = "No new words are waiting today."
+    if plan.due_count:
+        text += f" {plan.due_count} reviews are due."
+    return Message(text, _day_buttons(plan))
+
+
+def later_note() -> str:
+    """Tapped Later after the reviews: the new words wait."""
+    return "The new words wait. /learn starts them whenever you like."
 
 
 #: The ratings after a right answer, as buttons: the callback value is the
@@ -333,30 +369,54 @@ def answer_line(outcome: AnswerOutcome) -> str:
 
 
 def session_summary(
+    kind: str,
     answered: int,
     ratings: dict[int, int],
     plan: DailyPlan,
     stopped_early: bool,
     learned: int = 0,
-) -> str:
-    """The end of a session: what was done, and what is left."""
-    lines = ["<b>Session finished</b>" if not stopped_early else "<b>Stopped</b>"]
+) -> Message:
+    """The end of a session: what was done, what is left, and the next step.
+
+    Reviews finished with new words waiting ask about them: now, or later.
+    Anything else offers what is left, reviews first.
+    """
+    learning = kind == "learn"
+    if stopped_early:
+        title = "Stopped"
+    else:
+        title = "New words learned ✅" if learning else "Reviews done ✅"
+    lines = [f"<b>{title}</b>"]
     if answered:
         again = ratings.get(int(Rating.AGAIN), 0)
         rate = round(100 * again / answered) if answered else 0
         lines.append(f"{answered} reviewed · {again} again ({rate}%)")
     if learned:
-        lines.append(f"{learned} new {'word' if learned == 1 else 'words'} learned")
+        noun = "word" if learned == 1 else "words"
+        lines.append(f"{learned} new {noun} learned — first review tomorrow")
     if not answered and not learned:
         lines.append("Nothing was answered.")
+
+    left = []
     if plan.due_count:
-        lines.append(f"{plan.due_count} still due today.")
-    else:
-        lines.append("Nothing left for today. \U0001f389")
+        left.append(f"{plan.due_count} {'review' if plan.due_count == 1 else 'reviews'} due")
+    if plan.new_words:
+        left.append(f"{len(plan.new_words)} new words waiting")
     tomorrow = dict(plan.forecast).get(_next_day(plan.local_date))
+
+    buttons: tuple[ButtonRow, ...]
+    if not learning and not stopped_early and plan.new_words and not plan.due_count:
+        lines += ["", f"Next: <b>{len(plan.new_words)} new words</b>."]
+        buttons = ((("▶ Start now", LEARN_DATA), ("Later", LATER_DATA)),)
+    else:
+        if left:
+            lines.append("Still today: " + " · ".join(left) + ".")
+        else:
+            lines.append("Nothing left for today. 🎉")
+        buttons = _day_buttons(plan)
     if tomorrow:
         lines.append(f"Tomorrow: {tomorrow} reviews.")
-    return "\n".join(lines)
+    return Message("\n".join(lines), buttons)
 
 
 def evening_reminder(plan: DailyPlan) -> Message | None:
@@ -407,17 +467,21 @@ def welcome(bound: bool) -> str:
         return (
             "<b>LexiTrack is connected.</b>\n"
             "You will get today's words each morning. /today shows them now, "
-            "/review starts a session. Every question is answered with its buttons."
+            "/review starts the reviews and /learn the new words. Every question is "
+            "answered with its buttons."
         )
-    return "LexiTrack is running. /today shows today's words, /review starts a session."
+    return (
+        "LexiTrack is running. /today shows today's words, /review starts the "
+        "reviews, /learn the new words."
+    )
 
 
 def use_the_buttons() -> str:
-    return "Answer the card with its buttons. /review shows it again."
+    return "Answer the card with its buttons. /review or /learn shows it again."
 
 
 def no_session() -> str:
-    return "No session is open. /review starts one."
+    return "No session is open. /review starts the reviews, /learn the new words."
 
 
 def stale(action: str) -> str:

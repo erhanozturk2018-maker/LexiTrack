@@ -253,7 +253,7 @@ class TelegramRuntime:
         async def on_error(_update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
             log.warning("Telegram handler error: %s", context.error, exc_info=context.error)
 
-        for name in ("start", "today", "brief", "review", "help"):
+        for name in ("start", "today", "brief", "review", "learn", "help"):
             application.add_handler(CommandHandler(name, on_command))
         application.add_handler(CallbackQueryHandler(on_button))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

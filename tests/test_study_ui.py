@@ -130,39 +130,32 @@ class TestDayView:
         window.show_page(STUDY)
         assert window.study._stack.currentWidget() is window.study._pages[EMPTY]
 
-    def test_the_day_is_one_line_one_estimate_and_one_button(
+    def test_the_day_is_two_sessions_with_a_button_each(
         self, window, engine, loaded
     ) -> None:
         with_plan(engine, loaded)
         window.show_page(STUDY)
         study = window.study
         assert study._stack.currentWidget() is study._pages[DAY]
-        # 25 new words, each read and asked: about 40 seconds each.
-        assert study.headline.text() == "25 words · about 17 min"
-        assert study.detail.text() == "25 new"
-        assert study.primary_button.isEnabled()
-        assert study.primary_button.text() == "Start session →"
+        # Day one: nothing to review yet; 25 new words, about 40 seconds each.
+        reviews, learn = study.review_task, study.learn_task
+        assert reviews.headline.text() == "Nothing due"
+        assert not reviews.button.isEnabled()
+        assert learn.headline.text() == "25 new"
+        assert learn.detail.text().startswith("about 17 min")
+        assert learn.button.text() == "Learn new words →"
+        assert learn.button.isEnabled()
+        assert learn.button.property("variant") == "primary"
         chips = study.word_chips()
         assert len(chips) == 25
         assert engine.daily_plan().new_words[0].word in chips
         assert study.words_section.title.text() == "NEW WORDS \u00b7 25"
 
-    def test_marking_them_studied_skips_the_practice_and_says_when_they_come_back(
-        self, window, engine, loaded
-    ) -> None:
+    def test_there_is_no_way_to_mark_words_studied_unseen(self, window, engine, loaded) -> None:
+        """A new word is learned by being shown and practised, nothing else."""
         with_plan(engine, loaded)
         window.show_page(STUDY)
-        messages: list[str] = []
-        window.study.notify.connect(messages.append)
-        window.study.studied_button.click()
-        # Nothing is due on day one, so the day is finished and says so.
-        assert not window.study.primary_button.isEnabled()
-        assert "All done" in window.study.primary_button.text()
-        assert window.study.headline.text() == "All done for today"
-        assert window.study.detail.text() == "0 reviewed and 25 new learned today."
-        # The words stay on screen, greyed, as what was learned today.
-        assert window.study.words_section.title.text() == "LEARNED TODAY \u00b7 25"
-        assert messages and "2026-09-18" in messages[0]
+        assert not hasattr(window.study, "studied_button")
 
     def test_a_finished_day_is_stated_once_not_three_times(self, window, engine, loaded) -> None:
         with_plan(engine, loaded)
@@ -205,8 +198,10 @@ class TestSession:
         return window.study
 
     def test_start_opens_the_first_question_with_four_options(self, due) -> None:
-        assert due.primary_button.text() == "Start session →"
-        due.primary_button.click()
+        assert due.review_task.button.text() == "Start reviews →"
+        assert due.review_task.button.property("variant") == "primary"
+        due.review_task.button.click()
+        assert due.session_kind_label.text() == "REVIEWS"
         assert due._stack.currentWidget() is due._pages[SESSION]
         assert due.session_progress.text() == "1 / 25"
         question = due.card.step.question
@@ -235,8 +230,9 @@ class TestSession:
         due.keyPressEvent(_key(Qt.Key.Key_Escape))
         assert not due.in_session
         assert due._stack.currentWidget() is due._pages[DAY]
-        assert due.detail.text() == "24 reviews · done so far: 1 reviewed, 0 learned"
-        assert due.primary_button.text() == "Continue session →"
+        assert due.review_task.headline.text() == "24 due"
+        assert due.review_task.detail.text().endswith("1 done so far")
+        assert due.review_task.button.text() == "Continue reviews →"
 
     def test_number_keys_do_nothing_outside_a_session(self, due, engine) -> None:
         due.keyPressEvent(_key(Qt.Key.Key_1))
@@ -247,10 +243,11 @@ class TestSession:
         for _ in range(25):
             _right(due)
         assert not due.in_session
-        assert due.headline.text() == "All done for today"
-        assert due.primary_button.text() == "All done ✓"
+        assert due.review_task.headline.text() == "Done ✓"
+        assert due.review_task.detail.text() == "25 reviewed today."
+        assert not due.review_task.button.isEnabled()
 
-    def test_one_session_reviews_first_then_teaches_the_new_words(
+    def test_reviews_then_new_words_are_two_sessions(
         self, window, engine, loaded, clock
     ) -> None:
         with_plan(engine, loaded)
@@ -259,13 +256,26 @@ class TestSession:
         clock.advance_to_day_start(1)
         window.show_page(STUDY)
         study = window.study
-        assert study.detail.text() == "3 reviews, 3 new"
+        assert study.review_task.headline.text() == "3 due"
+        assert study.learn_task.headline.text() == "3 new"
+        # Reviews first: theirs is the primary button.
+        assert study.review_task.button.property("variant") == "primary"
+        assert study.learn_task.button.property("variant") != "primary"
         messages: list[str] = []
         study.notify_undo.connect(lambda text, _undo: messages.append(text))
-        study.start_session()
+
+        study.review_task.button.click()
         for _ in range(3):
             assert study.card.step.phase.value == "review"
             _right(study)
+        assert not study.in_session
+        assert messages == ["3 words reviewed. Next: 3 new words."]
+        assert engine.daily_plan().introduced_today == ()
+        # Now the new words are the next thing to do.
+        assert study.learn_task.button.property("variant") == "primary"
+
+        study.learn_task.button.click()
+        assert study.session_kind_label.text() == "NEW WORDS"
         for _ in range(3):
             # Each new word shown, then all three asked.
             assert study.card.step.label == "New word"
@@ -275,10 +285,8 @@ class TestSession:
             assert not study.card.step.rated
             _right(study)
         assert not study.in_session
-        assert messages == [
-            "3 words reviewed; 3 new words learned, first review tomorrow."
-        ]
         assert len(engine.daily_plan().introduced_today) == 3
+        assert study.learn_task.headline.text() == "Done ✓"
 
     def test_identical_intervals_are_said_once(self, due) -> None:
         due.start_session()

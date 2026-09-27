@@ -38,6 +38,8 @@ from lexitrack.telegram import config as telegram_config
 from lexitrack.telegram.config import load_config, read_env_file
 from lexitrack.telegram.core import BotCore
 from lexitrack.telegram.messages import (
+    LATER_DATA,
+    LEARN_DATA,
     START_DATA,
     Message,
     end_data,
@@ -261,50 +263,48 @@ class TestOwnership:
 
 
 class TestNewWords:
-    def test_the_brief_lists_the_words_with_their_meaning(
+    def test_the_brief_lists_the_words_and_offers_the_two_sessions(
         self, bot: BotCore, outbox: FakeOutbox
     ) -> None:
         run(bot.command(OWNER, "/today"))
         text = outbox.sent[-1][1].text
         assert "25 new words" in text
         assert "meaning of aaword" in text
-        assert intro_data("2026-09-17") in FakeOutbox.callbacks(outbox.sent[-1][1])
+        # Nothing is due on the first day: only the new words' button.
+        assert FakeOutbox.callbacks(outbox.sent[-1][1]) == [LEARN_DATA]
 
-    def test_confirming_introduces_the_words_and_edits_the_message(
+    def test_an_old_mark_as_studied_button_marks_nothing(
         self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
     ) -> None:
+        """The words are learned one by one now; the old button says so."""
         run(bot.callback(OWNER, "55", intro_data(clock.today()), "<b>brief</b>"))
-        assert len(bot.engine.daily_plan().introduced_today) == 25
+        assert bot.engine.daily_plan().introduced_today == ()
         chat, message_id, edited = outbox.edits[-1]
         assert (chat, message_id) == (OWNER, "55")
         assert edited.text.startswith("<b>brief</b>")
-        assert "25 new words marked as studied" in edited.text
+        assert "/learn" in edited.text
+        assert FakeOutbox.callbacks(edited) == [LEARN_DATA]
 
-    def test_confirming_twice_adds_nothing_the_second_time(
-        self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
+    def test_learn_with_nothing_left_says_so(
+        self, bot: BotCore, outbox: FakeOutbox
     ) -> None:
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
-        assert len(bot.engine.daily_plan().introduced_today) == 25
-        assert "already in" in outbox.edits[-1][2].text
+        bot.engine.introduce()
+        run(bot.command(OWNER, "/learn"))
+        assert "25 new words are learned" in outbox.sent[-1][1].text
 
-    def test_yesterdays_button_does_not_confirm_todays_words(
-        self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
-    ) -> None:
-        """The words on an old message are not the words offered today."""
-        old = intro_data(clock.today())
-        clock.advance_to_day_start(1)
-        run(bot.callback(OWNER, "55", old, ""))
-        assert bot.engine.daily_plan().introduced_today == ()
-        assert "earlier day" in outbox.edits[-1][2].text
-
-    def test_the_desktop_sees_what_the_phone_confirmed(
-        self, bot: BotCore, seeded: Database, clock: FrozenClock
+    def test_the_desktop_sees_what_the_phone_learned(
+        self, bot: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
         """One database, two clients: no sync step in between."""
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 4)
+        run(bot.command(OWNER, "/learn"))
+        session = _session_of(outbox.sent[-1][1])
+        for _ in range(100):
+            if session not in bot._flows:
+                break
+            respond(bot, outbox, session)
         desktop = LearningService(seeded, clock)
-        assert len(desktop.daily_plan().introduced_today) == 25
+        assert len(desktop.daily_plan().introduced_today) == 4
 
 
 # -- review sessions -----------------------------------------------------------
@@ -341,7 +341,7 @@ class TestReviews:
     @pytest.fixture
     def due(self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock) -> BotCore:
         """25 words marked as studied yesterday, due now."""
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        bot.engine.introduce()
         clock.advance_to_day_start(1)
         clock.advance(hours=18)
         SettingsRepository(bot.engine.database).set(Setting.NEW_WORDS_PER_DAY, 0)
@@ -475,7 +475,7 @@ class TestReviews:
                 break
             respond(due, outbox, session)
         text = outbox.edits[-1][2].text
-        assert "Session finished" in text
+        assert "Reviews done" in text
         assert "25 reviewed" in text
         assert due.engine.open_session(Channel.TELEGRAM) is None
 
@@ -486,7 +486,7 @@ class TestReviews:
         text = outbox.edits[-1][2].text
         assert "Stopped" in text
         assert "1 reviewed" in text
-        assert "24 still due" in text
+        assert "24 reviews due" in text
 
     def test_review_resumes_the_open_session(self, due: BotCore, outbox: FakeOutbox) -> None:
         session = self.start(due, outbox)
@@ -501,7 +501,7 @@ class TestReviews:
     ) -> None:
         SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 0)
         run(bot.command(OWNER, "/review"))
-        assert "Nothing is due" in outbox.sent[-1][1].text
+        assert "No reviews are due" in outbox.sent[-1][1].text
 
     def test_the_desktop_study_page_counts_phone_answers(
         self, due: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
@@ -518,7 +518,7 @@ class TestInterruptions:
 
     @pytest.fixture
     def due(self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock) -> BotCore:
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        bot.engine.introduce()
         clock.advance_to_day_start(1)
         clock.advance(hours=18)
         SettingsRepository(bot.engine.database).set(Setting.NEW_WORDS_PER_DAY, 0)
@@ -603,7 +603,7 @@ class TestLearningOnThePhone:
         self, bot: BotCore, outbox: FakeOutbox, seeded: Database
     ) -> None:
         SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 4)
-        run(bot.callback(OWNER, "1", START_DATA, ""))
+        run(bot.callback(OWNER, "1", LEARN_DATA, ""))
         session = _session_of(outbox.sent[-1][1])
         card = outbox.sent[-1][1]
         assert "NEW WORD" in card.text and "Definition" in card.text
@@ -620,7 +620,7 @@ class TestLearningOnThePhone:
     def test_a_word_right_after_a_long_gap_is_offered_as_known(
         self, bot: BotCore, outbox: FakeOutbox, seeded: Database, clock: FrozenClock
     ) -> None:
-        run(bot.callback(OWNER, "55", intro_data(clock.today()), ""))
+        bot.engine.introduce()
         SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 0)
         bot.engine.refresh_settings()
         clock.advance_to_day_start(1)
@@ -639,6 +639,66 @@ class TestLearningOnThePhone:
         ).fetchone()[0]
         assert status == ReviewStatus.KNOWN.value
         assert "marked Known" in outbox.edits[-1][2].text
+
+
+class TestTwoSessions:
+    """Reviews and new words are two sessions, each with its own button."""
+
+    @pytest.fixture
+    def day(self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock, seeded) -> BotCore:
+        """Words due from yesterday, and 4 new words today."""
+        bot.engine.introduce()
+        clock.advance_to_day_start(1)
+        clock.advance(hours=4)
+        SettingsRepository(seeded).set(Setting.NEW_WORDS_PER_DAY, 4)
+        bot.engine.refresh_settings()
+        outbox.sent.clear()
+        outbox.edits.clear()
+        return bot
+
+    def test_the_brief_offers_reviews_first_then_new_words(
+        self, day: BotCore, outbox: FakeOutbox
+    ) -> None:
+        run(day.command(OWNER, "/today"))
+        assert FakeOutbox.callbacks(outbox.sent[-1][1]) == [START_DATA, LEARN_DATA]
+
+    def test_reviews_hold_no_new_word_then_ask_about_them(
+        self, day: BotCore, outbox: FakeOutbox
+    ) -> None:
+        run(day.command(OWNER, "/review"))
+        session = _session_of(outbox.sent[-1][1])
+        for _ in range(200):
+            if session not in day._flows:
+                break
+            step = respond(day, outbox, session)
+            assert step.kind is not StepKind.TEACH
+        assert day.engine.daily_plan().introduced_today == ()
+        summary = outbox.edits[-1][2]
+        assert "Reviews done" in summary.text and "4 new words" in summary.text
+        assert FakeOutbox.callbacks(summary) == [LEARN_DATA, LATER_DATA]
+
+        run(day.callback(OWNER, "77", LATER_DATA, "<b>done</b>"))
+        later = outbox.edits[-1][2]
+        assert "/learn" in later.text and not later.buttons
+
+    def test_learn_closes_an_open_review_and_counts_only_what_was_practised(
+        self, day: BotCore, outbox: FakeOutbox
+    ) -> None:
+        run(day.command(OWNER, "/review"))
+        review = _session_of(outbox.sent[-1][1])
+        respond(day, outbox, review)
+        run(day.command(OWNER, "/learn"))
+        learn = _session_of(outbox.sent[-1][1])
+        assert learn != review
+        assert not day.engine.session(review).is_open
+        # One group of four is shown, then one of them is asked: nothing
+        # has been practised in full yet, so nothing is learned.
+        for _ in range(5):
+            respond(day, outbox, learn)
+        run(day.callback(OWNER, outbox.last_id(), end_data(learn), ""))
+        plan = day.engine.daily_plan()
+        assert len(plan.introduced_today) < 4
+        assert len(plan.new_words) == 4 - len(plan.introduced_today)
 
 
 class TestCards:
@@ -768,7 +828,7 @@ class TestNotifications:
     ) -> None:
         clock.set(datetime(2026, 9, 17, 3, 5, tzinfo=UTC))
         run(bot.tick())
-        run(bot.callback(OWNER, "1", intro_data(clock.today()), ""))
+        bot.engine.introduce()
         clock.set(datetime(2026, 9, 17, 18, 5, tzinfo=UTC))
         sent_before = len(outbox.sent)
         assert run(bot.tick()) == [Notification.EVENING]

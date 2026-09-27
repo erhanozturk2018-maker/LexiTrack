@@ -30,7 +30,7 @@ from lexitrack.repositories import (
     WordRepository,
 )
 from lexitrack.services.learning_service import LearningService
-from lexitrack.services.review_flow import StepKind
+from lexitrack.services.review_flow import SessionKind, StepKind
 from lexitrack.ui.components.review_card import _INNER_WIDTH, AnswerButton, ReviewCard, _fit
 from lexitrack.ui.study_page import StudyPage
 from lexitrack.ui.theme import ThemeManager, ThemeName
@@ -75,7 +75,7 @@ def _study(database: Database, qtbot, *, introduce: bool = True) -> StudyPage:
     study = StudyPage(engine)
     qtbot.addWidget(study)
     study.show()
-    study.start_session()
+    study.start_session(SessionKind.REVIEW if introduce else SessionKind.LEARN)
     return study
 
 

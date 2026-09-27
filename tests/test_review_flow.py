@@ -29,7 +29,7 @@ from lexitrack.repositories import (
     WordRepository,
 )
 from lexitrack.services.learning_service import LearningService
-from lexitrack.services.review_flow import ReviewFlow, StepKind
+from lexitrack.services.review_flow import ReviewFlow, SessionKind, StepKind
 from lexitrack.services.review_wording import feedback_text
 
 from .conftest import entry
@@ -362,7 +362,7 @@ def test_new_words_are_shown_then_asked_both_ways_and_learned(
     database: Database, clock: FrozenClock
 ) -> None:
     engine = _setup(database, clock, introduce=False)
-    flow = ReviewFlow(engine)
+    flow = ReviewFlow(engine, kind=SessionKind.LEARN)
     assert flow.start()
     steps = _asked(flow)
     first_group = [s.word.word for s in steps[:4]]
@@ -463,3 +463,37 @@ def test_a_word_deleted_during_a_session_is_left_out_on_restore(
     assert again is not None
     assert all(step.word.id != later for step in again._steps)
     assert again.total == flow.total - 1
+
+
+def test_reviews_and_new_words_are_two_sessions(database: Database, clock: FrozenClock) -> None:
+    """A review session holds only words due; a learning session only new ones."""
+    from lexitrack.models.settings import Setting
+
+    engine = _setup(database, clock)
+    engine.save_settings({Setting.NEW_WORDS_PER_DAY: 4})
+    # The eight words were introduced yesterday: four new ones for today.
+    source = SourceRepository(database).upsert(
+        Source(key="test", name="Test source", parser_type="generic")
+    )
+    fresh = list(WordRepository(database).add_entries(
+        [entry(w, definition=f"the meaning of {w}", cefr_level="B1")
+         for w in ("apricot", "lantern", "orchard", "quarry")],
+        source.id,
+    ).word_ids)
+    plan = engine.active_plan()
+    ListRepository(database).add_words(plan.list_ids[0], fresh)
+    StateRepository(database).set_status_many(fresh, ReviewStatus.UNKNOWN)
+    assert engine.daily_plan().new_words and engine.daily_plan().due_count
+
+    review = ReviewFlow(engine)
+    assert review.start() and review.kind is SessionKind.REVIEW
+    steps = _asked(review)
+    assert steps and all(s.kind is StepKind.QUESTION for s in steps)
+    assert {s.word.id for s in steps}.isdisjoint(fresh)
+    review.finish()
+
+    learn = ReviewFlow(engine, kind=SessionKind.LEARN)
+    assert learn.start()
+    assert {s.word.id for s in _asked(learn)} <= set(fresh)
+    # The kind is saved with the session and comes back with it.
+    assert ReviewFlow.restore(engine, learn.session_id).kind is SessionKind.LEARN

@@ -16,9 +16,14 @@ Three rules the handlers below all follow:
    queue, answers a card and reads the queue again; holding the lock across
    the three means the desktop cannot slip an answer in between and make the
    bot show a card that was just reviewed.
-3. **A button only does what it says on the day it was sent.** Marking new
-   words carries the date; a step carries the session and the step's number.
-   A tap on anything older is acknowledged and ignored.
+3. **A button only does what it says while it is current.** A step carries
+   the session and the step's number; a tap on anything older is
+   acknowledged and ignored.
+
+The day has two sessions, as on the desktop: /review (the words due) and
+/learn (today's new words), one open at a time. Asking for one while the
+other is open closes the other — its answers are already saved — and opens
+the one asked for.
 
 A session is the desktop's :class:`ReviewFlow` — the same questions, the same
 rules, recorded as answers from Telegram. Its state is saved after every
@@ -42,7 +47,7 @@ from ..models.srs import Channel
 from ..repositories import RuntimeRepository
 from ..services.learning_service import AnswerOutcome, LearningService
 from ..services.progress import ProgressService
-from ..services.review_flow import Feedback, ReviewFlow, StepKind
+from ..services.review_flow import Feedback, ReviewFlow, SessionKind, StepKind
 from ..services.review_wording import feedback_text, rated_line
 from . import messages
 from .messages import Message
@@ -117,7 +122,9 @@ class BotCore:
         if name in ("today", "brief"):
             await self._outbox.send(chat_id, self._brief())
         elif name == "review":
-            await self._begin_session(chat_id)
+            await self._begin_session(chat_id, SessionKind.REVIEW)
+        elif name == "learn":
+            await self._begin_session(chat_id, SessionKind.LEARN)
         else:
             await self._outbox.send(chat_id, Message(messages.welcome(bound=False)))
 
@@ -156,9 +163,15 @@ class BotCore:
         if parsed is None:
             return
         if parsed.action == "intro":
-            await self._introduce(chat_id, message_id, parsed.local_date or "", text_html)
+            await self._retired_intro(chat_id, message_id, text_html)
         elif parsed.action == "start":
-            await self._begin_session(chat_id)
+            await self._begin_session(chat_id, SessionKind.REVIEW)
+        elif parsed.action == "learn":
+            await self._begin_session(chat_id, SessionKind.LEARN)
+        elif parsed.action == "later":
+            await self._outbox.edit(
+                chat_id, message_id, Message(f"{text_html}\n\n{messages.later_note()}")
+            )
         elif parsed.action == "step":
             await self._step(chat_id, message_id, parsed)
         elif parsed.action == "known":
@@ -168,21 +181,16 @@ class BotCore:
         elif parsed.action == "undo":
             await self._undo(chat_id, message_id, parsed.session_id or "")
 
-    async def _introduce(
-        self, chat_id: str, message_id: str, local_date: str, text_html: str
-    ) -> None:
+    async def _retired_intro(self, chat_id: str, message_id: str, text_html: str) -> None:
+        """An old morning message's Mark as studied: it no longer marks
+        anything; the message offers today's two sessions instead."""
         with self._db.lock:
             self._engine.refresh_settings()
-            if local_date != self._engine.clock.today():
-                note, result, due = messages.stale("intro"), None, 0
-            else:
-                result = self._engine.introduce()
-                note = messages.introduced(result.count, result.first_due_on)
-                due = self._engine.daily_plan().due_count
-        buttons = ((((f"▶ Start session ({due})", messages.START_DATA),),) if due else ())
-        await self._outbox.edit(chat_id, message_id, Message(f"{text_html}\n\n{note}", buttons))
-        if result is not None and result.count:
-            self._on_activity()
+            plan = self._engine.daily_plan()
+        note = messages.retired_intro()
+        await self._outbox.edit(
+            chat_id, message_id, Message(f"{text_html}\n\n{note}", messages.day_buttons(plan))
+        )
 
     # -- the session -----------------------------------------------------------
 
@@ -242,10 +250,13 @@ class BotCore:
         if replaces is not None and replaces != sent:
             await self._outbox.delete(chat_id, replaces)
 
-    async def _begin_session(self, chat_id: str) -> None:
-        """Resume the open session if there is one; else start the day's."""
+    async def _begin_session(self, chat_id: str, kind: SessionKind) -> None:
+        """Resume the open session if it is of ``kind``; else start one.
+
+        The other kind's session, if one is open, is closed first: its
+        answers are saved with every step, so nothing is lost.
+        """
         note = None
-        empty = "Nothing is due right now, and today's new words are in."
         with self._db.lock:
             self._engine.refresh_settings()
             existing = self._engine.open_session(Channel.TELEGRAM)
@@ -253,11 +264,12 @@ class BotCore:
             replaces = None
             if existing is not None:
                 flow, _restored = self._flow(existing.id)
-                if flow is not None and flow.current is not None:
+                if flow is not None and flow.current is not None and flow.kind is kind:
                     note = "Picking up where you left off."
                     replaces = existing.message_id
                 else:
-                    # Nothing left in it, or saved by an older version.
+                    # Nothing left in it, the other kind, or saved by an
+                    # older version.
                     if flow is not None:
                         flow.finish()
                     else:
@@ -265,14 +277,20 @@ class BotCore:
                     self._flows.pop(existing.id, None)
                     flow = None
             if flow is None:
-                flow = ReviewFlow(self._engine, Channel.TELEGRAM, chat_id)
+                flow = ReviewFlow(self._engine, Channel.TELEGRAM, chat_id, kind)
                 if not flow.start():
                     flow = None
                 else:
                     self._flows[flow.session_id] = flow
             card = self._card(flow, note=note) if flow is not None else None
+            if card is None:
+                plan = self._engine.daily_plan()
         if card is None:
-            await self._outbox.send(chat_id, Message(empty))
+            empty = (
+                messages.nothing_to_learn(plan) if kind is SessionKind.LEARN
+                else messages.nothing_to_review(plan)
+            )
+            await self._outbox.send(chat_id, empty)
             return
         await self._show(chat_id, flow, card, replaces)
 
@@ -426,7 +444,10 @@ class BotCore:
             if session is None:
                 return
             flow = self._flows.pop(session_id, None)
+            if flow is None:
+                flow = ReviewFlow.restore(self._engine, session_id)
             learned = flow.learned if flow is not None else 0
+            kind = flow.kind if flow is not None else SessionKind.REVIEW
             if flow is not None and flow.active:
                 flow.finish()
             elif session.is_open:
@@ -435,15 +456,19 @@ class BotCore:
             # Counted from the record, so answers taken back are left out.
             answered = sum(ratings.values())
             plan = self._engine.daily_plan()
-        text = messages.session_summary(answered, ratings, plan, stopped_early, learned)
+        summary = messages.session_summary(
+            kind.value, answered, ratings, plan, stopped_early, learned
+        )
+        text = summary.text
         if last_line:
             text = f"<i>{escape(last_line)}</i>\n\n{text}"
         elif last is not None and not last.duplicate:
             text = f"<i>{escape(messages.answer_line(last))}</i>\n\n{text}"
+        message = Message(text, summary.buttons)
         if message_id:
-            await self._outbox.edit(chat_id, message_id, Message(text))
+            await self._outbox.edit(chat_id, message_id, message)
         else:
-            await self._outbox.send(chat_id, Message(text))
+            await self._outbox.send(chat_id, message)
 
     def _session_ratings(self, session_id: str) -> dict[int, int]:
         rows = self._db.connection.execute(
