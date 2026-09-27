@@ -1370,3 +1370,29 @@ edits until Save turns a mistaken × into nothing at all, and makes Cancel
 the undo for the whole edit; the one question left is about the one loss
 Save cannot take back. Adding a context now takes two steps (type, Save):
 the price of every change to a word going through the same door.
+
+## 87. Reviews and new words are two sessions, and no word is learned unseen
+
+**Decision.** The day is two sessions, each started on its own: **Reviews**
+(the words due) and **New words** (today's words, shown and practised). A
+review session never holds a new word. Today shows the two side by side,
+each with what it has left and its own button; the next thing to do — the
+reviews while any are due, then the new words — has the primary one. The
+Telegram bot offers the same two buttons on its morning and evening
+messages, answers `/review` and `/learn`, and at the end of the reviews asks
+about the new words: *Start now* or *Later*. **Mark as studied** is gone
+from both clients: a new word is learned only by being shown and practised,
+so stopping halfway leaves the rest waiting. An old morning message's
+button marks nothing; it says so and offers the two sessions. This
+supersedes the one-button Today card (§85 kept one session: reviews, then
+new words).
+
+**Reason.** In one session the new words arrived in the middle of what the
+learner took to be their reviews, and the phone's Mark as studied — meant
+for words studied elsewhere — marked a whole day's words learned while half
+of them had never been shown; the next /review then said the day was done.
+Reviews and learning are different work, with different effort and length,
+and the learner wants to choose when to do each. Two buttons keep that
+choice; the primary one and the "now or later" question keep the order that
+matters — reviewing before new words can interfere with recall — without
+forcing it.

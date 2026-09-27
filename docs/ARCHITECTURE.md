@@ -458,9 +458,12 @@ and where the word stands in it), each word's run (questions asked, contexts
 shown, cycles, rated or learned), and a right answer waiting for its rating.
 `ReviewFlow.restore` rebuilds it, so the same question comes back with the
 same four options. A state saved by an earlier route is not guessed at: that
-session is closed and today's starts afresh. The desktop's
-*Start session* resumes a session left open when the app closed, and the bot
-does the same on `/review` or the first tap after a restart.
+session is closed and today's starts afresh. A flow has a kind — reviews
+or new words (`SessionKind`), saved with its state — and one session is open
+per channel: asking for one kind while the other is open closes the other
+(its answers are already saved). The desktop's two Today buttons resume a
+session of their kind left open when the app closed, and the bot does the
+same on `/review` or `/learn`, or the first tap after a restart.
 
 What a step says — the right word and its definition after an answer, an
 interval in words — is in `services/review_wording.py`, as plain text each
@@ -683,10 +686,11 @@ Rules `BotCore` keeps:
   refusal and nothing else.
 - **Engine calls run under the database lock**, so a tap's read–answer–read is
   not interleaved with a desktop answer.
-- **A button does only what it said on its day.** A mark-as-studied button
-  carries its date; a step's button carries its session and the step's number
-  and is ignored unless that step is on screen, so a double tap or an old card
-  does nothing.
+- **A button does only what it says while it is current.** A step's button
+  carries its session and the step's number and is ignored unless that step
+  is on screen, so a double tap or an old card does nothing. The retired
+  mark-as-studied button of an old morning message marks nothing; it says so
+  and offers the day's two sessions.
 - **A restart loses nothing and guesses nothing.** The flow is restored from
   its saved state; the first tap or reply after a restart shows the step the
   session is on rather than acting, because the question may have changed.
@@ -814,8 +818,9 @@ MainWindow
 │   ├── no plan             the first-run setup: what to learn (all Unknown
 │   │                       words, or some lists), how many a day, the phone;
 │   │                       Start learning creates the plan
-│   ├── the day             one Today card (what waits, how long it takes,
-│   │                       Start session) · New words as CEFR-grouped chips ·
+│   ├── the day             two Today cards, Reviews and New words (what
+│   │                       waits, how long, a button each; the next one is
+│   │                       primary) · New words as CEFR-grouped chips ·
 │   │                       This week (day tiles) · Words you find hard
 │   └── session             one card: progress line, a new word shown whole, or
 │                           a question with four options (keys 1–4 / A–D); after

@@ -1132,3 +1132,21 @@ irreversible=)`, which ends every irreversible question the same way.
   it steps aside, and Save / Cancel sit at the top of the panel.
 - `MainWindow.quit` called `app.quit()` even when the window refused to
   close; it now stops when `close()` returns False (unsaved edits kept).
+
+## 2026-09-27 — Reviews and new words, two sessions (DECISIONS §87)
+
+`ReviewFlow` has a kind (`SessionKind.REVIEW` / `LEARN`, saved in its
+state; older states read as review and carry on as saved), and `start()`
+builds only that kind's steps. Today shows two cards, Reviews and New words;
+the bot has `/learn`, a button per session on its brief and reminder, and
+*Start now* / *Later* when the reviews are done. Mark as studied is gone from
+both; the engine's `introduce()` remains, used by the learning session one
+word at a time and by tests to set up a day.
+
+**Problems and solutions**
+
+- The report behind it: new words appeared inside what looked like the
+  reviews, and the phone's *Mark as studied* pressed mid-session introduced
+  all 25 of the day's words while about 13 had been shown; `/review` then
+  found nothing left. The crash the learner saw left no trace (logging is
+  off unless debug logging is on) and did not reproduce in the test harness.

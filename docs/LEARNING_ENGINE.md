@@ -181,10 +181,17 @@ after a gap. A miss is asked again three cards later — twice at most.
 None of it is rated. The answers are recorded as attempts of the
 introduction phase; the word gets its card — first review tomorrow — the
 moment its last step is done, so leaving early keeps the words finished and
-offers the rest again. **Mark as studied** introduces the day's words without
-the practice, for a learner who studied them another way.
+offers the rest again. There is no other way in: a word is never marked
+learned unseen (DECISIONS §87).
 
-The Today card estimates the session: 12 seconds a review, 40 a new word.
+Reviews and new words are **two sessions** (`SessionKind.REVIEW` and
+`SessionKind.LEARN`), each started on its own — Today's two cards, the bot's
+`/review` and `/learn`. A review session holds only words due, so reviewing
+measures memory before the day's new words can interfere with it; the order
+is kept by which button is the primary one, and by the bot asking "now or
+later" about the new words when the reviews are done.
+
+Today estimates each session: 12 seconds a review, 40 a new word.
 
 ---
 
@@ -471,8 +478,8 @@ Settings with their defaults:
       │ candidate     │  status = unknown          │ (user override)
       │ (no card yet) │                            │
       └──────┬────────┘                            │
-             │ learned in a session, or marked     │
-             │ as studied                          │
+             │ shown and practised in a learning   │
+             │ session                             │
              ▼                                     │
       ┌───────────────┐   due = next day start     │
       │ introduced    │   no rating recorded       │
@@ -492,8 +499,9 @@ Settings with their defaults:
 
 Transitions in words:
 
-- **candidate → introduced.** The only way in is the user confirming that the
-  day's new words were studied. Sending a Telegram message does not do it. On
+- **candidate → introduced.** The only way in is the word's last step in a
+  learning session: shown, then practised. Sending a Telegram message does
+  not do it, and there is no button that does it unseen. On
   introduction: `introduced_at = now`, `introduced_on = local date`,
   `due_at = next day start`, `state = introduced`, **no rating is written** —
   there is no fabricated "Good".
@@ -645,31 +653,34 @@ No randomisation unless a setting asks for it.
 ```text
 06:00  the morning brief (telegram/schedule.py decides it is owed)
          → today's new words with a short meaning, the review count
-         → [▶ Start session (N)]  [Mark the 25 new words as studied]
+         → [▶ Reviews (N)]   [▶ New words (25)]      reviews first
          → runtime_state: sent today
 
-user taps [Start session]  (or sends /review)
-         → an open Telegram session?  restore its ReviewFlow and show its step
-           else ReviewFlow(engine, Channel.TELEGRAM).start()
+user taps [▶ Reviews]  (or sends /review)          likewise [▶ New words], /learn
+         → an open Telegram session of that kind?  restore it, show its step
+           one of the other kind?  close it (its answers are saved)
+           else ReviewFlow(engine, Channel.TELEGRAM, kind=…).start()
          → one message per step, the last one deleted:
 
-             MEANING → WORD
+             DEFINITION → WORD
              unwilling and hesitant
-             Reply with the word.
+             Which word is it?
+             [reluctant] [eager]
+             [hostile]   [modest]
              3 / 33
-             [I don't know]
              [↶ Undo] [Stop here]
 
-         → a reply answers a typed step; buttons answer the rest:
+         → every step is answered with buttons:
            "st:<session>:<step number>:<value>"
          → answerCallbackQuery immediately (Telegram's ~10 s window)
          → the step number must be the one on screen, else ignored
-         → ReviewFlow.submit / choose / rate / grade / proceed
+         → ReviewFlow.choose / rate / proceed
               → LearningService.review (FSRS, logs, attempts) once per word
          → the flow's state saved to review_sessions.flow_state
          → the next card, opening with how that answer went
-21:00  one reminder, only if today's work is unfinished
-end    summary: reviews done, Again rate, new words learned, what is left
+end    reviews done, new words waiting:  [▶ Start now] [Later]
+       otherwise: what was done, what is left, a button for what is left
+21:00  one reminder, only if today's work is unfinished, with both buttons
 ```
 
 A step's buttons carry its session and its number; the number changes with

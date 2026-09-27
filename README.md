@@ -278,12 +278,14 @@ name. On a wide one the pages keep to a readable width instead of stretching.
 
 ### Studying
 
-**Today** is the first page. One card says what the day holds — "40 words ·
-about 15 min", with how many are reviews, how many new, and how many you
-find hard — and has one button, **Start session**. The session does the
-reviews first, then the new words:
+**Today** is the first page. The day is two sessions, side by side, each
+with what it has left and its own button: **Reviews** ("38 due · about 8
+min", with how many you find hard) and **New words** ("25 new · about 17
+min"). Reviews come first — theirs is the highlighted button until they are
+done — and a review session never shows a new word, so it measures what you
+remember undisturbed:
 
-1. **Review.** Words due today come one at a time, each with one question and
+1. **Reviews.** Words due today come one at a time, each with one question and
    four options: **Definition → Word** (the definition, four words) or, for a
    word with contexts, **Context → Definition** (a sentence with the word in
    bold, four definitions). A word with contexts is asked the other way from
@@ -300,7 +302,7 @@ reviews first, then the new words:
    *Undo* under the card, takes back the last word — its answer and the
    practice after it — and asks it again. The full rules are in
    [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md#the-two-questions).
-2. **Learn the new words.** Four at a time: each is shown whole — the word,
+2. **New words.** Four at a time: each is shown whole — the word,
    its length, level, part of speech, definition and contexts — then the
    four are asked, Definition → Word. Words with contexts are asked a second
    time a little later, Context → Definition. Missed one? It is asked again a
@@ -309,9 +311,10 @@ reviews first, then the new words:
    learned; the rest wait for next time. A word with no definition is not
    offered until it has one.
 
-   The new words are also listed below the card, grouped by CEFR level, to
-   look over, copy with their meanings or export as a PDF. Studied them
-   another way? **Mark as studied** skips the practice.
+   A new word counts as learned only once it has been shown and practised
+   here; there is no button that marks words learned unseen. The new words
+   are also listed below, grouped by CEFR level, to look over, copy with
+   their meanings or export as a PDF.
 
 ![A review card](docs/screenshots/study-session.png)
 
@@ -438,12 +441,14 @@ teach, and its row says so: sort it on Sort words first, or turn on
    the bot answers; you can also fix it with `LEXITRACK_TELEGRAM_CHAT_ID`.
 
 The bot sends the day's words at 06:00 and a reminder at 21:00 if something is
-left (both hours are settings). `/today` shows today's words and `/review`
-starts the day's session — or resumes the one in progress. Every question is
-answered with buttons: words as buttons, or definitions listed A to D with a
-button each; after a right answer, Again, Hard, Good or Easy — each with when
-the word would come back. *Mark the new words as studied* skips
-their practice, as *Mark as studied* does on the desktop. It works only while LexiTrack is running, so turn on *Start
+left (both hours are settings), each with a button for each session:
+**▶ Reviews** and **▶ New words**. `/today` shows today's words, `/review`
+starts the reviews and `/learn` the new words — or resumes the one in
+progress. When the reviews are done and new words are waiting, the bot asks:
+**▶ Start now** or **Later**. Every question is answered with buttons: words
+as buttons, or definitions listed A to D with a button each; after a right
+answer, Again, Hard, Good or Easy — each with when the word would come back.
+It works only while LexiTrack is running, so turn on *Start
 with Windows* to have it come back after a restart. If the computer was off at
 06:00, the message comes when it starts — once, never a pile of old ones.
 Every card after an answer has **↶ Undo** for a mis-tap, and on Sunday
