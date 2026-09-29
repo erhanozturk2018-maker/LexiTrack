@@ -875,8 +875,12 @@ class StudyPage(QWidget):
 
     def _after_rating(self, feedback: Feedback) -> None:
         outcome = feedback.outcome
-        if outcome is not None and not outcome.duplicate and outcome.suggest_known:
+        if outcome is None or outcome.duplicate:
+            return
+        if outcome.suggest_known:
             self._suggest_known(outcome.word)
+        elif outcome.suggest_relearn:
+            self._suggest_relearn(outcome.word)
 
     def _continue(self) -> None:
         """Enter after an answer or on a new word's page: on to the next step."""
@@ -902,6 +906,18 @@ class StudyPage(QWidget):
             f"“{word.word}”: right after {days:g}+ days without a review. "
             "Consider marking it Known.",
             ("Mark Known", confirm),
+        )
+
+    def _suggest_relearn(self, word) -> None:
+        """A Known word missed: offer, never decide, to learn it again."""
+        def confirm() -> None:
+            if self._engine.relearn([word.id]):
+                self.notify.emit(f"“{word.word}” is Unknown again and back in your reviews.")
+                self.data_changed.emit()
+
+        self.notify_action.emit(
+            f"You forgot “{word.word}”, a word you marked Known. Learn it again?",
+            ("Learn again", confirm),
         )
 
     # -- keyboard ----------------------------------------------------------

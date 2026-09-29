@@ -128,6 +128,8 @@ class MainWindow(QMainWindow):
         # One engine for the whole window, and later for the Telegram thread:
         # both must read the same settings and the same clock.
         self._engine = engine or LearningService(service.database)
+        # A status changed from the lists moves the word's card with it.
+        service.attach_engine(self._engine)
         self.telegram = telegram or TelegramController(service.database, parent=self)
         self.telegram.activity.connect(self._on_bot_activity)
         self._quitting = False
@@ -587,6 +589,11 @@ class MainWindow(QMainWindow):
         )
         dialog.changed.connect(self._on_data_changed)
         dialog.exec()
+        # Known words turned back on, or their target raised, come back a few
+        # a day: say over how long, once.
+        note = self._engine.take_spread_note()
+        if note:
+            self._toast(note)
         # The bot switch is saved with the rest; this starts or stops the
         # thread to match it.
         self.telegram.apply()

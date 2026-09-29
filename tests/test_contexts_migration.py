@@ -18,7 +18,7 @@ from lexitrack.database.migrations import SCHEMA_VERSION, read_version
 def build_v6_database(path: Path) -> None:
     conn = sqlite3.connect(path)
     for schema_file in _SCHEMA_FILES:
-        if schema_file.name == "contexts.sql":
+        if schema_file.name in ("contexts.sql", "known.sql"):
             continue
         conn.executescript(schema_file.read_text(encoding="utf-8"))
     conn.execute("INSERT INTO schema_version (version) VALUES (6)")
@@ -79,7 +79,7 @@ def test_a_version_6_database_is_upgraded(tmp_path: Path) -> None:
     db = Database(path)
     connection = db.connect()
     try:
-        assert read_version(connection) == SCHEMA_VERSION == 7
+        assert read_version(connection) == SCHEMA_VERSION == 8
         assert db.migration_backup is not None and db.migration_backup.exists()
 
         tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master")}

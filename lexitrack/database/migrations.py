@@ -29,7 +29,7 @@ from ..models.settings import DEFAULT_SETTINGS
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class MigrationError(StorageError):
@@ -479,6 +479,19 @@ def _migrate_6_to_7(connection: sqlite3.Connection) -> None:
     seed_settings(connection)
 
 
+_KNOWN_SCHEMA = Path(__file__).with_name("known.sql")
+
+
+def _migrate_7_to_8(connection: sqlite3.Connection) -> None:
+    """Known words keep their own pace; see known.sql.
+
+    Cards get the ``spread`` mark, and the status history accepts the cause
+    ``forgotten``. Nothing is removed or rewritten.
+    """
+    _run_sql(connection, _KNOWN_SCHEMA.read_text(encoding="utf-8"))
+    seed_settings(connection)
+
+
 # -- verification ------------------------------------------------------------
 
 #: Tables holding the user's data. An upgrade may add to them, never lose a
@@ -525,6 +538,7 @@ _STEPS: dict[int, Callable[[sqlite3.Connection], None]] = {
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
     6: _migrate_6_to_7,
+    7: _migrate_7_to_8,
 }
 
 

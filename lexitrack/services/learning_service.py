@@ -19,8 +19,16 @@ The rules implemented here, in order of how much trouble they save:
 * **Known is the user's.** A word answered correctly after a long gap (the
   threshold in Settings, 21 days by default) is offered as Known
   (:meth:`known_suggestions`). Only the user marks it (:meth:`confirm_known`,
-  recorded as learned here, or by hand), and that archives the card instead of
-  deleting it.
+  recorded as learned here, or by hand). Until then a word is never sent
+  further away than that gap, so the offer can come (the Known check).
+* **Known words keep their own pace.** While they are still reviewed they aim
+  at the Known target (85% by default), and a Known word answered wrong is
+  offered for learning again (:meth:`relearn`), never moved silently. With
+  reviewing of Known words off, their cards are archived, not deleted.
+* **Known words that come back at once are spread.** Turning their reviews
+  back on, or raising their target, would put hundreds on one day; they
+  return a few a day instead, only where a day has room, so reviews and new
+  words never stop for them (:meth:`_spread`).
 
 The service owns no Qt and no network code. It is given a clock, so a test can
 run a year of study in a second, and it never sleeps or polls.
@@ -28,7 +36,8 @@ run a year of study in a second, and it never sleeps or polls.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -66,6 +75,10 @@ from .srs_scheduler import SrsScheduler
 
 #: How far ahead the Study page looks.
 FORECAST_DAYS = 7
+
+#: Past this many days, spreading places words whether a day has room or not,
+#: so a limit set lower than the day's new words cannot hold them back forever.
+_SPREAD_HORIZON = 3650
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,10 +175,43 @@ class AnswerOutcome:
     #: yet Known: the caller offers to mark it Known. The engine never does
     #: it itself.
     suggest_known: bool = False
+    #: True when a Known word was answered wrong (or rated Again): the caller
+    #: offers to learn it again. The engine never does it itself.
+    suggest_relearn: bool = False
+    #: True when the Known check brought the next review closer.
+    known_check: bool = False
     #: The answer's row in review_logs, for practice that follows it.
     log_id: int | None = None
     #: Whether the option chosen was right.
     correct: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SpreadResult:
+    """Known words placed over the coming days, and until when."""
+
+    count: int = 0
+    #: How many days, from tomorrow, the last of them is away.
+    days: int = 0
+    last_day: str | None = None
+
+    def __add__(self, other: SpreadResult) -> SpreadResult:
+        if not other.count:
+            return self
+        if not self.count:
+            return other
+        later = max(self, other, key=lambda r: r.days)
+        return SpreadResult(self.count + other.count, later.days, later.last_day)
+
+    @property
+    def message(self) -> str | None:
+        """What to tell the learner, or None when nothing was spread."""
+        if not self.count:
+            return None
+        noun = "Known word will" if self.count == 1 else "Known words will"
+        if self.days <= 1:
+            return f"{self.count:,} {noun} come back tomorrow."
+        return f"{self.count:,} {noun} come back over the next {self.days} days."
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +246,7 @@ class LearningService:
         # One answer can be taken back, and only by the client that gave it:
         # the desk and the Telegram thread each hold their own service.
         self._last_answer: _LastAnswer | None = None
+        self._last_spread: SpreadResult | None = None
 
     # -- configuration -----------------------------------------------------
 
@@ -247,8 +294,20 @@ class LearningService:
         return self._settings
 
     def save_settings(self, values: dict[str, object]) -> LearningSettings:
+        """Save settings, and do what a change to the Known settings means
+        for the cards (see :meth:`_known_settings_changed`)."""
+        before = self._settings
         self._settings_repo.set_many(values)
-        return self.refresh_settings()
+        after = self.refresh_settings()
+        spread = self._known_settings_changed(before, after)
+        if spread.count:
+            self._last_spread = spread
+        return after
+
+    def take_spread_note(self) -> str | None:
+        """What the last settings change spread, once, for the Settings window."""
+        note, self._last_spread = self._last_spread, None
+        return note.message if note else None
 
     # -- plans -------------------------------------------------------------
 
@@ -662,7 +721,14 @@ class LearningService:
             )
 
         now = self._clock.now_utc()
-        result = self._scheduler.review(card, rating, now)
+        known = word.status is ReviewStatus.KNOWN
+        result = self._scheduler.review(
+            card,
+            rating,
+            now,
+            known=known,
+            check_days=self._check_days(word, card, rating, correct=correct, now=now),
+        )
         # One answer is one event: the card, its log, the attempts and the
         # session count are written together or not at all, and Undo takes
         # all of them back. The word's status is not part of it: reaching
@@ -686,7 +752,7 @@ class LearningService:
                     stability_after=result.card.stability,
                     difficulty_after=result.card.difficulty,
                     scheduler_version=result.card.scheduler_version,
-                    params_hash=self._scheduler.params_hash,
+                    params_hash=self._scheduler.params_hash_for(known=known),
                     route_version=ROUTE_V3,
                     task=task.value,
                     correct=correct,
@@ -717,12 +783,46 @@ class LearningService:
             interval_days=self._clock.days_between(now, result.card.due_at),
             became_struggling=result.became_struggling,
             reached_mastery=result.reached_mastery,
-            suggest_known=(
-                word.status is not ReviewStatus.KNOWN and word.id in self.known_evidence([word.id])
-            ),
+            suggest_known=(not known and word.id in self.known_evidence([word.id])),
+            suggest_relearn=known and rating is Rating.AGAIN,
+            known_check=result.known_check,
             log_id=log_id,
             correct=correct,
         )
+
+    def _check_threshold(self) -> int:
+        """The gap, in whole days, after which Known is offered."""
+        return max(int(round(self._settings.mastery_stability_days)), 1)
+
+    def _check_days(
+        self,
+        word: StoredWord,
+        card: SrsCard,
+        rating: Rating,
+        *,
+        correct: bool,
+        now: datetime,
+    ) -> int | None:
+        """The Known check for this answer: at most this many days to the next
+        review, or None when it does not apply.
+
+        It applies to a word that is not Known and has no case for Known yet
+        — counting this answer: a right answer after the long gap makes the
+        case, so the check stops with it, and an Again takes it away, so the
+        check starts again.
+        """
+        if word.status is ReviewStatus.KNOWN:
+            return None
+        if rating is Rating.AGAIN:
+            return self._check_threshold()
+        if word.id in self.known_evidence([word.id]):
+            return None
+        reference = card.last_review_at or card.introduced_at
+        if correct and reference is not None:
+            gap = self._clock.days_between(reference, now)
+            if gap >= self._settings.mastery_stability_days:
+                return None
+        return self._check_threshold()
 
     # -- undo --------------------------------------------------------------
 
@@ -774,29 +874,35 @@ class LearningService:
         scheduler's behaviour without reading the database.
         """
         card = self._cards.get(int(word_id))
-        if card is None:
+        word = self._words.get(int(word_id))
+        if card is None or word is None:
             return {}
         now = self._clock.now_utc()
-        return {
-            rating: self._clock.days_between(now, due)
-            for rating, due in self._scheduler.preview(card, now).items()
+        checks = {
+            rating: self._check_days(word, card, rating, correct=True, now=now)
+            for rating in Rating
         }
+        due = self._scheduler.preview(
+            card, now, known=word.status is ReviewStatus.KNOWN, check_days=checks
+        )
+        return {rating: self._clock.days_between(now, moment) for rating, moment in due.items()}
 
     # -- status --------------------------------------------------------------
 
     def mark_known(
         self, word_ids: Sequence[int], cause: StatusCause = StatusCause.MANUAL
     ) -> int:
-        """The user declares words Known by hand.
+        """Declare words Known.
 
-        The card is archived rather than deleted, so resetting the status
-        later resumes the schedule it already had instead of starting the word
-        over. When the user has asked to keep reviewing Known words, the card
-        is left alone entirely.
+        With reviewing of Known words on, a card keeps its history and is
+        moved at once to the Known target; with it off, the card is archived
+        rather than deleted, so resetting the status later resumes the same
+        schedule instead of starting the word over.
         """
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         if not ids:
             return 0
+        before = {word_id: status for word_id, (status, _) in self._state.states(ids).items()}
         plan = self.active_plan() if cause is StatusCause.MASTERY else None
         changed = self._state.set_status_many(
             ids,
@@ -805,9 +911,207 @@ class LearningService:
             plan_id=plan.id if plan else None,
             at=self._clock.now_utc(),
         )
-        if not self._settings.review_known_words:
-            self._cards.set_state(ids, CardState.ARCHIVED)
+        self.status_changed(before)
         return changed
+
+    def status_changed(self, before: Mapping[int, ReviewStatus]) -> SpreadResult:
+        """Bring the cards of words whose status changed in line with it.
+
+        ``before`` is each word's status before the change. Called by every
+        path that changes a status — the word list, sorting, Undo — so the
+        schedule never disagrees with it:
+
+        * Known, with reviewing of Known words off: the card is archived.
+        * Otherwise an archived card comes back into the schedule.
+        * A word that became Known, or stopped being Known, is moved to the
+          target it now has — unless it is due today: today's list stays.
+        """
+        ids = [int(word_id) for word_id in before]
+        if not ids:
+            return SpreadResult()
+        words = {word.id: word for word in self._words.get_many(ids)}
+        cards = self._cards.get_many(ids)
+        archive: list[int] = []
+        resume: list[int] = []
+        moved: list[int] = []
+        for word_id, card in cards.items():
+            word = words.get(word_id)
+            if word is None:
+                continue
+            is_known = word.status is ReviewStatus.KNOWN
+            if is_known and not self._settings.review_known_words:
+                if card.state is not CardState.ARCHIVED:
+                    archive.append(word_id)
+                continue
+            was_known = ReviewStatus(before[word_id]) is ReviewStatus.KNOWN
+            if card.state is CardState.ARCHIVED:
+                resume.append(word_id)
+                moved.append(word_id)
+            elif was_known != is_known:
+                moved.append(word_id)
+        if archive:
+            self._cards.set_state(archive, CardState.ARCHIVED)
+        self.resume(resume)
+        return self._retarget(moved, returning=resume)
+
+    def relearn(self, word_ids: Sequence[int]) -> int:
+        """Known words the learner forgot and chose to learn again.
+
+        They become Unknown, recorded as forgotten, and go back to the general
+        target; their schedule carries on from the answer that missed them.
+        Words that are not Known are left alone.
+        """
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        before = {
+            word_id: status
+            for word_id, (status, _) in self._state.states(ids).items()
+            if status is ReviewStatus.KNOWN
+        }
+        if not before:
+            return 0
+        changed = self._state.set_status_many(
+            list(before),
+            ReviewStatus.UNKNOWN,
+            cause=StatusCause.FORGOTTEN,
+            at=self._clock.now_utc(),
+        )
+        self.status_changed(before)
+        return changed
+
+    def forgotten_known(self) -> list[StoredWord]:
+        """Known words whose latest answer was Again: offered for learning
+        again until they are, or until they are remembered."""
+        cards = [card for card in self._cards.all_cards() if card.state is not CardState.ARCHIVED]
+        last = self._cards.last_ratings([card.word_id for card in cards])
+        missed = [card.word_id for card in cards if last.get(card.word_id) is Rating.AGAIN]
+        return [
+            word for word in self._words_in_order(missed) if word.status is ReviewStatus.KNOWN
+        ]
+
+    # -- moving cards ----------------------------------------------------------
+
+    def _retarget(
+        self, word_ids: Sequence[int], returning: Sequence[int] = ()
+    ) -> SpreadResult:
+        """Move reviewed cards to the date their word's target gives.
+
+        A card due today keeps its place, so today's number never changes
+        under the learner — unless it is ``returning`` from the archive, when
+        it was on no one's list. A card whose date has already passed (a
+        raised target, a long pause) is not piled onto tomorrow: it is spread.
+        """
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        if not ids:
+            return SpreadResult()
+        now = self._clock.now_utc()
+        tomorrow = self._clock.next_day_start(now)
+        cards = self._cards.get_many(ids)
+        words = {word.id: word for word in self._words.get_many(ids)}
+        evidence = self.known_evidence(ids)
+        back = {int(word_id) for word_id in returning}
+        moves: list[tuple[int, datetime, bool]] = []
+        overdue: list[SrsCard] = []
+        for word_id, card in cards.items():
+            word = words.get(word_id)
+            if word is None or card.state is CardState.ARCHIVED or card.due_at is None:
+                continue
+            if card.due_at < tomorrow and word_id not in back:
+                continue
+            known = word.status is ReviewStatus.KNOWN
+            check = None if known or word_id in evidence else self._check_threshold()
+            target = self._scheduler.target_due(card, known=known, check_days=check)
+            if target is None:
+                if card.due_at < tomorrow:
+                    overdue.append(card)
+                continue
+            if target <= tomorrow:
+                overdue.append(card)
+            elif target != card.due_at or card.spread:
+                moves.append((word_id, target, False))
+        self._cards.move(moves)
+        return self._spread(overdue)
+
+    def _spread(self, cards: Sequence[SrsCard]) -> SpreadResult:
+        """Place cards over the days from tomorrow, a few a day.
+
+        Weakest first (the lowest chance of recall now). A day takes at most
+        the Known words per day setting, and never more than the room left
+        once its reviews and the day's new words are counted — so they never
+        pause new words or pass the review limit.
+        """
+        if not cards:
+            return SpreadResult()
+        settings = self._settings
+        now = self._clock.now_utc()
+        placing = {card.word_id for card in cards}
+        counts = Counter(
+            self._clock.local_date(due)
+            for word_id, due in self._cards.active_due()
+            if word_id not in placing
+        )
+        order = sorted(
+            cards,
+            key=lambda card: (self._scheduler.retrievability(card, now) or 0.0, card.word_id),
+        )
+        per_day = settings.known_back_per_day
+        capacity = effective_capacity(settings.review_capacity_per_day)
+        placements: list[tuple[int, datetime, bool]] = []
+        offset, placed, last_day, last_offset = 1, 0, None, 0
+        while placed < len(order):
+            day = self._clock.shift_days(offset)
+            room = min(per_day, capacity - counts[day] - settings.new_words_per_day)
+            if offset > _SPREAD_HORIZON:
+                room = per_day
+            if room > 0:
+                start = self._clock.day_start(day)
+                for card in order[placed : placed + room]:
+                    placements.append((card.word_id, start, True))
+                placed += min(room, len(order) - placed)
+                last_day, last_offset = day, offset
+            offset += 1
+        self._cards.move(placements)
+        return SpreadResult(count=len(order), days=last_offset, last_day=last_day)
+
+    def _known_settings_changed(
+        self, before: LearningSettings, after: LearningSettings
+    ) -> SpreadResult:
+        """What a change to the Known settings does to the cards.
+
+        * Reviewing of Known words turned off: their cards are archived.
+        * Turned back on: archived cards return, spread over the coming days.
+        * The Known target changed: Known words move to it (spread when the
+          new date has already passed).
+        * The number per day changed: words still waiting from a spread are
+          placed again with it.
+        """
+        result = SpreadResult()
+        if before.review_known_words and not after.review_known_words:
+            self._cards.set_state(self._known_card_ids(), CardState.ARCHIVED)
+            return result
+        if not after.review_known_words:
+            return result
+        if not before.review_known_words:
+            known = self._known_card_ids()
+            archived = [
+                word_id
+                for word_id, card in self._cards.get_many(known).items()
+                if card.state is CardState.ARCHIVED
+            ]
+            self.resume(archived)
+            result += self._retarget(known, returning=archived)
+        elif before.known_retention != after.known_retention:
+            result += self._retarget(self._known_card_ids())
+        if before.known_back_per_day != after.known_back_per_day:
+            tomorrow = self._clock.next_day_start(self._clock.now_utc())
+            waiting = [c for c in self._cards.spread_cards() if c.due_at and c.due_at >= tomorrow]
+            result += self._spread(waiting)
+        return result
+
+    def _known_card_ids(self) -> list[int]:
+        """Every Known word that has a card, archived or not."""
+        cards = self._cards.all_cards()
+        words = self._words.get_many([card.word_id for card in cards])
+        return [word.id for word in words if word.status is ReviewStatus.KNOWN]
 
     def known_evidence(self, word_ids: Sequence[int]) -> set[int]:
         """Of ``word_ids``, the words whose record makes the case for Known:

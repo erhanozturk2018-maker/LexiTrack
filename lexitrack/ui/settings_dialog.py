@@ -178,20 +178,36 @@ class SettingsDialog(QDialog):
         known = _Group("WORDS YOU KNOW")
         self.mastery_days = _spin(1, 365, " days")
         known.add(
-            "Long-term evidence after",
-            "A word is offered as Known when you have used it well in two different "
-            "ways and recalled it after at least this long without a review. It is "
-            "never marked Known by itself.",
+            "Offer Known after",
+            "When you answer a word right after not seeing it for this many days, "
+            "LexiTrack offers to mark it Known; you decide. Until then a word is "
+            "never sent further away than this, so the offer can come.",
             self.mastery_days,
         )
         self.review_known = _switch()
         known.add(
             "Keep reviewing words learned here",
-            "Only words that became Known through Study; words you knew before "
-            "are never scheduled. On, they come round every few months, which is "
-            "how LexiTrack learns whether its predictions were right.",
+            "Words you started learning here keep coming back now and then after you "
+            "mark them Known, so you don't forget them. Words you knew before and "
+            "never learned here are never scheduled.",
             self.review_known,
         )
+        self.known_target = _spin(75, 95, " %")
+        self.known_target_hint = QLabel()
+        self.known_target_hint.setObjectName("SettingHint")
+        self.known_target_hint.setWordWrap(True)
+        known.add("Memory target for Known words", self.known_target_hint, self.known_target)
+        self.known_back = _spin(5, 100, " words")
+        self.known_back.setSingleStep(5)
+        known.add(
+            "Known words back per day",
+            "When many Known words come back at once, for example after you turn "
+            "reviewing them back on, they return this many a day at most, and only "
+            "on days with room, so your reviews and new words never stop for them.",
+            self.known_back,
+        )
+        self.review_known.toggled.connect(self._update_known_controls)
+        self.known_target.valueChanged.connect(self._update_known_controls)
         layout.addWidget(known)
 
         day = _Group("THE DAY")
@@ -478,6 +494,7 @@ class SettingsDialog(QDialog):
         # The interface is English, so the number is too: "0.90", not the
         # "0,90" a system locale with a decimal comma would otherwise produce.
         self.retention.setLocale(QLocale(QLocale.Language.English))
+        self.retention.valueChanged.connect(self._update_known_controls)
         scheduler.add(
             "Target retention",
             "Higher means shorter intervals and many more reviews. 0.90 is the default.",
@@ -575,6 +592,8 @@ class SettingsDialog(QDialog):
         self.fragile_every.setValue(s.fragile_every)
         self.mastery_days.setValue(int(s.mastery_stability_days))
         self.review_known.setChecked(s.review_known_words)
+        self.known_target.setValue(round(s.known_retention * 100))
+        self.known_back.setValue(s.known_back_per_day)
         self.timezone_note.setText(f"Times are in {s.timezone}.")
         self.day_start.setValue(s.day_start_hour)
         self.notify_hour.setValue(s.notify_hour)
@@ -590,6 +609,7 @@ class SettingsDialog(QDialog):
         self._show_telegram_state()
         index = self.theme_combo.findData(self._theme.current.value)
         self.theme_combo.setCurrentIndex(max(index, 0))
+        self._update_known_controls()
         self._apply_developer_mode(s.developer_mode)
         self._show_personal()
 
@@ -746,6 +766,8 @@ class SettingsDialog(QDialog):
             Setting.REVIEW_CAPACITY_PER_DAY: self.capacity.value(),
             Setting.MASTERY_STABILITY_DAYS: self.mastery_days.value(),
             Setting.REVIEW_KNOWN_WORDS: self.review_known.isChecked(),
+            Setting.KNOWN_RETENTION: self.known_target.value() / 100,
+            Setting.KNOWN_BACK_PER_DAY: self.known_back.value(),
             Setting.DAY_START_HOUR: self.day_start.value(),
             Setting.NOTIFY_HOUR: self.notify_hour.value(),
             Setting.EVENING_REMINDER_HOUR: self.reminder_hour.value(),
@@ -778,6 +800,30 @@ class SettingsDialog(QDialog):
             self._theme.apply(chosen)
         self.changed.emit()
         self.accept()
+
+    def _update_known_controls(self, *_args) -> None:
+        """The Known words' settings mean nothing while they are not reviewed:
+        shown, but off, with the reason in the hint."""
+        on = self.review_known.isChecked()
+        self.known_target.setEnabled(on)
+        self.known_back.setEnabled(on)
+        general = round(self.retention.value() * 100)
+        target = self.known_target.value()
+        if not on:
+            text = "Turn on “Keep reviewing words learned here” to use this."
+        elif target > general:
+            text = (
+                f"Higher than the {general}% other words aim at: Known words will come "
+                "back more often than the rest."
+            )
+        elif target == general:
+            text = "The same as other words: Known words come back as often as the rest."
+        else:
+            text = (
+                f"Other words aim at {general}%. At {target}%, Known words come back "
+                "less often, since you know them already."
+            )
+        self.known_target_hint.setText(text)
 
     # -- actions -----------------------------------------------------------
 

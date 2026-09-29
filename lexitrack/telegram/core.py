@@ -381,6 +381,11 @@ class BotCore:
                         " — consider marking it Known."
                     )
                     known = (outcome.word.id, outcome.word.word)
+                elif outcome.suggest_relearn:
+                    line = (line or "") + (
+                        f"\n“{outcome.word.word}” was Known and is forgotten — you can "
+                        "learn it again from Progress on the desktop."
+                    )
         with self._db.lock:
             finished = flow.current is None
             card = None if finished else self._card(flow, feedback=line, known_word=known)

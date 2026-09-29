@@ -96,10 +96,35 @@ class VocabularyService:
             self._db, self._registry, self._words, self._sources, self._lists
         )
         self._export = ExportService(self._words, self._lists, self._contexts)
+        self._engine = None
 
     @property
     def database(self) -> Database:
         return self._db
+
+    def attach_engine(self, engine) -> None:
+        """Use the window's learning engine for what a status change means
+        for a word's card. Without one, an engine over the same database is
+        made when it is needed."""
+        self._engine = engine
+
+    def _status_changed(self, before: Mapping[int, ReviewStatus]) -> None:
+        """Bring the cards of words whose status changed in line with it:
+        archived, resumed or moved to their target (LearningService)."""
+        if not before:
+            return
+        from .learning_service import LearningService
+
+        engine = self._engine or LearningService(self._db)
+        engine.status_changed(before)
+
+    def _set(self, word_ids: Sequence[int], status: ReviewStatus, **kwargs) -> int:
+        """Set a status and keep the cards in line with it."""
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        before = {word_id: was for word_id, (was, _) in self._state.states(ids).items()}
+        changed = self._state.set_status_many(ids, status, **kwargs)
+        self._status_changed({i: was for i, was in before.items() if was is not status})
+        return changed
 
     # -- import ------------------------------------------------------------
 
@@ -314,7 +339,7 @@ class VocabularyService:
         """A flashcard session with its own backward-navigation history."""
         if list_id is not None:
             self._lists.require(list_id)
-        return ReviewSession(self._words, self._state, list_id)
+        return ReviewSession(self._words, self._state, list_id, on_status=self._status_changed)
 
     def get_next_word(self, list_id: int | None = None) -> StoredWord | None:
         """Return the next word awaiting review, or ``None`` when none remain.
@@ -325,10 +350,10 @@ class VocabularyService:
         return self._words.next_unreviewed(list_id)
 
     def mark_known(self, word_id: int) -> None:
-        self._state.set_status(word_id, ReviewStatus.KNOWN)
+        self._set([word_id], ReviewStatus.KNOWN)
 
     def mark_unknown(self, word_id: int) -> None:
-        self._state.set_status(word_id, ReviewStatus.UNKNOWN)
+        self._set([word_id], ReviewStatus.UNKNOWN)
 
     def mark(self, word_id: int, known: bool) -> None:
         if known:
@@ -338,11 +363,11 @@ class VocabularyService:
 
     def undo(self, word_id: int) -> None:
         """Return ``word_id`` to Not Reviewed. An explicit status change."""
-        self._state.set_status(word_id, ReviewStatus.NOT_REVIEWED)
+        self._set([word_id], ReviewStatus.NOT_REVIEWED)
 
     def set_status(self, word_ids: Sequence[int], status: ReviewStatus) -> int:
         """Change the status of many words at once. Returns how many changed."""
-        changed = self._state.set_status_many(word_ids, status)
+        changed = self._set(word_ids, ReviewStatus(status))
         log.info("Set %d words to %s", changed, status.value)
         return changed
 
@@ -354,6 +379,7 @@ class VocabularyService:
             before = self._state.states(word_ids)
             self._state.set_status_many(word_ids, status)
         changed = {word_id: was for word_id, was in before.items() if was[0] is not status}
+        self._status_changed({word_id: was[0] for word_id, was in changed.items()})
         log.info("Set %d words to %s", len(changed), status.value)
         return StatusChange(status, changed)
 
@@ -361,6 +387,7 @@ class VocabularyService:
         """Put back the statuses a :meth:`change_status` changed. Returns how
         many words changed back."""
         restored = self._state.restore(dict(change.before))
+        self._status_changed({word_id: change.status for word_id in change.before})
         log.info("Took back a change to %s for %d words", change.status.value, restored)
         return restored
 

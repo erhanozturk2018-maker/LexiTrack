@@ -33,7 +33,7 @@ _SELECT_CARD = """
 SELECT word_id, origin_plan_id, state, introduced_at, introduced_on, due_at,
        first_review_at, last_review_at, review_count, lapse_count,
        consecutive_lapses, needs_relearning, stability, difficulty,
-       fsrs_state, scheduler_version
+       fsrs_state, scheduler_version, spread
 FROM srs_cards
 """
 
@@ -285,7 +285,7 @@ class CardRepository:
                            review_count = ?, lapse_count = ?, consecutive_lapses = ?,
                            needs_relearning = ?, stability = ?, difficulty = ?,
                            fsrs_state = ?, scheduler_version = ?,
-                           origin_plan_id = COALESCE(?, origin_plan_id),
+                           origin_plan_id = COALESCE(?, origin_plan_id), spread = ?,
                            updated_at = datetime('now')
                      WHERE word_id = ?
                     """,
@@ -303,6 +303,7 @@ class CardRepository:
                         card.fsrs_state,
                         card.scheduler_version,
                         card.origin_plan_id,
+                        int(card.spread),
                         card.word_id,
                     ),
                 )
@@ -420,24 +421,112 @@ class CardRepository:
         return [_to_log(row) for row in rows]
 
     def recalled_after(self, word_ids: Iterable[int], days: float) -> set[int]:
-        """Of ``word_ids``, those answered correctly at least once after
-        ``days`` or more without a review: an answer not taken back, not
-        Again, correct when that was recorded, and a recall rather than a
-        recognition when an earlier version recorded that."""
+        """Of ``word_ids``, those remembered after ``days`` or more without a
+        review, and not forgotten since.
+
+        The answer counts when it was not taken back, not Again, correct when
+        that was recorded, and a recall rather than a recognition when an
+        earlier version recorded that. The gap is counted in learning days
+        from the previous answer's day to this one's, so an answer in the
+        morning after one in the evening still counts the days between; the
+        first answer counts the time since the introduction. A later Again cancels it: a
+        word forgotten since has no case for Known until it is remembered
+        after a long gap again.
+        """
         ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
         found: set[int] = set()
         for start in range(0, len(ids), _CHUNK):
             chunk = ids[start : start + _CHUNK]
             marks = ",".join("?" * len(chunk))
             rows = self._db.connection.execute(
-                f"SELECT DISTINCT word_id FROM review_logs WHERE word_id IN ({marks}) "
-                "AND undone_at IS NULL AND rating != ? AND elapsed_days >= ? "
-                "AND (memory_result IS NULL OR memory_result IN ('RECALLED', 'RECALLED_EFFORT')) "
-                "AND (correct IS NULL OR correct = 1)",
-                [*chunk, int(Rating.AGAIN), float(days)],
+                f"""
+                WITH answers AS (
+                    SELECT l.id, l.word_id, l.reviewed_at, l.reviewed_on, l.rating,
+                           l.elapsed_days, l.memory_result, l.correct,
+                           LAG(l.reviewed_on) OVER (
+                               PARTITION BY l.word_id ORDER BY l.reviewed_at, l.id
+                           ) AS previous_on
+                    FROM review_logs l
+                    WHERE l.word_id IN ({marks}) AND l.undone_at IS NULL
+                ),
+                forgotten AS (
+                    SELECT word_id, MAX(reviewed_at) AS at FROM answers
+                    WHERE rating = ? GROUP BY word_id
+                )
+                SELECT DISTINCT a.word_id FROM answers a
+                LEFT JOIN forgotten f ON f.word_id = a.word_id
+                WHERE a.rating != ?
+                  AND (a.elapsed_days >= ?
+                       OR julianday(a.reviewed_on) - julianday(a.previous_on) >= ?)
+                  AND (a.memory_result IS NULL
+                       OR a.memory_result IN ('RECALLED', 'RECALLED_EFFORT'))
+                  AND (a.correct IS NULL OR a.correct = 1)
+                  AND (f.at IS NULL OR a.reviewed_at > f.at)
+                """,
+                [*chunk, int(Rating.AGAIN), int(Rating.AGAIN), float(days), float(days)],
             ).fetchall()
             found.update(int(row["word_id"]) for row in rows)
         return found
+
+    def last_ratings(self, word_ids: Iterable[int]) -> dict[int, Rating]:
+        """Each word's latest answer that was not taken back."""
+        ids = [int(word_id) for word_id in dict.fromkeys(word_ids)]
+        found: dict[int, Rating] = {}
+        for start in range(0, len(ids), _CHUNK):
+            chunk = ids[start : start + _CHUNK]
+            marks = ",".join("?" * len(chunk))
+            rows = self._db.connection.execute(
+                f"""
+                SELECT word_id, rating FROM (
+                    SELECT word_id, rating, ROW_NUMBER() OVER (
+                        PARTITION BY word_id ORDER BY reviewed_at DESC, id DESC
+                    ) AS n
+                    FROM review_logs
+                    WHERE word_id IN ({marks}) AND undone_at IS NULL
+                ) WHERE n = 1
+                """,
+                chunk,
+            ).fetchall()
+            found.update({int(row["word_id"]): Rating(int(row["rating"])) for row in rows})
+        return found
+
+    def active_due(self) -> list[tuple[int, datetime]]:
+        """``(word id, due)`` of every card in the schedule (not archived)."""
+        rows = self._db.connection.execute(
+            "SELECT word_id, due_at FROM srs_cards "
+            "WHERE state IN ('introduced', 'learning', 'review', 'relearning')"
+        ).fetchall()
+        found = []
+        for row in rows:
+            moment = _parse(row["due_at"])
+            if moment is not None:
+                found.append((int(row["word_id"]), moment))
+        return found
+
+    def spread_cards(self) -> list[SrsCard]:
+        """Cards placed by spreading and not answered since."""
+        rows = self._db.connection.execute(
+            _SELECT_CARD + " WHERE spread = 1 AND state != 'archived' ORDER BY due_at, word_id"
+        ).fetchall()
+        return [_to_card(row) for row in rows]
+
+    def move(self, placements: Sequence[tuple[int, datetime, bool]]) -> int:
+        """Give cards a new due time and spread mark, nothing else."""
+        if not placements:
+            return 0
+        try:
+            with self._db.transaction() as conn:
+                conn.executemany(
+                    "UPDATE srs_cards SET due_at = ?, spread = ?, updated_at = datetime('now') "
+                    "WHERE word_id = ?",
+                    [
+                        (_stamp(due), int(spread), int(word_id))
+                        for word_id, due, spread in placements
+                    ],
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Those cards could not be moved.") from exc
+        return len(placements)
 
     def rated_on(self, word_id: int, local_date: str) -> bool:
         """True when the word has an answer on that day that was not taken back."""
@@ -546,6 +635,7 @@ def _to_card(row: sqlite3.Row) -> SrsCard:
         fsrs_state=row["fsrs_state"],
         scheduler_version=row["scheduler_version"],
         origin_plan_id=row["origin_plan_id"],
+        spread=bool(row["spread"]),
     )
 
 

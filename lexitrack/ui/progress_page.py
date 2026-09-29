@@ -355,6 +355,35 @@ class ProgressPage(QWidget):
         suggestions_layout.addWidget(panel)
         layout.addWidget(self.suggestions)
 
+        # Known words answered wrong: offered for learning again
+        self.forgotten, forgotten_layout, _, self.forgotten_title = _section(
+            "KNOWN WORDS YOU FORGOT"
+        )
+        panel, self._forgotten_layout = _panel()
+        self._forgotten_layout.addWidget(
+            _label(
+                "You marked these Known, then answered them wrong. Learn them again "
+                "to review them like other words; left alone, they stay Known.",
+                "Faint",
+                wrap=True,
+            )
+        )
+        self._forgotten_list = QVBoxLayout()
+        self._forgotten_list.setSpacing(0)
+        self._forgotten_layout.addLayout(self._forgotten_list)
+        footer = QHBoxLayout()
+        footer.addStretch(1)
+        self.relearn_all = QPushButton()
+        self.relearn_all.setProperty("variant", "primary")
+        self.relearn_all.clicked.connect(
+            lambda: self._relearn(list(getattr(self, "_forgotten_ids", [])))
+        )
+        footer.addWidget(self.relearn_all)
+        self._forgotten_layout.addLayout(footer)
+        forgotten_layout.addWidget(panel)
+        layout.addWidget(self.forgotten)
+        self._forgotten_rows: list[QWidget] = []
+
         # Memory
         where, where_layout, _, _ = _section("MEMORY")
         panel, panel_layout = _panel()
@@ -553,6 +582,7 @@ class ProgressPage(QWidget):
             f"{summary.struggling:,} words you find hard"
         )
         self._fill_suggestions()
+        self._fill_forgotten()
         self.pipeline.set_stages(self._progress.pipeline(rows))
         self._fill_recent(rows)
         self._fill_rates()
@@ -594,9 +624,8 @@ class ProgressPage(QWidget):
         count = len(suggestions)
         self.suggestions_title.setText(f"READY TO MARK KNOWN · {count:,}")
         self.suggestions_note.setText(
-            f"Long-term memory and productive evidence are strong: "
-            f"{'this word has' if count == 1 else 'each of these has'} been used well in "
-            f"two different ways and recalled after {threshold:g}+ days without a review. "
+            f"{'This word was' if count == 1 else 'Each of these was'} answered right "
+            f"after {threshold:g}+ days without a review. "
             "Consider marking it Known — it is your call; until you do, it keeps its "
             "place in your reviews."
         )
@@ -640,6 +669,54 @@ class ProgressPage(QWidget):
                 f"{marked:,} {'word' if marked == 1 else 'words'} marked Known."
             )
             # The window reloads the page on screen; alone, the page does it.
+            if self.receivers(SIGNAL("data_changed()")):
+                self.data_changed.emit()
+            else:
+                self.refresh()
+
+    def _fill_forgotten(self) -> None:
+        words = self._engine.forgotten_known()
+        self._forgotten_ids = [word.id for word in words]
+        self.forgotten.setVisible(bool(words))
+        for widget in self._forgotten_rows:
+            widget.hide()
+            widget.deleteLater()
+        self._forgotten_rows = []
+        if not words:
+            return
+        count = len(words)
+        self.forgotten_title.setText(f"KNOWN WORDS YOU FORGOT · {count:,}")
+        for index, word in enumerate(words[:_SUGGESTIONS_SHOWN]):
+            row = QFrame()
+            row.setObjectName("SuggestionRow")
+            row.setProperty("first", "true" if index == 0 else "false")
+            row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, METRICS.space_1, 0, METRICS.space_1)
+            line.setSpacing(METRICS.space_3)
+            name = QPushButton(word.word)
+            name.setObjectName("LinkButton")
+            name.setCursor(Qt.CursorShape.PointingHandCursor)
+            name.setToolTip("Open its history")
+            name.clicked.connect(lambda _c=False, i=word.id: self._open(i))
+            line.addWidget(name)
+            line.addStretch(1)
+            again = QPushButton("Learn again")
+            again.setProperty("compact", True)
+            again.setAccessibleName(f"Learn {word.word} again")
+            again.clicked.connect(lambda _c=False, i=word.id: self._relearn([i]))
+            line.addWidget(again)
+            self._forgotten_list.addWidget(row)
+            self._forgotten_rows.append(row)
+        self.relearn_all.setText("Learn it again" if count == 1 else f"Learn all {count:,} again")
+
+    def _relearn(self, word_ids: list[int]) -> None:
+        changed = self._engine.relearn(word_ids)
+        if changed:
+            self.notify.emit(
+                f"{changed:,} {'word is' if changed == 1 else 'words are'} Unknown again "
+                "and back in your reviews."
+            )
             if self.receivers(SIGNAL("data_changed()")):
                 self.data_changed.emit()
             else:

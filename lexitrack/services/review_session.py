@@ -27,6 +27,7 @@ gain (see DECISIONS.md).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..models.user_word_state import Progress, ReviewStatus, StatusCause
@@ -62,10 +63,13 @@ class ReviewSession:
         words: WordRepository,
         state: StateRepository,
         list_id: int | None = None,
+        on_status: Callable[[dict[int, ReviewStatus]], None] | None = None,
     ) -> None:
         self._words = words
         self._state = state
         self.list_id = list_id
+        #: Told each word's status before a change, so its card can follow.
+        self._on_status = on_status
         #: Word ids answered this session, oldest first.
         self._history: list[int] = []
         #: Index into history of the word on screen; ``len(history)`` means live.
@@ -125,8 +129,10 @@ class ReviewSession:
         if item is None:
             return None
         status = ReviewStatus.KNOWN if known else ReviewStatus.UNKNOWN
+        before = item.word.status
         # Sorting, not learning: the Review tab says what the user already knows.
         self._state.set_status(item.word.id, status, cause=StatusCause.SORTING)
+        self._changed(item.word.id, before, status)
         self.last_answer = known
 
         if self.is_live:
@@ -154,9 +160,14 @@ class ReviewSession:
         if item is None:
             return None
         self._state.set_status(item.word.id, ReviewStatus.NOT_REVIEWED)
+        self._changed(item.word.id, item.word.status, ReviewStatus.NOT_REVIEWED)
         return self.current()
 
     # -- helpers -----------------------------------------------------------
+
+    def _changed(self, word_id: int, before: ReviewStatus, after: ReviewStatus) -> None:
+        if self._on_status is not None and before is not after:
+            self._on_status({word_id: before})
 
     def _item(self, word: StoredWord) -> ReviewItem:
         return ReviewItem(

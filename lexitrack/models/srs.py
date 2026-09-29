@@ -149,6 +149,9 @@ class SrsCard:
     fsrs_state: str | None = None
     scheduler_version: str | None = None
     origin_plan_id: int | None = None
+    #: Placed by the spreading of Known words coming back at once, and not
+    #: answered since: moved again when the per-day number changes.
+    spread: bool = False
 
     @property
     def is_introduced_only(self) -> bool:

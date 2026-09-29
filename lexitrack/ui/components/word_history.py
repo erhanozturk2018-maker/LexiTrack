@@ -81,7 +81,9 @@ def status_sentence(step: JourneyStep) -> str:
     to = step.status_to
     cause = step.cause
     if cause is StatusCause.MASTERY:
-        text = "Marked Known after reaching long-term memory"
+        text = "Marked Known after remembering it following a long gap"
+    elif cause is StatusCause.FORGOTTEN:
+        text = "Forgotten in a review, and back to learning"
     elif cause is StatusCause.UNDO:
         text = f"Back to {_status_word(to)}: an answer or a change was taken back"
     elif cause is StatusCause.SORTING:

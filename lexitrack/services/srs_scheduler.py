@@ -26,6 +26,16 @@ one place instead of scattered through the services:
    rated, so ``needs_relearning`` is a stored fact that the Struggling Words
    view and the queue order can both rely on.
 
+5. **Known words aim lower.** A word the learner marked Known is scheduled
+   for a lower chance of recall (the Known target in Settings, 85% by
+   default) than other words (90%), so it comes back about half as often.
+
+6. **The Known check.** A word not yet Known, and not yet remembered after a
+   long gap, is never sent further away than the gap Known is offered after
+   (21 days by default). Without this the intervals jump past it — 11 days,
+   then 46 — and the offer would wait two months instead of five weeks. The
+   caller decides when it applies; see ``LearningService``.
+
 The library's own state travels in ``SrsCard.fsrs_state`` as JSON and is never
 interpreted outside this module. That is what makes a future parameter
 optimisation — or a library upgrade — a change to one file.
@@ -36,7 +46,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fsrs import Card as FsrsCard
 from fsrs import Rating as FsrsRating
@@ -73,6 +83,8 @@ class ScheduleResult:
     became_struggling: bool = False
     #: True when stability crossed the mastery threshold with this answer.
     reached_mastery: bool = False
+    #: True when the Known check brought the next review closer.
+    known_check: bool = False
 
 
 class SrsScheduler:
@@ -81,12 +93,16 @@ class SrsScheduler:
     def __init__(self, settings: LearningSettings, clock: DayClock) -> None:
         self._settings = settings
         self._clock = clock
+        self._scheduler = self._build(settings.desired_retention)
+        self._known = self._build(settings.known_retention)
+
+    def _build(self, retention: float) -> Scheduler:
         extra = {}
-        if settings.fsrs_parameters is not None:
-            extra["parameters"] = settings.fsrs_parameters
-        self._scheduler = Scheduler(
+        if self._settings.fsrs_parameters is not None:
+            extra["parameters"] = self._settings.fsrs_parameters
+        return Scheduler(
             **extra,
-            desired_retention=settings.desired_retention,
+            desired_retention=retention,
             learning_steps=_STEP,
             relearning_steps=_STEP,
             # Fuzzing spreads due dates to avoid clumps. It is off here
@@ -120,10 +136,15 @@ class SrsScheduler:
         Written on every review, so a schedule can be traced to the exact
         parameters and retention that produced it after either changes.
         """
+        return self.params_hash_for(known=False)
+
+    def params_hash_for(self, *, known: bool) -> str:
+        """:attr:`params_hash` for a Known word (its own target) or another."""
+        retention = self._settings.known_retention if known else self._settings.desired_retention
         payload = json.dumps(
             {
                 "w": [round(value, 6) for value in self.parameters],
-                "retention": round(self._settings.desired_retention, 4),
+                "retention": round(retention, 4),
                 "version": SCHEDULER_VERSION,
             },
             sort_keys=True,
@@ -162,8 +183,20 @@ class SrsScheduler:
 
     # -- reviewing ---------------------------------------------------------
 
-    def review(self, card: SrsCard, rating: Rating, now: datetime) -> ScheduleResult:
+    def review(
+        self,
+        card: SrsCard,
+        rating: Rating,
+        now: datetime,
+        *,
+        known: bool = False,
+        check_days: int | None = None,
+    ) -> ScheduleResult:
         """Apply one rating and return the card's new schedule.
+
+        ``known`` schedules for the Known target. ``check_days``, when given,
+        is the Known check: the next review is at most that many learning
+        days away.
 
         The card is not written here — the caller owns the transaction that
         saves the card and appends the log row together.
@@ -174,11 +207,17 @@ class SrsScheduler:
 
         engine_card = self._to_engine(card, now)
         elapsed = self._elapsed_days(card, now)
-        reviewed, _log = self._scheduler.review_card(
+        scheduler = self._known if known else self._scheduler
+        reviewed, _log = scheduler.review_card(
             engine_card, FsrsRating(int(rating)), review_datetime=_utc(now)
         )
 
         due_at = self._snap(reviewed.due, now)
+        checked = False
+        if check_days is not None:
+            limit = self.days_after(now, check_days)
+            if due_at > limit:
+                due_at, checked = limit, True
         state = _STATE_BY_FSRS.get(reviewed.state, CardState.REVIEW)
         lapse = rating.is_lapse
         lapse_count = card.lapse_count + (1 if lapse else 0)
@@ -208,6 +247,7 @@ class SrsScheduler:
             difficulty=reviewed.difficulty,
             fsrs_state=json.dumps(reviewed.to_dict(), separators=(",", ":")),
             scheduler_version=SCHEDULER_VERSION,
+            spread=False,
         )
         return ScheduleResult(
             card=updated,
@@ -217,16 +257,68 @@ class SrsScheduler:
             scheduled_days=self._scheduled_days(now, due_at),
             became_struggling=struggling and not card.needs_relearning,
             reached_mastery=mastered,
+            known_check=checked,
         )
 
-    def preview(self, card: SrsCard, now: datetime) -> dict[Rating, datetime]:
+    def preview(
+        self,
+        card: SrsCard,
+        now: datetime,
+        *,
+        known: bool = False,
+        check_days: dict[Rating, int | None] | None = None,
+    ) -> dict[Rating, datetime]:
         """What each of the four answers would schedule.
 
         Shown in Developer Mode and used by the tests that check the four
         buttons are actually different. Cheap enough to call per card: the
         engine state is copied, nothing is written.
         """
-        return {rating: self.review(card, rating, now).card.due_at for rating in Rating}
+        checks = check_days or {}
+        return {
+            rating: self.review(
+                card, rating, now, known=known, check_days=checks.get(rating)
+            ).card.due_at
+            for rating in Rating
+        }
+
+    def days_after(self, moment: datetime, days: int) -> datetime:
+        """The start of the learning day ``days`` after the one ``moment`` is in."""
+        day = date.fromisoformat(self._clock.local_date(moment)) + timedelta(days=int(days))
+        return self._clock.day_start(day)
+
+    def interval_days(self, stability: float, *, known: bool) -> int:
+        """The days FSRS waits after an answer that left ``stability``.
+
+        The same rule as the library's (whole days, at least one, at most its
+        maximum), for the Known target or the general one.
+        """
+        retention = self._settings.known_retention if known else self._settings.desired_retention
+        decay = -self.parameters[20]
+        factor = 0.9 ** (1 / decay) - 1
+        days = round((stability / factor) * (retention ** (1 / decay) - 1))
+        return int(min(max(days, 1), self._scheduler.maximum_interval))
+
+    def target_due(
+        self, card: SrsCard, *, known: bool, check_days: int | None = None
+    ) -> datetime | None:
+        """When a reviewed card is due for the target it now has.
+
+        Counted from its last answer, as FSRS would have, and cut to the Known
+        check when one applies. None for a card without a settled memory — a
+        word still being learned keeps the steps it has.
+        """
+        if (
+            card.state is not CardState.REVIEW
+            or card.stability is None
+            or card.last_review_at is None
+        ):
+            return None
+        last = _utc(card.last_review_at)
+        due = self.days_after(last, self.interval_days(card.stability, known=known))
+        if check_days is not None:
+            due = min(due, self.days_after(last, check_days))
+        return due
 
     # -- policies ----------------------------------------------------------
 

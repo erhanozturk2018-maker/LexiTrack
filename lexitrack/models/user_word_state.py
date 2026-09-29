@@ -23,7 +23,8 @@ class ReviewStatus(StrEnum):
 class StatusCause(StrEnum):
     """Why a word's status changed. Stored with every change."""
 
-    #: The schedule judged the word learned: stability passed the threshold.
+    #: The learner confirmed Known after remembering the word following a long
+    #: gap (the threshold in Settings): "learned here".
     MASTERY = "mastery"
     #: A status button: the details panel, the word list, Unknown Words.
     MANUAL = "manual"
@@ -31,6 +32,8 @@ class StatusCause(StrEnum):
     SORTING = "sorting"
     #: An answer taken back.
     UNDO = "undo"
+    #: A Known word answered wrong; the learner chose to learn it again.
+    FORGOTTEN = "forgotten"
 
 
 @dataclass(frozen=True, slots=True)

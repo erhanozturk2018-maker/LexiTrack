@@ -43,6 +43,12 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "fsrs_parameters": "",
     "mastery_stability_days": "21",
     "review_known_words": "true",
+    # Known words that are still reviewed aim at a lower chance of recall than
+    # other words, so they come back about half as often.
+    "known_retention": "0.85",
+    # When many Known words come back at once (the switch above turned on, or
+    # the target raised), at most this many return on one day.
+    "known_back_per_day": "25",
     # -- struggling words (leeches): any one of these is enough
     "leech_consecutive": "4",
     "leech_total_lapses": "8",
@@ -77,6 +83,8 @@ class Setting(StrEnum):
     FSRS_PARAMETERS = "fsrs_parameters"
     MASTERY_STABILITY_DAYS = "mastery_stability_days"
     REVIEW_KNOWN_WORDS = "review_known_words"
+    KNOWN_RETENTION = "known_retention"
+    KNOWN_BACK_PER_DAY = "known_back_per_day"
     LEECH_CONSECUTIVE = "leech_consecutive"
     LEECH_TOTAL_LAPSES = "leech_total_lapses"
     LEECH_WEAK_STABILITY_DAYS = "leech_weak_stability_days"
@@ -109,6 +117,8 @@ class LearningSettings:
     fsrs_parameters: tuple[float, ...] | None = None
     mastery_stability_days: float = 21.0
     review_known_words: bool = True
+    known_retention: float = 0.85
+    known_back_per_day: int = 25
     leech_consecutive: int = 4
     leech_total_lapses: int = 8
     leech_weak_stability_days: float = 7.0
@@ -158,6 +168,8 @@ class LearningSettings:
             fsrs_parameters=_parameters(merged[Setting.FSRS_PARAMETERS]),
             mastery_stability_days=max(number(Setting.MASTERY_STABILITY_DAYS), 1.0),
             review_known_words=flag(Setting.REVIEW_KNOWN_WORDS),
+            known_retention=min(max(number(Setting.KNOWN_RETENTION), 0.75), 0.95),
+            known_back_per_day=min(max(integer(Setting.KNOWN_BACK_PER_DAY), 5), 100),
             leech_consecutive=max(integer(Setting.LEECH_CONSECUTIVE), 1),
             leech_total_lapses=max(integer(Setting.LEECH_TOTAL_LAPSES), 1),
             leech_weak_stability_days=max(number(Setting.LEECH_WEAK_STABILITY_DAYS), 0.0),

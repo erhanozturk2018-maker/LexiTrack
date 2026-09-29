@@ -41,6 +41,9 @@ from ..database.migrations import SCHEMA_VERSION
 log = logging.getLogger(__name__)
 
 FORMAT = "lexitrack-backup"
+#: Older data versions whose files restore unchanged into this one: version 8
+#: only added a column with a default and widened a CHECK constraint.
+READABLE_OLDER = frozenset({7})
 FORMAT_VERSION = 1
 SUFFIX = ".lexitrack"
 
@@ -196,7 +199,7 @@ def _open(source: Path) -> tuple[dict, dict[str, dict]]:
                     f"{source.name} was written by a newer LexiTrack. Update LexiTrack first."
                 )
             version = int(manifest.get("schema_version", 0))
-            if version != SCHEMA_VERSION:
+            if version != SCHEMA_VERSION and version not in READABLE_OLDER:
                 newer = version > SCHEMA_VERSION
                 raise InvalidFileError(
                     f"{source.name} was written by "
