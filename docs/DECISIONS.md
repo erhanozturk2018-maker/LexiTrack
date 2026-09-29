@@ -1417,3 +1417,51 @@ file is exact, costs a few kilobytes, and is the one the phone already
 writes and reads, so a PDF now moves between the two in both directions.
 MuPDF compresses the file (FlateDecode); the phone inflates it (mobile
 DECISIONS D-23, *Ek*).
+
+## 89. Known words keep their own pace
+
+**Decision.** Five rules, the same on the phone (mobile DECISIONS D-24):
+
+1. **The Known check.** A word that is not Known and has no case for Known
+   yet — no right answer, other than Again, after a gap of *Offer Known
+   after* (21 days) or more, since its last Again — is never scheduled
+   further away than that threshold. The answer that makes the case lifts
+   the limit; an Again brings it back. Known words are never limited.
+2. **The Known target.** Known words that keep being reviewed use their own
+   target retention, *Memory target for Known words*: 85% by default, 75%
+   to 95% (`known_retention`), with a second FSRS scheduler built for it.
+   Marking a word Known moves its next review to that target at once,
+   unless it is due today; changing the target moves every Known word; a
+   word set back to Unknown returns to the general target.
+3. **A Known word answered wrong** stays Known. The learner is asked *Learn
+   it again?*; yes sets it Unknown with the new cause `forgotten`. Until
+   then it is listed under *Known words you forgot* on Progress.
+4. **Spreading.** Known words that come back at once — reviewing them turned
+   back on, archived cards resumed, the target raised — are placed from
+   tomorrow on, the weakest first, at most *Known words back per day* (25
+   by default, 5 to 100; `known_back_per_day`) and only in the room a day
+   has left: the review limit, less the reviews already due, less the day's
+   new words. The learner is told once how long it will take; changing the
+   number spreads again the words still waiting. `srs_cards.spread` marks
+   them.
+5. **Status changes are reconciled in one place**
+   (`LearningService.status_changed`), whichever button made them: Known
+   with *Keep reviewing* off archives the card; a word that stops being
+   Known resumes an archived card; a change of Known-ness retargets.
+
+Schema 8 adds `srs_cards.spread` and `forgotten` to the causes of
+`word_status_events`. Portable backups of schema 7 still restore.
+
+**Reason.** The offer of Known (§84) needs a right answer after 21 days
+without a review, but FSRS with all Goods sent a word 46 days away on day
+14: the offer came on day 60 or later, and a word that was ready waited
+twice as long as it needed. Capping the interval at the threshold until the
+case is made brings it to day 35 and costs one review. Known words, on the
+other hand, need less than other words — the learner already judged them
+known — and 85% halves how often they come back. A wrong answer is not the
+learner's judgement, so it is not allowed to undo Known by itself. And
+turning reviewing back on for hundreds of Known words must not bury a day's
+reviews and new words: spreading them only into the room left keeps the
+daily work as it was. Before this, the status buttons in the word tables
+bypassed the engine, so an archived card of a word set back to Unknown was
+never resumed; routing every change through one method fixed that.

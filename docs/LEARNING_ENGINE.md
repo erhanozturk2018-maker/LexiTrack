@@ -128,7 +128,9 @@ recorded, linked to the day's answer so Undo reaches it, never rated.
 
 **Known** is offered — never set — when a word is answered right, and not
 rated Again, after the threshold (21 days by default) or more without a
-review. Stability alone is a forecast and never counts.
+review. Stability alone is a forecast and never counts. Until a word has
+made that case it is never scheduled further away than the threshold (see
+*Since schema 8* below).
 
 **Undo** takes back the last rated word whole — its answer and the practice
 after it — and asks it again.
@@ -192,6 +194,40 @@ is kept by which button is the primary one, and by the bot asking "now or
 later" about the new words when the reviews are done.
 
 Today estimates each session: 12 seconds a review, 40 a new word.
+
+### Since schema 8: Known words keep their own pace
+
+DECISIONS §89. `LearningService` holds two schedulers: one at the general
+target retention (90%), one at the Known target (`known_retention`, 85%).
+
+- **The Known check** (`_check_days`). For a word that is not Known and has
+  no evidence yet, every answer caps the next interval at *Offer Known
+  after*. Evidence (`CardRepository.recalled_after`) is a right answer, not
+  Again, after the last Again, whose gap from the review before it — or its
+  own `elapsed_days` for the first answer — reaches the threshold. The
+  answer that makes the case is not capped. With all Goods a word is seen on
+  days 1, 3, 14 and 35, and Known is offered on day 35.
+- **Two targets.** A Known word is scheduled, previewed and retargeted with
+  the Known scheduler; its FSRS state is shared, only the interval changes
+  (`SrsScheduler.target_due`). `params_hash` records which target was used.
+- **Reconciliation** (`status_changed(before)`), called by every status
+  change — the study page, the tables, Sort words, Undo, the bot: Known with
+  *Keep reviewing* off → archive; archived and no longer excluded → resume
+  (as returning); Known-ness changed → retarget.
+- **Retargeting** (`_retarget`). A card due before tomorrow stays, unless it
+  is returning. If the new due date is after tomorrow it moves there;
+  otherwise it joins the spread.
+- **Spreading** (`_spread`). The cards are sorted by chance of recall,
+  lowest first, and placed from tomorrow, each day taking
+  min(`known_back_per_day`, review limit − due that day − new words a day).
+  A day without room is skipped; past 3,650 days every day takes the
+  per-day number, so the spread always ends. `spread = 1` marks a card placed this way, so a change of the
+  per-day number spreads again only those still waiting. The result
+  (`SpreadResult`) is shown once, as a toast after Settings.
+- **Forgotten Known words.** A Known word rated Again sets
+  `AnswerOutcome.suggest_relearn`; `relearn()` makes it Unknown with cause
+  `forgotten`. `forgotten_known()` lists the Known words whose latest
+  rating is Again, for the Progress panel.
 
 ---
 

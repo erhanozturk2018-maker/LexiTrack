@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from .learning_service import LearningService
 
 #: The default gap after which a recall is long-term evidence; the one in use
-#: is the learner's setting (*Long-term evidence after*, 21 days by default).
+#: is the learner's setting (*Offer Known after*, 21 days by default).
 LONG_INTERVAL_DAYS = 21
 #: The Overview's recent window.
 RECENT_DAYS = 30

@@ -205,6 +205,11 @@ dropped it (the backup taken before the upgrade keeps it), rebuilt
 `learning_attempts` with `correct` and `effort` (again, hard, good, easy) in
 place of `success`, the level, the depth and "novel context".
 
+Schema 8 (`database/known.sql`) adds `srs_cards.spread` — a Known word's
+card placed by the spread, waiting for its day — and lets
+`word_status_events.cause` be `forgotten`: a Known word missed and learned
+again (LEARNING_ENGINE, *Since schema 8*; DECISIONS §89).
+
 ### Invariants the repositories maintain
 
 1. **Vocabulary is the union of the lists.** A word removed from its last list,
@@ -799,7 +804,8 @@ a day:
 `services/portable.py` writes and restores the `.lexitrack` file: a ZIP of
 `manifest.json` (format, schema version, row counts) and
 `tables/<table>.json` (columns and rows, ids kept), tables in dependency
-order. A restore needs the same schema version, runs in one transaction with
+order. A restore needs the same schema version, or one listed in
+`READABLE_OLDER` (schema 7, whose tables schema 8 only extends), runs in one transaction with
 foreign keys deferred and checked before commit, and is preceded by the same
 safety copy. `ui/export_center.py` is the window over both, and
 `services/word_filter.py` chooses the words to export.

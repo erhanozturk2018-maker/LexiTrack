@@ -83,7 +83,7 @@ from it. With the default settings:
 | 0 | Studied the new words and confirmed | — | Tomorrow |
 | 1 | Good | 2 days | Day 3 |
 | 3 | Good | 11 days | Day 14 |
-| 14 | Good | 46 days | Day 60, in long-term memory |
+| 14 | Good | 46 days | Day 35: the Known check |
 
 A word is in **long-term memory** when that number passes 21 days — three
 Goods, or two Easys, but never on the day you first study it. Answering Easy
@@ -92,6 +92,12 @@ the number. That is a forecast, not yet a reason to call the word Known.
 LexiTrack offers to mark it Known when you **answer it right after 21 days or
 more without a review**. It never marks a word Known itself, because Known is
 your judgement, and until you say yes the word keeps coming back.
+
+**The Known check.** Until a word has passed that test, it is never sent
+further away than 21 days. On day 14 above the memory says 46 days, but the
+word comes back on day 35: 21 days later, the gap the offer asks for. Answer
+it right then and Known is offered; after that the word is spaced out as its
+memory says. Without this limit the offer would wait for day 60, or longer.
 
 **Pressing Again is not a reset to the beginning.** It costs you the interval
 you had built up, and the word comes back tomorrow as a review — it does not
@@ -111,8 +117,41 @@ because LexiTrack has learned the word is hard for you — after the second slip
 it also joins *Words you find hard* and comes first in every session.
 
 These days come from the scheduler with the default settings. Change
-*Long-term evidence after* or, in Developer mode, the target retention, and
-they move with it.
+*Offer Known after* or, in Developer mode, the target retention, and they
+move with it.
+
+## Words you know
+
+**Marking a word Known** takes it out of your new words and your reviews,
+whether you knew it before LexiTrack or learned it here. What happens next
+depends on *Keep reviewing words learned here* (Settings → Learning):
+
+1. **Off.** Known words are never asked again.
+2. **On** (the default). A word you *learned here* keeps coming back now and
+   then, so it stays known. A word you knew before and never learned here is
+   never scheduled: there is no memory of it to keep.
+
+Known words that keep coming back aim at a lower chance of remembering than
+other words: **85%**, against 90%. That is *Memory target for Known words*,
+from 75% to 95%. A lower target means longer gaps: a Known word comes back
+about half as often as it would otherwise. When you mark a word Known, its
+next review moves to the Known target at once (unless it is due today);
+when you change the target, every Known word moves with it.
+
+**A Known word you get wrong.** It is still Known; LexiTrack never takes that
+back by itself. It asks instead: *You forgot this word. Learn it again?* Say
+yes and it becomes Unknown again, recorded as forgotten, and goes back to
+the normal target. Say nothing and it waits in *Known words you forgot* on
+the Progress page, until you learn it again or answer it right.
+
+**Many Known words at once.** Turning *Keep reviewing* back on, or raising
+the target, can bring hundreds of Known words due on the same day. They are
+spread out instead: at most *Known words back per day* (25 by default, 5 to
+100), and only on days with room left after your reviews and new words, so
+those never stop for them. The weakest come first, from tomorrow on.
+LexiTrack says how long it will take, for example *800 Known words will come
+back over the next 32 days*. Change the number and the words still waiting
+are spread again.
 
 ## The four ratings
 
@@ -141,7 +180,8 @@ Nothing is hidden from you.
   *Progress → Answers*, or save it as a spreadsheet from *Export and backup*.
 - **Every question**, practice included, with whether it was right.
 - **Every change of status** - Known, Unknown, reset - with its cause: the
-  schedule, a button, Sort words or Undo.
+  schedule, a button, Sort words, Undo, or a Known word you forgot and chose
+  to learn again.
 - **Answers taken back** stay in the record, marked, and are left out of
   every count.
 

@@ -1163,3 +1163,29 @@ file is there and says `"format": "lexitrack-words"`, and hands it to
 parsers are unchanged. `tests/test_lexitrack_pdf.py` covers the round trip, a
 PDF laid out as the phone writes one (uncompressed file in the catalog's name
 tree), and PDFs that are not LexiTrack's.
+
+## 2026-09-29 — Known words keep their own pace (DECISIONS §89, schema 8)
+
+`known.sql` adds `srs_cards.spread` and rebuilds `word_status_events` so its
+cause may be `forgotten` (its indexes recreated); `_migrate_7_to_8` runs it,
+and portable backups of schema 7 still restore (`READABLE_OLDER`). New
+settings `known_retention` and `known_back_per_day`. `SrsScheduler` builds a
+second FSRS scheduler for the Known target and takes a `check_days` cap;
+`LearningService` gained `status_changed`, `relearn`, `forgotten_known`,
+`_retarget` and `_spread`. `VocabularyService.attach_engine` routes every
+status change through the engine. `tests/test_known_words.py` covers the
+check, both targets, spreading and the reconciliation.
+
+**Problems and solutions**
+
+- The status buttons in the word tables changed `user_word_state` directly,
+  so a word set back to Unknown kept an archived card and was never asked
+  again. Every change now goes through `VocabularyService._set`, which calls
+  the engine.
+- Evidence counted by day gap alone found a "gap" between the introduction
+  and the first review at a threshold of 1. The first answer now counts only
+  its own `elapsed_days`.
+- A resumed archived card was left where it was by the rule "a card due
+  today stays". Returning cards are now always placed, through the spread.
+- The v6 migration fixture already had `spread` once `known.sql` ran on it;
+  the fixture test skips that file, as it does the later ones.
