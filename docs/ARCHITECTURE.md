@@ -21,6 +21,7 @@ behind its defaults, is in [LEARNING_ENGINE.md](LEARNING_ENGINE.md).
                     ▼                          │
         ┌─────────────────────────┐            │
         │ ParserRegistry          │            │
+        │  LexiTrackPdfParser     │            │
         │  JsonParser             │            │
         │  OxfordParser           │            │
         │  GenericTextParser      │            │
@@ -333,9 +334,14 @@ in priority order, skipping those whose `document_types` do not match.
 
 | Parser | Reads | Priority | Language |
 | --- | --- | --- | --- |
+| `LexiTrackPdfParser` | PDF with `lexitrack-words.json` embedded | 300 | from the embedded list |
 | `JsonParser` | `JsonDocument` | 200 | from the file, per word or per list |
 | `OxfordParser` | PDF | 100 | `en` |
 | `GenericTextParser` | PDF | −100 | none stated |
+
+`LexiTrackPdfParser` reads only the word list a LexiTrack PDF embeds (see
+DECISIONS 88) and hands it to `JsonParser`; a PDF without it goes on to
+`OxfordParser` and `GenericTextParser` as before.
 
 `OxfordParser` is unchanged in behaviour from 0.1 and still accounts for every
 line of both published PDFs. The JSON format is specified in

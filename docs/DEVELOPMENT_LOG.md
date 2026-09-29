@@ -1150,3 +1150,16 @@ word at a time and by tests to set up a day.
   all 25 of the day's words while about 13 had been shown; `/review` then
   found nothing left. The crash the learner saw left no trace (logging is
   off unless debug logging is on) and did not reproduce in the test harness.
+
+## 2026-09-29 — PDFs import back from their embedded word list (DECISIONS §88)
+
+`export_words_pdf` builds the sheet in memory with ReportLab, then embeds
+`lexitrack-words.json` with MuPDF and writes the file; the export service
+passes it the whole word list (`build_json_document`, contexts included),
+even when the sheet shows no contexts. `Document.embedded_file()` reads an
+attachment; `LexiTrackPdfParser` (priority 300) accepts a PDF only when the
+file is there and says `"format": "lexitrack-words"`, and hands it to
+`JsonParser` as a `JsonDocument` named after the PDF. The Oxford and generic
+parsers are unchanged. `tests/test_lexitrack_pdf.py` covers the round trip, a
+PDF laid out as the phone writes one (uncompressed file in the catalog's name
+tree), and PDFs that are not LexiTrack's.

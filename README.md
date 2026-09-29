@@ -569,7 +569,9 @@ definition and contexts. With contexts, a PDF lists each word as an entry —
 its definition, then its contexts with the word in bold; the summary says how
 many of the words have contexts. Nothing about scheduling is ever in a word
 export. A JSON word list always holds every field — length and contexts
-included — and is the file that imports back.
+included — and is the file that imports back. A PDF carries that same word
+list inside it, so a PDF LexiTrack exported — here or on the phone — imports
+back whole, whichever columns it shows.
 
 ![Export with a live preview](docs/screenshots/export-preview.png)
 
@@ -684,6 +686,7 @@ key in one place, with a filter.
 
 | Format | Parser | What it extracts |
 | --- | --- | --- |
+| PDF exported by LexiTrack (desktop or phone) | `LexiTrackPdfParser` | The word list embedded in it (`lexitrack-words.json`), as the JSON parser reads it; never the page text |
 | Oxford 3000 / 5000 "by CEFR level" PDF | `OxfordParser` | Word, part of speech, CEFR level; English |
 | LexiTrack JSON | `JsonParser` | Word plus any of part of speech, CEFR, definition, contexts, language; list name, language, description, source |
 | Any other text-based PDF | `GenericTextParser` | Every distinct word, nothing else |

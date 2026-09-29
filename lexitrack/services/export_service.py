@@ -28,7 +28,7 @@ from pathlib import Path
 
 from ..core.errors import ExportError
 from ..exporters.csv_exporter import export_words_csv
-from ..exporters.json_exporter import export_words_json
+from ..exporters.json_exporter import build_json_document, export_words_json
 from ..exporters.pdf_exporter import export_words_pdf
 from ..exporters.sheet import ALL_COLUMNS, DEFAULT_COLUMNS, ExportColumn, WordSheet
 from ..models.language import UNDETERMINED
@@ -165,9 +165,11 @@ class ExportService:
 
     def write(self, content: ExportContent, path: Path, file_format: ExportFormat) -> Path:
         columns = tuple(column for column in ALL_COLUMNS if column in content.columns)
-        wants_contexts = file_format is ExportFormat.JSON or ExportColumn.CONTEXTS in columns
+        # A PDF embeds the whole word list, contexts included, to import back.
+        wants_contexts = file_format is not ExportFormat.CSV or ExportColumn.CONTEXTS in columns
         contexts = self._contexts_of(content.words) if wants_contexts else {}
-        sheet = WordSheet(columns=columns, contexts=contexts)
+        shown = contexts if ExportColumn.CONTEXTS in columns else {}
+        sheet = WordSheet(columns=columns, contexts=shown)
         if file_format is ExportFormat.PDF:
             return export_words_pdf(
                 content.words,
@@ -176,6 +178,13 @@ class ExportService:
                 subtitle=content.subtitle,
                 group_by_level=content.group_by_level,
                 sheet=sheet,
+                word_list=build_json_document(
+                    content.words,
+                    name=content.name,
+                    language=content.language,
+                    description=content.description,
+                    contexts=contexts,
+                ),
             )
         if file_format is ExportFormat.CSV:
             return export_words_csv(content.words, path, sheet=sheet)

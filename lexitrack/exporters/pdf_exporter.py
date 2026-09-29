@@ -18,18 +18,27 @@ in the file, so a sheet looks the same everywhere and covers the Latin
 alphabets (Turkish, German, Spanish, French…). A sheet holding characters Vera
 lacks — Cyrillic, Greek — is set in a system font that has them, where one is
 installed.
+
+Every PDF also carries its words as an embedded file, ``lexitrack-words.json``
+in the JSON word-list format, the same file the phone embeds. Importing the
+PDF reads that file (parsers/lexitrack_pdf.py), so a sheet comes back whole —
+contexts and all — whichever columns it prints.
 """
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache
 from pathlib import Path
+from typing import Any
 
+import pymupdf
 import reportlab
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -54,7 +63,9 @@ from reportlab.platypus.flowables import HRFlowable
 
 from ..core.errors import ExportError
 from ..models.context import find_word
+from ..parsers.lexitrack_pdf import WORD_LIST_FILE, WORD_LIST_FORMAT
 from ..repositories.word_repository import StoredWord
+from .json_exporter import build_json_document
 from .sheet import ExportColumn, WordSheet
 
 log = logging.getLogger(__name__)
@@ -89,15 +100,21 @@ def export_words_pdf(
     subtitle: str | None = None,
     group_by_level: bool = False,
     sheet: WordSheet | None = None,
+    word_list: Mapping[str, Any] | None = None,
 ) -> Path:
     """Write ``words`` to ``path`` as a printable PDF and return the path.
 
     With ``group_by_level`` a heading starts each run of words sharing a CEFR
-    level; pass the words already in level order.
+    level; pass the words already in level order. ``word_list`` is the JSON
+    word list embedded in the file (see ``build_json_document``); without it,
+    one is made from ``words`` alone, without contexts.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        _build(words, path, title, subtitle, group_by_level, sheet or WordSheet())
+        buffer = io.BytesIO()
+        _build(words, buffer, title, subtitle, group_by_level, sheet or WordSheet())
+        embedded = word_list if word_list is not None else build_json_document(words, name=title)
+        path.write_bytes(_with_word_list(buffer.getvalue(), embedded))
     except ExportError:
         raise
     except Exception as exc:
@@ -110,7 +127,7 @@ def export_words_pdf(
 
 def _build(
     words: Sequence[StoredWord],
-    path: Path,
+    target: io.BytesIO,
     title: str,
     subtitle: str | None,
     group_by_level: bool,
@@ -122,7 +139,7 @@ def _build(
     fonts = fonts_for(_texts(words, sheet, (title, caption, footer_text)))
 
     document = BaseDocTemplate(
-        str(path),
+        target,
         pagesize=A4,
         leftMargin=_MARGIN,
         rightMargin=_MARGIN,
@@ -166,6 +183,20 @@ def _build(
         story.append(Paragraph("There are no words to export.", styles["empty"]))
 
     document.build(story)
+
+
+def _with_word_list(pdf: bytes, word_list: Mapping[str, Any]) -> bytes:
+    """``pdf`` with ``word_list`` embedded as ``lexitrack-words.json``."""
+    content = {"format": WORD_LIST_FORMAT, "version": 1, **word_list}
+    data = json.dumps(content, ensure_ascii=False, indent=1).encode("utf-8")
+    with pymupdf.open(stream=pdf, filetype="pdf") as document:
+        document.embfile_add(
+            WORD_LIST_FILE,
+            data,
+            filename=WORD_LIST_FILE,
+            desc="The words of this sheet, for importing it back into LexiTrack",
+        )
+        return document.tobytes(garbage=1, deflate=True)
 
 
 def _body(

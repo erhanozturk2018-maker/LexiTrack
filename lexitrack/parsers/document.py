@@ -38,6 +38,8 @@ class Document:
         self._pdf = pdf
         self.path = path
         self._text_cache: dict[int, str] = {}
+        #: Non-fatal problems found while parsing, shown in the import preview.
+        self.warnings: list[str] = []
 
     # -- construction ------------------------------------------------------
 
@@ -128,6 +130,18 @@ class Document:
         if title and len(title) > 2 and not title.lower().endswith(".pdf"):
             return title
         return self.path.stem.replace("_", " ").replace("-", " ").strip()
+
+    # -- embedded files ----------------------------------------------------
+
+    def embedded_file(self, name: str) -> bytes | None:
+        """The content of the file embedded under ``name``, or ``None``."""
+        try:
+            if name not in self._pdf.embfile_names():
+                return None
+            return self._pdf.embfile_get(name)
+        except Exception as exc:  # pragma: no cover - malformed attachment
+            log.warning("Embedded file %s of %s could not be read: %s", name, self.path, exc)
+            return None
 
     # -- text --------------------------------------------------------------
 

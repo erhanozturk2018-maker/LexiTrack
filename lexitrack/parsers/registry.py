@@ -15,6 +15,7 @@ from .document import Document  # noqa: F401 - re-exported for callers
 from .generic import GenericTextParser
 from .json_document import AnyDocument
 from .json_parser import JsonParser
+from .lexitrack_pdf import LexiTrackPdfParser
 from .oxford import OxfordParser
 
 log = logging.getLogger(__name__)
@@ -94,4 +95,4 @@ class ParserRegistry:
 
 def default_parsers() -> list[DocumentParser]:
     """Return the parsers shipped with LexiTrack, most specific first."""
-    return [JsonParser(), OxfordParser(), GenericTextParser()]
+    return [LexiTrackPdfParser(), JsonParser(), OxfordParser(), GenericTextParser()]

@@ -1396,3 +1396,24 @@ and the learner wants to choose when to do each. Two buttons keep that
 choice; the primary one and the "now or later" question keep the order that
 matters — reviewing before new words can interfere with recall — without
 forcing it.
+
+## 88. A PDF carries its word list, and imports back from it alone
+
+**Decision.** Every exported PDF embeds its words as
+`lexitrack-words.json` — the JSON word-list format with
+`"format": "lexitrack-words"` and `"version": 1`, the same file the phone
+embeds — holding every field and every context, whichever columns the sheet
+prints. A new parser, `LexiTrackPdfParser`, is offered a PDF first: when the
+file is there and states that format, it reads that file and nothing else,
+through the JSON parser's rules; it never reads the page text. A PDF without
+it goes on to the Oxford and generic parsers, which do not change. Chosen by
+hand for another PDF, the parser says the PDF was not exported by
+LexiTrack.
+
+**Reason.** A printed sheet is laid out for reading: it may leave out the
+definition or the contexts, and its table cells break words across lines.
+Reading it back as text would lose details or invent words. The embedded
+file is exact, costs a few kilobytes, and is the one the phone already
+writes and reads, so a PDF now moves between the two in both directions.
+MuPDF compresses the file (FlateDecode); the phone inflates it (mobile
+DECISIONS D-23, *Ek*).
