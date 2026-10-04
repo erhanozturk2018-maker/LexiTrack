@@ -65,9 +65,11 @@ from .telegram_controller import TelegramController
 from .theme import ThemeManager, ThemeName, current_palette
 from .theme.palette import METRICS
 
+#: The pages, grouped as the phone's Settings: what to learn and how it
+#: is kept, then the reminders, then the app.
 LEARNING, TELEGRAM, APPEARANCE, DATA, ADVANCED, ABOUT = (
-    "Learning",
-    "Telegram",
+    "Reviews and memory",
+    "Reminders",
     "Appearance",
     "Data",
     "Advanced",
@@ -152,7 +154,10 @@ class SettingsDialog(QDialog):
     # -- pages -------------------------------------------------------------
 
     def _build_learning(self) -> QWidget:
-        page, layout = _page("Learning", "How much you take on, and when the day turns over.")
+        page, layout = _page(
+            "Reviews and memory",
+            "How much you take on, how Known words are kept, and when the day turns over.",
+        )
 
         workload = _Group("DAILY WORKLOAD")
         self.new_words = _spin(0, 200, " words")
@@ -217,14 +222,6 @@ class SettingsDialog(QDialog):
             "Changing it moves every review to the new start of its day.",
             self.day_start,
         )
-        self.notify_hour = _HourSpin()
-        day.add("Morning message", "When today's words are sent to Telegram.", self.notify_hour)
-        self.reminder_hour = _HourSpin()
-        day.add(
-            "Evening reminder",
-            "Sent only if something is still waiting.",
-            self.reminder_hour,
-        )
         layout.addWidget(day)
         self.timezone_note = _note("")
         layout.addWidget(self.timezone_note)
@@ -233,23 +230,38 @@ class SettingsDialog(QDialog):
 
     def _build_telegram(self) -> QWidget:
         page, layout = _page(
-            "Telegram",
-            "Today's words each morning and your reviews on your phone, for as "
-            "long as LexiTrack is running.",
+            "Reminders",
+            "The morning plan, the evening reminder and Sunday's summary, on your "
+            "phone through Telegram, for as long as LexiTrack is running. Each one "
+            "says what the day really holds when it is sent; a day with nothing to "
+            "do says why, and what next.",
         )
-        bot = _Group("BOT")
-        self.telegram_enabled = _switch()
-        bot.add(
-            "Send my daily words and reviews",
-            "Stays as you leave it across restarts.",
-            self.telegram_enabled,
+        when = _Group("WHEN")
+        self.notify_hour = _HourSpin()
+        when.add(
+            "Morning plan", "Today's new words and reviews, with buttons.", self.notify_hour
+        )
+        self.reminder_hour = _HourSpin()
+        when.add(
+            "Evening reminder",
+            "What is still waiting, or that the day is done.",
+            self.reminder_hour,
         )
         self.weekly_summary = _switch()
-        bot.add(
-            "Weekly summary",
-            "Sunday at the evening reminder hour: the week's answers, the words "
-            "learned and the words giving you trouble.",
+        when.add(
+            "Sunday summary",
+            "At the evening hour: the week's answers, the words learned and the "
+            "words giving you trouble.",
             self.weekly_summary,
+        )
+        layout.addWidget(when)
+
+        bot = _Group("TELEGRAM")
+        self.telegram_enabled = _switch()
+        bot.add(
+            "Send reminders to Telegram",
+            "Stays as you leave it across restarts.",
+            self.telegram_enabled,
         )
         self.telegram_status = QLabel()
         self.telegram_status.setTextFormat(Qt.TextFormat.RichText)

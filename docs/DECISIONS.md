@@ -1543,3 +1543,22 @@ the phone:
 four ways to back up and restore, and Settings repeated part of it. Taking
 a copy and going back to one are what a learner looks for when something
 went wrong; they deserve a page that holds only that.
+
+---
+
+## 93. Settings, grouped as on the phone
+
+**Decision.** The Settings pages are *Reviews and memory*, *Reminders*,
+*Appearance*, *Data*, *Advanced* and *About*.
+
+- **Reviews and memory** (was *Learning*): the daily workload, Known words,
+  and the hour the day starts.
+- **Reminders** (was *Telegram*): first *when* — the morning plan, the
+  evening reminder and the Sunday summary, which were split between
+  *Learning* and *Telegram* — then the Telegram bot, its token and how to
+  set it up.
+
+**Reason.** The hours the reminders come at sat under *Learning ▸ The day*,
+apart from the switch that sends them. The phone groups them under
+*Reminders*; so does the desk now, and the page says what a reminder holds,
+including on a quiet day (90).
