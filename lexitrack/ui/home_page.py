@@ -1,19 +1,20 @@
-"""Home: continue where you left off, see where you stand, pick a list.
+"""Lists: where your words stand, and every list, one click from its words.
 
-Three blocks, in order of how often they are wanted:
+Two blocks, as on the phone:
 
-1. **Continue learning** — the current list, its progress and one button.
-2. **Overview** — four numbers for the whole vocabulary; the Unknown tile
+1. **Overview** — four numbers for the whole vocabulary; the Unknown tile
    opens the Unknown Words manager.
-3. **Your lists** — a card per list. Click to make it current, double-click or
-   Enter to open it, right-click (or the Menu key / Shift+F10) for everything
-   else. Arrow keys move between cards; Up from the top row returns to
-   Continue, Down from Continue enters the grid.
+2. **Your lists** — a card per list. A click (or Enter) opens it: its words,
+   and *Know or don't know?* to sort them. Right-click (or the Menu key /
+   Shift+F10) for everything else. Arrow keys move between cards.
+
+There is no "continue" banner: the day's learning is on Today, and sorting a
+list is done inside it, so the page has one job — choosing a list.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -27,9 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models.language import UNDETERMINED
 from ..services.vocabulary_service import VocabularyService
-from .components.cards import ListCard, ModeSwitch, SegmentedProgress, StatTile
+from .components.cards import ListCard, ModeSwitch, StatTile
 from .empty_state import WelcomeState
 from .list_actions import ListActions
 from .theme.palette import METRICS
@@ -41,9 +41,9 @@ _GRID_COLUMNS = 3
 class HomePage(QWidget):
     """The start screen."""
 
-    #: Open a list for review in a mode ("flashcard" / "list").
+    #: Open a list in a mode ("list": its words; "flashcard": Know or don't know?).
     open_list = Signal(int, str)
-    #: The user picked a list as current without opening it.
+    #: The list opened last, to come back to.
     current_changed = Signal(int)
     show_unknown = Signal()
 
@@ -77,44 +77,20 @@ class HomePage(QWidget):
         PageColumn(content, layout)
         layout.setSpacing(m.space_4)
 
-        # 1. continue
-        self.continue_panel = QFrame()
-        self.continue_panel.setObjectName("Panel")
-        self.continue_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        panel = QHBoxLayout(self.continue_panel)
-        panel.setContentsMargins(m.space_5, m.space_4, m.space_5, m.space_4)
-        panel.setSpacing(m.space_5)
-        text = QVBoxLayout()
-        text.setSpacing(6)
-        text.addWidget(_label("CONTINUE LEARNING", "SectionTitle"))
-        name_row = QHBoxLayout()
-        self.current_name = _label("", "PageTitle")
-        name_row.addWidget(self.current_name)
-        self.current_language = _label("", "LanguageTag")
-        name_row.addWidget(self.current_language, 0, Qt.AlignmentFlag.AlignVCenter)
-        name_row.addStretch(1)
-        text.addLayout(name_row)
-        self.current_detail = _label("", "Muted")
-        text.addWidget(self.current_detail)
-        self.current_bar = SegmentedProgress()
-        text.addWidget(self.current_bar)
-        panel.addLayout(text, 1)
+        title_row = QHBoxLayout()
+        title_row.addWidget(_label("Lists", "PageTitle"))
+        title_row.addStretch(1)
+        new_list = QPushButton("New list")
+        new_list.setToolTip("Create an empty list (Ctrl+N)")
+        new_list.clicked.connect(self._actions.create_list)
+        title_row.addWidget(new_list)
+        import_button = QPushButton("Import")
+        import_button.setToolTip("Import PDF, CSV or JSON files (Ctrl+O)")
+        import_button.clicked.connect(lambda: self._actions.import_into(None))
+        title_row.addWidget(import_button)
+        layout.addLayout(title_row)
 
-        buttons = QVBoxLayout()
-        buttons.setSpacing(m.space_2)
-        self.continue_button = QPushButton("Continue  →")
-        self.continue_button.setProperty("variant", "primary")
-        self.continue_button.setMinimumSize(170, 40)
-        self.continue_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.continue_button.clicked.connect(self._continue)
-        self.continue_button.installEventFilter(self)
-        buttons.addWidget(self.continue_button)
-        self.mode_switch = ModeSwitch()
-        buttons.addWidget(self.mode_switch, 0, Qt.AlignmentFlag.AlignHCenter)
-        panel.addLayout(buttons)
-        layout.addWidget(self.continue_panel)
-
-        # 2. overview
+        # 1. overview
         layout.addSpacing(m.space_2)
         layout.addWidget(_label("OVERVIEW", "SectionTitle"))
 
@@ -129,20 +105,9 @@ class HomePage(QWidget):
             tiles.addWidget(tile)
         layout.addLayout(tiles)
 
-        # 3. lists
-        lists_header = QHBoxLayout()
-        lists_header.addWidget(_label("YOUR LISTS", "SectionTitle"))
-        lists_header.addStretch(1)
-        new_list = QPushButton("New list")
-        new_list.setToolTip("Create an empty list (Ctrl+N)")
-        new_list.clicked.connect(self._actions.create_list)
-        lists_header.addWidget(new_list)
-        import_button = QPushButton("Import")
-        import_button.setToolTip("Import PDF or JSON files (Ctrl+O)")
-        import_button.clicked.connect(lambda: self._actions.import_into(None))
-        lists_header.addWidget(import_button)
+        # 2. lists
         layout.addSpacing(m.space_1)
-        layout.addLayout(lists_header)
+        layout.addWidget(_label("YOUR LISTS", "SectionTitle"))
 
         self.grid = QGridLayout()
         self.grid.setHorizontalSpacing(m.space_3)
@@ -181,11 +146,9 @@ class HomePage(QWidget):
         self._cards = {}
         for index, lst in enumerate(lists):
             card = ListCard(lst)
-            card.clicked.connect(self._select)
+            card.clicked.connect(self._open)
             card.navigate.connect(lambda dx, dy, c=card: self._move_focus(c, dx, dy))
-            card.activated.connect(
-                lambda list_id: self.open_list.emit(list_id, self.mode_switch.mode)
-            )
+            card.activated.connect(self._open)
             card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             card.customContextMenuRequested.connect(
                 lambda pos, c=card: self._card_menu(c, pos)
@@ -197,36 +160,8 @@ class HomePage(QWidget):
 
         ids = [lst.id for lst in lists]
         self._current_id = current_id if current_id in ids else ids[0]
-        self.mode_switch.set_mode(mode)
-        self._show_current()
-        if self.isVisible():
-            self.continue_button.setFocus()
-
-    def _show_current(self) -> None:
-        current = self._service.get_list(self._current_id) if self._current_id else None
         for list_id, card in self._cards.items():
             card.set_current(list_id == self._current_id)
-        if current is None:
-            return
-        p = current.progress
-        self.current_name.setText(current.name)
-        self.current_language.setVisible(current.language != UNDETERMINED)
-        self.current_language.setText(current.language.upper())
-        self.current_language.setToolTip(current.language_name)
-        if p.total == 0:
-            detail = "This list is empty. Add words or import a file into it."
-            self.continue_button.setText("Open list  →")
-        elif p.remaining == 0:
-            detail = f"All {p.total:,} words reviewed · {p.known:,} known · {p.unknown:,} to learn"
-            self.continue_button.setText("Open list  →")
-        else:
-            detail = (
-                f"{p.reviewed:,} of {p.total:,} reviewed · {p.remaining:,} remaining · "
-                f"{p.unknown:,} to learn"
-            )
-            self.continue_button.setText("Continue  →")
-        self.current_detail.setText(detail)
-        self.current_bar.set_progress(p)
 
     @property
     def current_id(self) -> int | None:
@@ -236,47 +171,21 @@ class HomePage(QWidget):
 
     def _move_focus(self, card: ListCard, dx: int, dy: int) -> None:
         cards = list(self._cards.values())
-        index = cards.index(card)
-        if dy < 0 and index < _GRID_COLUMNS:
-            self.continue_button.setFocus()
-            return
-        target = index + dx + dy * _GRID_COLUMNS
+        target = cards.index(card) + dx + dy * _GRID_COLUMNS
         if 0 <= target < len(cards):
             cards[target].setFocus()
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        if (
-            watched is self.continue_button
-            and event.type() == QEvent.Type.KeyPress
-            and event.key() == Qt.Key.Key_Down
-            and self._cards
-        ):
-            current = self._cards.get(self._current_id) or next(iter(self._cards.values()))
-            current.setFocus()
-            return True
-        return super().eventFilter(watched, event)
-
-    def _select(self, list_id: int) -> None:
+    def _open(self, list_id: int, mode: str = ModeSwitch.LIST) -> None:
+        """A list opens on its words; sorting them is one switch away."""
         self._current_id = list_id
-        self._show_current()
         self.current_changed.emit(list_id)
-
-    def _continue(self) -> None:
-        if self._current_id is None:
-            return
-        current = self._service.get_list(self._current_id)
-        mode = self.mode_switch.mode
-        if current is not None and current.progress.remaining == 0:
-            mode = ModeSwitch.LIST
-        self.open_list.emit(self._current_id, mode)
+        self.open_list.emit(list_id, mode)
 
     def _card_menu(self, card: ListCard, pos: QPoint) -> None:
         list_id = card.list_id
         menu = QMenu(self)
-        menu.addAction(
-            "Review as Flashcards", lambda: self.open_list.emit(list_id, ModeSwitch.FLASHCARD)
-        )
-        menu.addAction("Open as List", lambda: self.open_list.emit(list_id, ModeSwitch.LIST))
+        menu.addAction("Open", lambda: self._open(list_id))
+        menu.addAction("Know or don't know?", lambda: self._open(list_id, ModeSwitch.FLASHCARD))
         menu.addSeparator()
         self._actions.fill_menu(menu, list_id)
         menu.exec(card.mapToGlobal(pos))

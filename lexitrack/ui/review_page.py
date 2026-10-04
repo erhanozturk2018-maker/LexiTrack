@@ -76,6 +76,8 @@ class ReviewPage(QWidget):
     list_missing = Signal()
     #: The user switched list or mode here; remember it.
     context_changed = Signal(int, str)
+    #: "← Lists": back to every list.
+    back_requested = Signal()
 
     def __init__(
         self, service: VocabularyService, actions: ListActions, parent: QWidget | None = None
@@ -104,7 +106,14 @@ class ReviewPage(QWidget):
 
         names = QVBoxLayout()
         names.setSpacing(0)
-        names.addWidget(_label("SORTING", "ContextLabel"))
+        back = QPushButton("←  Lists")
+        back.setObjectName("LinkButton")
+        back.setProperty("variant", "ghost")
+        back.setProperty("compact", True)
+        back.setCursor(Qt.CursorShape.PointingHandCursor)
+        back.setToolTip("Back to every list (Alt+L)")
+        back.clicked.connect(self.back_requested.emit)
+        names.addWidget(back, 0, Qt.AlignmentFlag.AlignLeft)
         self.list_button = QPushButton()
         self.list_button.setObjectName("ContextListButton")
         self.list_button.setToolTip("Switch list (Ctrl+L)")
@@ -137,8 +146,8 @@ class ReviewPage(QWidget):
         # Study tab schedules. Saying so here is what stops an answer on
         # this page being mistaken for a spaced-repetition review.
         self.purpose = _label(
-            "Sort words into Known and Unknown. The words you mark Unknown are "
-            "the ones Today teaches; nothing on this page is scheduled.",
+            "Know or don't know? Sort the words into Known and Unknown. The words "
+            "you mark Unknown are the ones Today teaches; nothing here is scheduled.",
             "Faint",
         )
         self.purpose.setWordWrap(True)
@@ -255,6 +264,8 @@ class ReviewPage(QWidget):
         self.language_tag.setToolTip(current.language_name)
         self.stats.update_progress(current.progress)
 
+        # The sentence about sorting belongs to sorting, not to the word table.
+        self.purpose.setVisible(self.mode_switch.mode == ModeSwitch.FLASHCARD)
         if self.mode_switch.mode == ModeSwitch.LIST:
             self.modes.setCurrentIndex(1)
             if reload_table or self._table_list_id != self.list_id:

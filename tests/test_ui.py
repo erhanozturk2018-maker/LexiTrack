@@ -384,14 +384,30 @@ def test_an_empty_database_opens_on_the_welcome_screen(qapp, theme, service) -> 
         win.close()
 
 
-def test_a_fresh_list_opens_home_with_it_ready_to_continue(window) -> None:
+def test_the_menu_is_today_lists_progress_as_on_the_phone(window) -> None:
     assert window.current_page == HOME
-    assert window.home.current_name.text() == "sample"
-    assert window.home.continue_button.text().startswith("Continue")
+    assert list(window.tab_buttons) == [STUDY, HOME, PROGRESS]
+    assert not hasattr(window.home, "continue_button"), "no Continue banner"
+
+
+def test_a_list_opens_on_its_words_and_sorts_from_there(window) -> None:
+    card = window.home._cards[window.home.current_id]
+    card.clicked.emit(card.list_id)
+    assert window.current_page == REVIEW
+    assert window.review.mode == ModeSwitch.LIST
+    assert window.review.list_button.text().startswith("sample")
+    assert window.tab_buttons[HOME].isChecked(), "a list is inside Lists"
+    assert not window.review.purpose.isVisible() or not window.review.isVisible()
+
+    window.review.set_mode(ModeSwitch.FLASHCARD)
+    assert window.review.flashcard._word_label.text() == "alpha"
+
+    window.review.back_requested.emit()
+    assert window.current_page == HOME
 
 
 def test_continue_opens_flashcards_for_the_current_list(window) -> None:
-    window.home.continue_button.click()
+    window.open_review(mode=ModeSwitch.FLASHCARD)
     assert window.current_page == REVIEW
     assert window.review.list_button.text().startswith("sample")
     assert window.review.flashcard._word_label.text() == "alpha"
@@ -504,12 +520,14 @@ def test_the_current_list_and_mode_are_remembered(qapp, theme, loaded) -> None:
         again.close()
 
 
-def test_resuming_mid_list_opens_straight_into_review(qapp, theme, loaded) -> None:
+def test_sorting_half_way_resumes_where_it_stopped(qapp, theme, loaded) -> None:
+    """The window opens on Lists; Know or don't know? goes on from the next word."""
     list_id = loaded.lists()[0].id
     loaded.mark_known(loaded.get_next_word(list_id).id)
     win = MainWindow(loaded, theme)
     try:
-        assert win.current_page == REVIEW
+        assert win.current_page == HOME
+        win.open_review(list_id, ModeSwitch.FLASHCARD)
         assert win.review.flashcard._word_label.text() == "beta"
     finally:
         win.close()
@@ -986,7 +1004,7 @@ def test_unknown_words_can_be_copied_but_not_moved(window, loaded) -> None:
 
 
 def test_arrow_keys_move_between_home_cards(qtbot, window, loaded) -> None:
-    """Arrows move focus across the 3-column grid; Up from the top row returns to Continue.
+    """Arrows move focus across the 3-column grid, and stop at its edges.
 
     ``focusWidget()`` is checked rather than ``hasFocus()``: the latter is false
     whenever the test window is not the active window, which it may not be.
@@ -1013,9 +1031,7 @@ def test_arrow_keys_move_between_home_cards(qtbot, window, loaded) -> None:
     qtbot.keyClick(cards[3], Qt.Key.Key_Up)
     assert focused() is cards[0]
     qtbot.keyClick(cards[0], Qt.Key.Key_Up)
-    assert focused() is window.home.continue_button
-    qtbot.keyClick(window.home.continue_button, Qt.Key.Key_Down)
-    assert isinstance(focused(), ListCard)
+    assert isinstance(focused(), ListCard) and focused() is cards[0]
 
 def test_enter_on_a_home_card_opens_it(qtbot, window, loaded) -> None:
     window.show_page(HOME)
@@ -1026,17 +1042,13 @@ def test_enter_on_a_home_card_opens_it(qtbot, window, loaded) -> None:
 
 
 def test_ctrl_tab_cycles_pages(window) -> None:
-    window.show_page(HOME)
+    window.show_page(STUDY)
     window.cycle_page(1)
-    assert window.current_page == REVIEW
-    window.cycle_page(1)
-    assert window.current_page == UNKNOWN
-    window.cycle_page(1)
-    assert window.current_page == STUDY, "cycling wraps round to the first tab"
+    assert window.current_page == HOME
     window.cycle_page(1)
     assert window.current_page == PROGRESS
     window.cycle_page(1)
-    assert window.current_page == HOME
+    assert window.current_page == STUDY, "cycling wraps round to the first tab"
     window.cycle_page(-1)
     assert window.current_page == PROGRESS
 

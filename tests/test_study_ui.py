@@ -26,9 +26,7 @@ from lexitrack.services.vocabulary_service import VocabularyService  # noqa: E40
 from lexitrack.ui.main_window import (  # noqa: E402
     HOME,
     PROGRESS,
-    REVIEW,
     STUDY,
-    UNKNOWN,
     MainWindow,
 )
 from lexitrack.ui.settings_dialog import SettingsDialog  # noqa: E402
@@ -93,16 +91,18 @@ def with_plan(engine: LearningService, service: VocabularyService) -> None:
 class TestNavigation:
     def test_today_is_the_first_page_in_the_sidebar(self, window) -> None:
         tabs = list(window.tab_buttons)
-        assert tabs == [STUDY, PROGRESS, HOME, REVIEW, UNKNOWN]
+        assert tabs == [STUDY, HOME, PROGRESS], "as on the phone"
         assert window.tab_buttons[STUDY].text() == "Today"
-        assert window.tab_buttons[REVIEW].text() == "Sort words"
+        assert window.tab_buttons[HOME].text() == "Lists"
 
     def test_the_sidebar_counts_what_is_waiting(self, qapp, loaded, engine) -> None:
         with_plan(engine, loaded)
         win = MainWindow(loaded, ThemeManager(), engine)
         plan = engine.daily_plan()
         assert win.tab_buttons[STUDY].badge == f"{plan.new_remaining + plan.due_count:,}"
-        assert win.tab_buttons[UNKNOWN].badge == f"{loaded.unknown_count():,}"
+        # The Unknown count is on Lists now, not beside a menu item.
+        win.show_page(HOME)
+        assert win.home.unknown_tile.value_label.text() == f"{loaded.unknown_count():,}"
         win.close()
 
     def test_a_narrow_window_folds_the_sidebar_to_icons(self, qapp, window) -> None:
@@ -411,9 +411,9 @@ class TestProgressPage:
         engine.undo_last_answer()
         return window
 
-    def test_it_is_the_second_page_with_its_own_key(self, window) -> None:
+    def test_it_is_the_third_page_with_its_own_key(self, window) -> None:
         tabs = list(window.tab_buttons)
-        assert tabs[:2] == [STUDY, PROGRESS]
+        assert tabs == [STUDY, HOME, PROGRESS]
         assert window.tab_buttons[PROGRESS].toolTip() == "Progress (Alt+P)"
 
     def test_the_numbers_come_from_the_record(self, studied) -> None:
@@ -681,7 +681,8 @@ def test_ctrl_p_and_ctrl_comma_are_listed_as_commands(window) -> None:
     assert titles["Study Plan…"] == "Ctrl+P"
     assert titles["Settings…"] == "Ctrl+,"
     assert titles["Go to Today"] == "Alt+T"
-    assert titles["Go to Sort Words"] == "Alt+S"
+    assert titles["Go to the Current List"] == "Alt+S"
+    assert titles["Know or Don't Know?"] == "Ctrl+1"
 
 
 def test_shortcuts_window_documents_the_study_keys(window) -> None:

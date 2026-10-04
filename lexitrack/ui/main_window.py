@@ -91,8 +91,9 @@ from .unknown_page import UnknownPage
 log = logging.getLogger(__name__)
 
 STUDY, PROGRESS, HOME, REVIEW, UNKNOWN = "study", "progress", "home", "review", "unknown"
-#: Sidebar order, and the order Ctrl+Tab cycles through.
-PAGE_ORDER = (STUDY, PROGRESS, HOME, REVIEW, UNKNOWN)
+#: Sidebar order, and the order Ctrl+Tab cycles through: as on the phone.
+#: A list's own page (REVIEW) and Unknown Words (UNKNOWN) are inside Lists.
+PAGE_ORDER = (STUDY, HOME, PROGRESS)
 
 _SETTINGS_LIST = "review/list_id"
 _SETTINGS_MODE = "review/mode"
@@ -107,8 +108,8 @@ PAGES = {
     STUDY: ("Today", "today", "Alt+T"),
     PROGRESS: ("Progress", "progress", "Alt+P"),
     HOME: ("Lists", "lists", "Alt+L"),
-    REVIEW: ("Sort words", "sort", "Alt+S"),
-    UNKNOWN: ("Unknown", "unknown", "Alt+U"),
+    REVIEW: ("A list", "sort", "Alt+S"),
+    UNKNOWN: ("Unknown words", "unknown", "Alt+U"),
 }
 
 
@@ -144,9 +145,10 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(app_icon())
         self._settings = QSettings()
         self._current_list_id: int | None = self._load_int(_SETTINGS_LIST)
-        self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.FLASHCARD))
+        # A list opens on its words; sorting them is one switch away.
+        self._mode = str(self._settings.value(_SETTINGS_MODE, ModeSwitch.LIST))
         if self._mode not in (ModeSwitch.FLASHCARD, ModeSwitch.LIST):
-            self._mode = ModeSwitch.FLASHCARD
+            self._mode = ModeSwitch.LIST
 
         self.setWindowTitle("LexiTrack")
         self.resize(1180, 800)
@@ -177,18 +179,19 @@ class MainWindow(QMainWindow):
             Command("Go to Progress", "What you have learned here, and every answer",
                     lambda: self.show_page(PROGRESS), "Alt+P",
                     "statistics history learned answers log calibration"),
-            Command("Go to Lists", "Your lists, and the one you were sorting",
+            Command("Go to Lists", "Your lists, each one click from its words",
                     lambda: self.show_page(HOME), "Alt+L", "home start overview"),
-            Command("Go to Sort Words", "Sort the current list into Known and Unknown",
-                    lambda: self.show_page(REVIEW), "Alt+S", "review flashcards table"),
+            Command("Go to the Current List", "The words of the list you opened last",
+                    lambda: self.show_page(REVIEW), "Alt+S", "review table words sort"),
             Command("Go to Unknown Words", "Every word you marked unknown, across all lists",
                     lambda: self.show_page(UNKNOWN), "Alt+U", "difficult"),
-            Command("Switch List\u2026", "Choose which list to sort", self.switch_list,
+            Command("Switch List\u2026", "Open another list", self.switch_list,
                     "Ctrl+L", "change list open"),
-            Command("Flashcard Mode", "Sort the current list one word at a time",
-                    lambda: self.open_review(mode=ModeSwitch.FLASHCARD), "Ctrl+1", "cards"),
-            Command("List Mode", "See the current list as a table you can search and filter",
-                    lambda: self.open_review(mode=ModeSwitch.LIST), "Ctrl+2", "table"),
+            Command("Know or Don't Know?", "Sort the current list one word at a time",
+                    lambda: self.open_review(mode=ModeSwitch.FLASHCARD), "Ctrl+1",
+                    "flashcards cards sort"),
+            Command("Words of the Current List", "Search, filter and change its words",
+                    lambda: self.open_review(mode=ModeSwitch.LIST), "Ctrl+2", "table list"),
             Command("Import\u2026", "Add words from PDF or JSON files",
                     lambda: self.actions.import_into(None), "Ctrl+O", "open pdf json add"),
             Command("New List\u2026", "Create an empty list and add words to it",
@@ -227,10 +230,12 @@ class MainWindow(QMainWindow):
         ]
 
     def _build_actions(self) -> None:
-        """Window-wide shortcuts. The sidebar carries its own Alt+T / P / L / S / U."""
+        """Window-wide shortcuts. The sidebar carries its own Alt+T / L / P."""
         self._shortcut_actions: list[QAction] = []
         for keys, slot in (
             ("Ctrl+K", self.open_palette),
+            ("Alt+S", lambda: self.show_page(REVIEW)),
+            ("Alt+U", lambda: self.show_page(UNKNOWN)),
             ("Ctrl+L", self.switch_list),
             ("Ctrl+1", lambda: self.open_review(mode=ModeSwitch.FLASHCARD)),
             ("Ctrl+2", lambda: self.open_review(mode=ModeSwitch.LIST)),
@@ -300,6 +305,7 @@ class MainWindow(QMainWindow):
         self.review = ReviewPage(self._service, self.actions)
         self.review.list_missing.connect(self._on_list_missing)
         self.review.context_changed.connect(self._on_review_context)
+        self.review.back_requested.connect(lambda: self.show_page(HOME))
 
         self.unknown = UnknownPage(self._service)
 
@@ -359,10 +365,7 @@ class MainWindow(QMainWindow):
         self.palette_button.clicked.connect(self.open_palette)
         sidebar.add_spacing(m.space_2)
 
-        for key in (STUDY, PROGRESS):
-            sidebar.add_page(key, *PAGES[key])
-        sidebar.add_section("Library")
-        for key in (HOME, REVIEW, UNKNOWN):
+        for key in PAGE_ORDER:
             sidebar.add_page(key, *PAGES[key])
         #: The page buttons, by page key.
         self.tab_buttons = sidebar.items
@@ -416,11 +419,10 @@ class MainWindow(QMainWindow):
         self._fold_sidebar()
 
     def _update_badges(self) -> None:
-        """The counts beside Today and Unknown, read fresh from the database."""
+        """The count beside Today, read fresh from the database."""
         plan = self._engine.daily_plan()
         waiting = (plan.new_remaining + plan.due_count) if plan.has_plan else 0
         self.tab_buttons[STUDY].set_badge(waiting)
-        self.tab_buttons[UNKNOWN].set_badge(self._service.unknown_count())
 
     # -- navigation --------------------------------------------------------
 
@@ -434,7 +436,8 @@ class MainWindow(QMainWindow):
             self._ensure_current_list()
             if self._current_list_id is None:
                 page = HOME
-        self.sidebar.select(page)
+        # A list's page and Unknown Words are inside Lists.
+        self.sidebar.select(HOME if page in (REVIEW, UNKNOWN) else page)
         self.pages.setCurrentWidget(self._page_widgets[page])
         self._update_badges()
         if page == STUDY:
@@ -464,7 +467,7 @@ class MainWindow(QMainWindow):
         plan = self._engine.daily_plan()
         if plan.has_plan and plan.has_work:
             return STUDY
-        return REVIEW if self._has_resumable_review() else HOME
+        return HOME
 
     def switch_list(self) -> None:
         """Ctrl+L: open Review and choose a list from the keyboard."""
@@ -504,14 +507,6 @@ class MainWindow(QMainWindow):
                 # Prefer a list with something left to review.
                 pending = [lst for lst in lists if lst.progress.remaining]
                 self._set_current_list((pending or lists)[0].id)
-
-    def _has_resumable_review(self) -> bool:
-        if self._current_list_id is None:
-            return False
-        current = self._service.get_list(self._current_list_id)
-        if current is None:
-            return False
-        return current.progress.reviewed > 0 and current.progress.remaining > 0
 
     def _focus_list(self, list_id: int) -> None:
         self._set_current_list(list_id)

@@ -237,7 +237,10 @@ class StatTile(QFrame):
 
 
 class ModeSwitch(QFrame):
-    """A two-segment control: Flashcard | List."""
+    """A two-segment control: Words | Know or don't know?
+
+    The mode names stay "list" and "flashcard": they are saved settings.
+    """
 
     FLASHCARD = "flashcard"
     LIST = "list"
@@ -256,14 +259,14 @@ class ModeSwitch(QFrame):
         self._group.setExclusive(True)
         self.buttons: dict[str, QPushButton] = {}
         for mode, text, shortcut in (
-            (self.FLASHCARD, "Flashcard", "Ctrl+1"),
-            (self.LIST, "List", "Ctrl+2"),
+            (self.LIST, "Words", "Ctrl+2"),
+            (self.FLASHCARD, "Know or don't know?", "Ctrl+1"),
         ):
             button = QPushButton(text)
             button.setObjectName("ModeButton")
             button.setCheckable(True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setToolTip(f"{text} mode ({shortcut})")
+            button.setToolTip(f"{text} ({shortcut})")
             button.clicked.connect(lambda _checked=False, m=mode: self._select(m))
             self._group.addButton(button)
             self.buttons[mode] = button

@@ -1496,3 +1496,25 @@ At midnight, a session at 00:30 counted as the next day, so that day's new
 words unlocked at once and the evening's work counted for a day not yet
 lived. A silent evening looked like the bot not working, and a learner
 with no word marked Unknown got no word and no hint why.
+
+---
+
+## 91. Today, Lists, Progress: the phone's three places
+
+**Decision.** The sidebar holds Today, Lists and Progress, in that order,
+as the phone's tabs do.
+
+- **Lists** has no "Continue learning" banner. It shows the overview and
+  the lists; a click on a list (or Enter) opens it.
+- **A list** opens on its words. *Know or don't know?*, one switch away
+  (*Words | Know or don't know?*, Ctrl+2 / Ctrl+1), sorts them one at a
+  time. "← Lists" goes back; the sidebar keeps Lists marked while a list is
+  open.
+- **Unknown Words** opens from the Unknown tile on Lists (and Alt+U); it
+  is no longer a sidebar page, and its count is on the tile.
+- The window opens on Today when there is work, otherwise on Lists.
+
+**Reason.** Two things were called learning: the banner's *Continue*
+(sorting a list) and Today (the schedule), and two sidebar pages (*Sort
+words*, *Unknown*) were views of the lists. Grouped as on the phone, each
+place has one job, and sorting sits where the words are.
