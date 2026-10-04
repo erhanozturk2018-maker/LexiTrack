@@ -214,7 +214,8 @@ class SettingsDialog(QDialog):
         self.day_start = _HourSpin()
         day.add(
             "Day starts at",
-            "At 00:00 a review at 01:00 counts for the new day.",
+            "For night owls: until this hour, it still counts as the day before. "
+            "Changing it moves every review to the new start of its day.",
             self.day_start,
         )
         self.notify_hour = _HourSpin()

@@ -816,7 +816,7 @@ backup job reuses it rather than copying files while they are open.
 | App closed means no bot | The daily message stops arriving | Close to tray instead of quitting; optional start-with-Windows; a headless mode later |
 | Two instances polling Telegram | Telegram rejects one poller and updates are lost | Single-instance lock file; a second launch raises the existing window |
 | Review backlog | A cap of 75 would silently accumulate work | Default 250, overdue-first ordering, seven-day forecast in the UI |
-| Day boundary at 00:00 | A session at 00:30 counts as the new day, so that day's 25 unlock immediately | Accepted, and `day_start_hour` is a setting if it turns out to be annoying |
+| Day boundary at 04:00 | A session until 04:00 still counts for the evening it began in | Was 00:00, where a session at 00:30 counted as the new day; 04:00 as on the phone. A change of the hour moves every due time to the new start of its day |
 | FSRS library upgrade | Card state shape may change | Store state as JSON with `scheduler_version`; never silently reinterpret |
 | Known vs SRS conflict | Two sources of truth for "I know this" | Manual Known wins and archives the card; automatic mastery only sets the status and leaves scheduling alone |
 | Definitions visible on the card | Now that every word has one, recall is not being tested | Hide the meaning until revealed **in study-plan reviews only**; ordinary flashcard and list browsing keep showing it |
@@ -999,7 +999,7 @@ the wall time the suite happens to run at:
 | Meaning on the card | Hidden until revealed in study-plan reviews only |
 | Word notes editing | Not planned; the user does not want it |
 | Developer Mode | Settings → About; adds a Developer page (simulation, inspector, maintenance). Debug logging is a second, separate switch |
-| Day boundary | 00:00 Europe/Istanbul (`day_start_hour` = 0, adjustable) |
+| Day boundary | 04:00 Europe/Istanbul (`day_start_hour` = 4, adjustable; due times move with it) |
 | Morning message | 06:00 local |
 | Settings | Learning settings in the database; UI preferences stay in `QSettings` |
 | Bot lifecycle | Tray icon; closing the window hides it; Quit stops everything; the bot has its own persistent on/off setting; autostart is a separate setting; single instance enforced by a lock file |

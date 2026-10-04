@@ -241,12 +241,17 @@ class LearningService:
         self._state = StateRepository(database)
         self._lists = ListRepository(database)
         self._settings = self._settings_repo.load()
-        self._clock = clock or DayClock(self._settings.timezone, self._settings.day_start_hour)
+        # A clock handed in follows the settings too, as it does whenever they
+        # change (refresh_settings): the day must start at the hour they say.
+        self._clock = (clock or DayClock()).configure(
+            self._settings.timezone, self._settings.day_start_hour
+        )
         self._scheduler = SrsScheduler(self._settings, self._clock)
         # One answer can be taken back, and only by the client that gave it:
         # the desk and the Telegram thread each hold their own service.
         self._last_answer: _LastAnswer | None = None
         self._last_spread: SpreadResult | None = None
+        self._align_day_start()
 
     # -- configuration -----------------------------------------------------
 
@@ -291,7 +296,37 @@ class LearningService:
         self._settings = self._settings_repo.load()
         self._clock.configure(self._settings.timezone, self._settings.day_start_hour)
         self._scheduler = SrsScheduler(self._settings, self._clock)
+        self._align_day_start()
         return self._settings
+
+    def _align_day_start(self) -> None:
+        """Keep every due time at the start of its learning day.
+
+        Due times sit at a day's start. When the hour the day starts at
+        changes — in Settings, or with the default moving from midnight to
+        04:00 — each card moves to the new start of the same learning day, so
+        nothing comes due early or a day late. The hour the due times are
+        placed at is recorded; before it was, it was the learner's own setting
+        or the old default, midnight (mobile DECISIONS D-27).
+        """
+        hour = self._settings.day_start_hour
+        applied = self._runtime.get(RuntimeRepository.DAY_START_APPLIED)
+        stored = self._settings_repo.stored(Setting.DAY_START_HOUR)
+        try:
+            before = int(applied if applied is not None else (stored or 0))
+        except ValueError:
+            before = 0
+        if before != hour:
+            old = DayClock(self._settings.timezone, before)
+            placements = [
+                (word_id, self._clock.day_start(old.local_date(due)))
+                for word_id, due in self._cards.active_due()
+            ]
+            with self._db.transaction():
+                self._cards.set_due(placements)
+                self._runtime.set(RuntimeRepository.DAY_START_APPLIED, hour)
+        elif applied is None:
+            self._runtime.set(RuntimeRepository.DAY_START_APPLIED, hour)
 
     def save_settings(self, values: dict[str, object]) -> LearningSettings:
         """Save settings, and do what a change to the Known settings means

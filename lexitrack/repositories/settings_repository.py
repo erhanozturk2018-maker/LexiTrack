@@ -52,6 +52,13 @@ class SettingsRepository:
             return default
         return DEFAULT_SETTINGS.get(str(key))
 
+    def stored(self, key: str) -> str | None:
+        """The value saved for ``key``, or None when it was never saved (no default)."""
+        row = self._db.connection.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (str(key),)
+        ).fetchone()
+        return row["value"] if row is not None else None
+
     def set(self, key: str, value: object) -> None:
         self.set_many({str(key): value})
 
@@ -118,6 +125,9 @@ class RuntimeRepository:
     TELEGRAM_OFFSET = "telegram_offset"
     #: Content batches exported and not yet imported, as JSON.
     CONTENT_BATCHES = "content_batches"
+    #: The hour the cards' due times are placed at: the day start they were
+    #: scheduled under (see LearningService._align_day_start).
+    DAY_START_APPLIED = "day_start_applied"
 
     def __init__(self, database: Database) -> None:
         self._db = database

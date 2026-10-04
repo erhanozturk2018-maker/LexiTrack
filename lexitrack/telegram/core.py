@@ -150,7 +150,13 @@ class BotCore:
     def _brief(self) -> Message:
         with self._db.lock:
             self._engine.refresh_settings()
-            return messages.morning_brief(self._engine.daily_plan())
+            return messages.morning_brief(
+                self._engine.daily_plan(), unknown_only=self._unknown_only()
+            )
+
+    def _unknown_only(self) -> bool:
+        """New words come only from the words marked Unknown."""
+        return not self._engine.settings.new_words_include_not_reviewed
 
     # -- buttons -------------------------------------------------------------
 
@@ -499,9 +505,9 @@ class BotCore:
         for notification in due:
             assert plan is not None
             if notification is Notification.MORNING:
-                message = messages.morning_brief(plan)
+                message = messages.morning_brief(plan, unknown_only=self._unknown_only())
             elif notification is Notification.EVENING:
-                message = messages.evening_reminder(plan)
+                message = messages.evening_reminder(plan, unknown_only=self._unknown_only())
             else:
                 with self._db.lock:
                     week = ProgressService(self._db, self._engine).week()

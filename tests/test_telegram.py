@@ -823,16 +823,22 @@ class TestNotifications:
         assert run(bot.tick()) == [Notification.EVENING]
         assert "Still to do" in outbox.sent[-1][1].text
 
-    def test_a_finished_day_gets_no_reminder(
+    def test_a_finished_day_says_so_and_what_tomorrow_holds(
         self, bot: BotCore, outbox: FakeOutbox, clock: FrozenClock
     ) -> None:
+        """A quiet evening is said, not left silent: silence looked like the
+        reminders not working."""
         clock.set(datetime(2026, 9, 17, 3, 5, tzinfo=UTC))
         run(bot.tick())
-        bot.engine.introduce()
+        learned = bot.engine.introduce().count
         clock.set(datetime(2026, 9, 17, 18, 5, tzinfo=UTC))
         sent_before = len(outbox.sent)
         assert run(bot.tick()) == [Notification.EVENING]
-        assert len(outbox.sent) == sent_before, "claimed for the day, but silent"
+        assert len(outbox.sent) == sent_before + 1
+        text = outbox.sent[-1][1].text
+        assert "All done for today" in text
+        assert f"{learned} new words" in text
+        assert f"Tomorrow: {learned} reviews." in text
         assert run(bot.tick()) == []
 
     def test_a_brief_after_the_reminder_hour_replaces_the_reminder(
@@ -947,3 +953,26 @@ class TestWeeklySummary:
         clock.set(self.SUNDAY_EVENING)
         assert Notification.WEEKLY in run(bot.tick()), "counted as done for the week"
         assert not [m for _, m in outbox.sent if "Your week" in m.text]
+
+
+def test_a_quiet_day_says_why_and_what_next() -> None:
+    """With nothing waiting, the reminder names the reason and the next step."""
+    from lexitrack.models.srs import StudyPlan
+    from lexitrack.services.learning_service import DailyPlan
+    from lexitrack.telegram import messages
+
+    plan = StudyPlan(id=1, name="Plan")
+    no_words = DailyPlan(local_date="2026-09-17", plan=plan, pool_remaining=0)
+    text = messages.quiet_day(no_words).text
+    assert "No new words to learn" in text
+    assert "mark Unknown" in text
+    assert "Every word in your study plan is learned" in messages.quiet_day(
+        no_words, unknown_only=False
+    ).text
+    paused = DailyPlan(
+        local_date="2026-09-17", plan=plan, pool_remaining=40, intake_note="Reviews first."
+    )
+    assert "Reviews first." in messages.quiet_day(paused).text
+    morning = messages.morning_brief(no_words).text
+    assert morning.startswith("<b>Good morning</b>")
+    assert "No new words to learn" in morning

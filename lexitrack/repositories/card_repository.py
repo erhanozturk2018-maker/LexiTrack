@@ -528,6 +528,21 @@ class CardRepository:
             raise StorageError("Those cards could not be moved.") from exc
         return len(placements)
 
+    def set_due(self, placements: Sequence[tuple[int, datetime]]) -> int:
+        """Give cards a new due time, and nothing else (their spread mark stays)."""
+        if not placements:
+            return 0
+        try:
+            with self._db.transaction() as conn:
+                conn.executemany(
+                    "UPDATE srs_cards SET due_at = ?, updated_at = datetime('now') "
+                    "WHERE word_id = ?",
+                    [(_stamp(due), int(word_id)) for word_id, due in placements],
+                )
+        except sqlite3.Error as exc:
+            raise StorageError("Those cards could not be moved.") from exc
+        return len(placements)
+
     def rated_on(self, word_id: int, local_date: str) -> bool:
         """True when the word has an answer on that day that was not taken back."""
         row = self._db.connection.execute(

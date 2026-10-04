@@ -32,7 +32,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "review_warm_up": "3",
     "fragile_every": "4",
     # -- the day
-    "day_start_hour": "0",
+    "day_start_hour": "4",
     "timezone": "Europe/Istanbul",
     "notify_hour": "6",
     "evening_reminder_hour": "21",
@@ -108,7 +108,7 @@ class LearningSettings:
     review_capacity_per_day: int = 250
     review_warm_up: int = 3
     fragile_every: int = 4
-    day_start_hour: int = 0
+    day_start_hour: int = 4
     timezone: str = "Europe/Istanbul"
     notify_hour: int = 6
     evening_reminder_hour: int = 21

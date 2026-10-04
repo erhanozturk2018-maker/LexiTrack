@@ -19,6 +19,7 @@ from lexitrack.models.source import Source
 from lexitrack.models.srs import CardState, Channel, Rating
 from lexitrack.models.user_word_state import ReviewStatus, StatusCause
 from lexitrack.repositories import (
+    CardRepository,
     ListRepository,
     SourceRepository,
     StateRepository,
@@ -551,3 +552,46 @@ class TestPlans:
         assert len(offered) == len(set(offered)) == 25
         result = engine.introduce()
         assert result.count == 25
+
+
+class TestDayStart:
+    """The day starts at 04:00, and a change of the hour moves every due time
+    to the new start of the same learning day (mobile DECISIONS D-27)."""
+
+    def test_the_default_is_four_in_the_morning(self, engine: LearningService) -> None:
+        assert engine.settings.day_start_hour == 4
+
+    def test_a_new_hour_moves_due_times_within_their_day(
+        self, engine: LearningService, clock: FrozenClock
+    ) -> None:
+        engine.introduce()
+        due = {word_id: at for word_id, at in CardRepository(engine.database).active_due()}
+        assert {clock.to_local(at).hour for at in due.values()} == {4}
+        days = {word_id: clock.local_date(at) for word_id, at in due.items()}
+
+        engine.save_settings({Setting.DAY_START_HOUR: 6})
+        moved = dict(CardRepository(engine.database).active_due())
+        assert {clock.to_local(at).hour for at in moved.values()} == {6}
+        assert {word_id: clock.local_date(at) for word_id, at in moved.items()} == days
+
+    def test_an_older_database_moves_from_midnight_once(
+        self, engine: LearningService, database: Database, clock: FrozenClock
+    ) -> None:
+        engine.introduce()
+        # As an older version left it: due at midnight, and no hour recorded.
+        engine.save_settings({Setting.DAY_START_HOUR: 0})
+        engine.runtime.clear("day_start_applied")
+        database.connection.execute("DELETE FROM app_settings WHERE key = 'day_start_hour'")
+        midnight = dict(CardRepository(engine.database).active_due())
+        assert {clock.to_local(at).hour for at in midnight.values()} == {0}
+
+        LearningService(database, clock)  # opened again, as by a new version
+        moved = dict(CardRepository(database).active_due())
+        assert {clock.to_local(at).hour for at in moved.values()} == {4}
+        assert {w: clock.local_date(at) for w, at in moved.items()} == {
+            w: FrozenClock(clock.now_utc(), day_start_hour=0).local_date(at)
+            for w, at in midnight.items()
+        }
+        # Once: opening again changes nothing.
+        LearningService(database, clock)
+        assert dict(CardRepository(database).active_due()) == moved

@@ -1465,3 +1465,34 @@ reviews and new words: spreading them only into the room left keeps the
 daily work as it was. Before this, the status buttons in the word tables
 bypassed the engine, so an archived card of a word set back to Unknown was
 never resumed; routing every change through one method fixed that.
+
+---
+
+## 90. The day starts at 04:00, and a quiet day is said
+
+**Decision.**
+
+1. **04:00.** A learning day starts at 04:00 by default (Settings ▸
+   Learning ▸ *Day starts at*). A session until 04:00 still counts for the
+   evening it began in.
+2. **The due times follow the hour.** Due times sit at a day's start. When
+   the hour changes, every card in the schedule moves to the new start of
+   the same learning day (`LearningService._align_day_start`). The hour the
+   due times are placed at is recorded (`runtime_state.day_start_applied`);
+   a database from before it, with no record, is moved once from the
+   learner's own setting or, without one, from midnight.
+3. **A clock handed to the engine follows the settings**, as it does when
+   they change: the tests and the simulator no longer run a day that starts
+   at another hour than the settings say.
+4. **A quiet day is said.** The morning brief and the evening reminder
+   always come once a day; on a day with nothing waiting they say why, and
+   what next (`messages.quiet_day`): the day is done, with what was done and
+   tomorrow's reviews; no words to learn, and where new words come from
+   (the words marked Unknown); every word of the plan learned; or new words
+   paused, and why.
+
+**Reason.** The same choices as the phone's (mobile DECISIONS D-25, D-27).
+At midnight, a session at 00:30 counted as the next day, so that day's new
+words unlocked at once and the evening's work counted for a day not yet
+lived. A silent evening looked like the bot not working, and a learner
+with no word marked Unknown got no word and no hint why.

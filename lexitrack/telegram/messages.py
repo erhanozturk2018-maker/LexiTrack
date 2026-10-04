@@ -147,17 +147,20 @@ def parse_callback(data: str | None) -> Callback | None:
 # -- messages ----------------------------------------------------------------
 
 
-def morning_brief(plan: DailyPlan) -> Message:
+def morning_brief(plan: DailyPlan, *, unknown_only: bool = True) -> Message:
     """The 06:00 message: today's words, today's reviews, two buttons.
 
     The words come with a short definition each, because the point of the
-    message is to study from it — on the bus, before the desk.
+    message is to study from it — on the bus, before the desk. A day with
+    nothing to do says why, and what to do next (:func:`quiet_day`).
     """
     lines = [f"<b>Good morning</b> · {escape(_pretty(plan.local_date))}"]
     if not plan.has_plan:
         lines.append("")
         lines.append("There is no study plan yet. Open LexiTrack and choose one.")
         return Message("\n".join(lines))
+    if not plan.has_work:
+        return Message(lines[0] + "\n\n" + quiet_day(plan, unknown_only=unknown_only).text)
 
     if plan.new_words:
         levels = Counter(word.cefr_level or "–" for word in plan.new_words)
@@ -419,10 +422,13 @@ def session_summary(
     return Message("\n".join(lines), buttons)
 
 
-def evening_reminder(plan: DailyPlan) -> Message | None:
-    """21:00, only if something is left. ``None`` means stay quiet."""
-    if not plan.has_plan or not plan.has_work:
+def evening_reminder(plan: DailyPlan, *, unknown_only: bool = True) -> Message | None:
+    """21:00: what is left, or, on a day with nothing left, why
+    (:func:`quiet_day`). ``None`` only without a study plan."""
+    if not plan.has_plan:
         return None
+    if not plan.has_work:
+        return quiet_day(plan, unknown_only=unknown_only)
     parts = []
     if plan.new_words:
         parts.append(f"{len(plan.new_words)} new words to learn")
@@ -431,6 +437,38 @@ def evening_reminder(plan: DailyPlan) -> Message | None:
     return Message(
         "<b>Still to do today</b>\n" + " · ".join(parts) + ".", _day_buttons(plan)
     )
+
+
+def quiet_day(plan: DailyPlan, *, unknown_only: bool = True) -> Message:
+    """A day with nothing waiting, said all the same, with why and what next.
+
+    Silence looked like the reminders not working, and a learner with no
+    words marked Unknown got none, and no hint why (mobile DECISIONS D-25).
+    ``unknown_only``: new words come only from the words marked Unknown.
+    """
+    done = []
+    if plan.reviews_done_today:
+        done.append(f"{plan.reviews_done_today} reviews")
+    if plan.introduced_today:
+        done.append(f"{len(plan.introduced_today)} new words")
+    if done:
+        tomorrow = plan.forecast[1][1] if len(plan.forecast) > 1 else 0
+        lines = ["<b>All done for today</b>", f"Done today: {' · '.join(done)}."]
+        lines.append(f"Tomorrow: {tomorrow} reviews." if tomorrow else "See you tomorrow.")
+        return Message("\n".join(lines))
+    if plan.pool_remaining == 0 and not unknown_only:
+        return Message(
+            "<b>Every word in your study plan is learned</b>\n"
+            "Add a list to the plan, or import more words."
+        )
+    if plan.pool_remaining == 0:
+        return Message(
+            "<b>No new words to learn</b>\n"
+            "New words come from the words you mark Unknown. Open LexiTrack, sort a "
+            "list into Known and Unknown, and the Unknown ones are taught a few a day."
+        )
+    reason = plan.intake_note or "New words a day is set to 0 (Settings › Learning)."
+    return Message(f"<b>No new words today</b>\n<i>{escape(reason)}</i>")
 
 
 def weekly_summary(week) -> Message | None:
