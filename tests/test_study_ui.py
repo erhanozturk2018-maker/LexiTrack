@@ -497,7 +497,7 @@ class TestFirstRun:
         window.show_page(STUDY)
         study = window.study
         assert not study.setup_none.isHidden()
-        assert "Sort words" in study.setup_none.text()
+        assert "Know or don't know?" in study.setup_none.text()
         assert not study.setup_review.isHidden()
 
 
@@ -570,7 +570,7 @@ class TestStudyPlanDialog:
                           ReviewStatus.NOT_REVIEWED)
         dialog = StudyPlanDialog(engine, loaded)
         row = next(iter(dialog._checks.values())).parentWidget()
-        assert "4 never answered: sort them on Sort words first" in row.meta.text()
+        assert "4 never answered: sort them first" in row.meta.text()
 
     def test_all_my_lists_ticks_every_list_and_gives_the_choices_back(
         self, qapp, engine, loaded

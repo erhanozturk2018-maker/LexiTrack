@@ -46,7 +46,7 @@ FLASHCARD_KEYS: Section = (
 )
 
 TABLE_KEYS: Section = (
-    "List mode and Unknown Words",
+    "A list's words and Unknown Words",
     (
         ("↑ / ↓", "Move between words; the details panel follows"),
         ("Shift+↑ / Shift+↓", "Extend the selection"),

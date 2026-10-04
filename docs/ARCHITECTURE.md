@@ -807,7 +807,8 @@ a day:
 order. A restore needs the same schema version, or one listed in
 `READABLE_OLDER` (schema 7, whose tables schema 8 only extends), runs in one transaction with
 foreign keys deferred and checked before commit, and is preceded by the same
-safety copy. `ui/export_center.py` is the window over both, and
+safety copy. `ui/backups_dialog.py` is the window over both (backing up and
+restoring); `ui/export_center.py` holds the exports, and
 `services/word_filter.py` chooses the words to export.
 
 Logging (`core/logging_config.py`) writes to the console of a development run
@@ -822,9 +823,9 @@ through a formatter that masks anything shaped like a bot token.
 
 ```text
 MainWindow
-├── Sidebar     LexiTrack · Search (Ctrl+K) · Today (count) · Progress
-│               · LIBRARY: Lists · Sort words · Unknown (count)
-│               · foot: Export and backup (window) · Settings · theme icon · ⋯ menu
+├── Sidebar     LexiTrack · Search (Ctrl+K) · Today (count) · Lists · Progress
+│               · foot: Export (window) · Backups (window) · Settings · theme icon
+│               · ⋯ menu
 │               Folds to icons below 1000 px; counts become dots, names tooltips
 ├── StudyPage   (on screen: Today)
 │   ├── no plan             the first-run setup: what to learn (all Unknown
@@ -848,15 +849,15 @@ MainWindow
 ├── HomePage    (on screen: Lists)
 │   ├── Continue learning   current list, progress, Continue, Flashcard|List
 │   ├── Overview            four totals; the Unknown tile opens Unknown Words
-│   └── Your lists          ListCard grid (click: current; double-click: open;
-│                           right-click: review, open, add words, import into,
+│   └── Your lists          ListCard grid (click or Enter: open; right-click:
+│                           open, Know or don't know?, add words, import into,
 │                           export, edit, delete)
-├── ReviewPage  (on screen: Sort words)
-│   ├── context strip       SORTING · <list ▾ switcher> · language · List Actions
-│   │                       · Flashcard|List, and one line saying that this page
-│   │                       sorts and Today teaches
-│   ├── Flashcard mode      ReviewWidget / list complete / empty list
-│   ├── List mode           VocabularyTable (details panel, floating bar) + Add Words
+├── ReviewPage  (on screen: a list, inside Lists)
+│   ├── context strip       ← Lists · <list ▾ switcher> · language · List Actions
+│   │                       · Words | Know or don't know?, and, when sorting, one
+│   │                       line saying that this sorts and Today teaches
+│   ├── Know or don't know? ReviewWidget / list complete / empty list
+│   ├── Words               VocabularyTable (details panel, floating bar) + Add Words
 │   └── StatsBar            known · unknown · remaining · total for the list
 └── UnknownPage             VocabularyTable (all unknown words, no status
                             column) + list filter
@@ -896,8 +897,8 @@ whenever shown. Pages do not know how they are navigated to, so changing the
 navigation style means changing `main_window.py` only — the move from tabs
 to the sidebar did exactly that.
 
-The app opens on Today when the plan has work waiting, otherwise on Sort words
-when the current list is part-way through, and on Lists otherwise. With a tray, the
+The app opens on Today when the plan has work waiting, and on Lists
+otherwise. With a tray, the
 window can start hidden (`--minimized`).
 
 ### Shared components (`ui/components`)
@@ -960,10 +961,9 @@ Review and Unknown Words:
 ### Keyboard model
 
 Arrows move; letters act. In flashcards ← and → navigate the session history
-and never answer. On Home the arrows move focus across the card grid (Up from
-the top row returns to Continue). Ctrl+Tab cycles pages in sidebar order; Alt+T,
-P, L, S and U go to Today, Progress, Lists, Sort words and Unknown; Ctrl+L
-switches list.
+and never answer. On Lists the arrows move focus across the card grid. Ctrl+Tab cycles Today,
+Lists and Progress; Alt+T, L and P go to them, Alt+S to the current list and
+Alt+U to Unknown Words; Ctrl+L switches list.
 
 Shortcuts are listed in one place, Keyboard Shortcuts (F1), and shown next to
 each command in the Ctrl+K palette. They are not printed under the flashcard

@@ -2,12 +2,10 @@
 
 A column on the left rather than tabs across the top, for three reasons:
 
-* The destinations are grouped. *Today* and *Progress* are about learning;
-  *Lists*, *Sort words* and *Unknown* are the library the learning draws on;
-  *Export and backup* and *Settings* sit at the foot, out of the way. A row
-  of tabs can only list them.
-* Each item can carry a count — words waiting today, unknown words — so the
-  sidebar answers "is there anything to do?" from any page.
+* The destinations are the phone's: *Today*, *Lists* and *Progress*;
+  *Export*, *Backups* and *Settings* sit at the foot, out of the way.
+* An item can carry a count — the words waiting today — so the sidebar
+  answers "is there anything to do?" from any page.
 * There is room to grow. Pages to come (backups, the content workflow) are
   one more row, not a squeeze on the tab strip.
 

@@ -145,15 +145,18 @@ QPushButton#ModeButton:checked {{
 
 
 /* Transfer result with Undo: an inverted chip that floats over the page. */
+/* In the theme's own colours, as on the phone: an inverse box came out
+   white on the dark theme. */
 #Toast {{
-    background-color: {p.inverse};
+    background-color: {p.surface_raised};
+    border: 1px solid {p.border_strong};
     border-radius: {m.radius_md}px;
 }}
-#ToastText {{ color: {p.inverse_text}; font-size: 13px; }}
+#ToastText {{ color: {p.text}; font-size: 13px; }}
 QPushButton#ToastAction {{
     background: transparent;
     border: none;
-    color: {p.accent_soft};
+    color: {p.accent};
     font-weight: 600;
     padding: 4px 8px;
     min-height: 0;

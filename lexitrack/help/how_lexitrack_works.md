@@ -3,9 +3,9 @@
 LexiTrack does two different things, and most confusion comes from mixing
 them up:
 
-1. **Sorting.** On **Sort words** you go through a list and say what you
-   already know: *I Know* or *I Don't Know*. Nothing is scheduled there. It
-   only decides which words are **Unknown**.
+1. **Sorting.** In a list, **Know or don't know?** goes through its words
+   and you say what you already know: *I Know* or *I Don't Know*. Nothing is
+   scheduled there. It only decides which words are **Unknown**.
 2. **Learning.** Your **study plan** takes the Unknown words from the lists
    you choose and teaches them on **Today**: a few new words a day,
    then each one again on the day you are most likely to forget it.
@@ -29,11 +29,10 @@ its icons; hover over one for its name.
 | Page | What it is for |
 | --- | --- |
 | **Today** | The new words to learn, then the words due for review. The number beside it is what is waiting. |
+| **Lists** | Your lists and how far each one is sorted. Click one to open it: its **Words**, and **Know or don't know?** to sort them. The **Unknown** tile opens every word you marked Unknown, across all lists. |
 | **Progress** | Everything learned here, every answer you have given, and whether the schedule fits you. |
-| **Lists** | Your lists and how far each one is sorted. |
-| **Sort words** | Sorting a list into Known and Unknown, as flashcards or as a table. |
-| **Unknown** | Every word you marked Unknown, across all lists. |
-| **Export and backup** | Words as PDF, CSV or JSON; your answers as CSV; backups, one file with everything, and restoring them. |
+| **Export** | Everything in one file; any words as PDF, CSV or JSON, previewed first; your answers and questions as CSV. |
+| **Backups** | A copy now, the daily copies (the newest ten), and going back to one — or to a file with everything. |
 
 ## Your day
 
@@ -54,7 +53,8 @@ Today has two sessions, each with its own button: **Reviews** first, then
 
 On your phone the Telegram bot does the same — `/review` and `/learn`, or
 the two buttons on its morning message — if you set it up in
-*Settings → Telegram*.
+*Settings → Reminders*. On a day with nothing to do, the morning and
+evening messages say why, and what to do next.
 
 ## How a word is learned
 
@@ -124,7 +124,7 @@ move with it.
 
 **Marking a word Known** takes it out of your new words and your reviews,
 whether you knew it before LexiTrack or learned it here. What happens next
-depends on *Keep reviewing words learned here* (Settings → Learning):
+depends on *Keep reviewing words learned here* (Settings → Reviews and memory):
 
 1. **Off.** Known words are never asked again.
 2. **On** (the default). A word you *learned here* keeps coming back now and
@@ -177,10 +177,10 @@ Nothing is hidden from you.
 - **Every answer** from Today and Telegram, with its time, the question it
   answered, whether it was right, its rating, how long you were expected to
   remember the word afterwards and where you answered. See it in
-  *Progress → Answers*, or save it as a spreadsheet from *Export and backup*.
+  *Progress → Answers*, or save it as a spreadsheet from *Export*.
 - **Every question**, practice included, with whether it was right.
 - **Every change of status** - Known, Unknown, reset - with its cause: the
-  schedule, a button, Sort words, Undo, or a Known word you forgot and chose
+  schedule, a button, Know or don't know?, Undo, or a Known word you forgot and chose
   to learn again.
 - **Answers taken back** stay in the record, marked, and are left out of
   every count.

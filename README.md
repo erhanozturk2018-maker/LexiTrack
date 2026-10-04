@@ -9,8 +9,8 @@ a set number of new words each day and asks about each one again on the day
 you are most likely to forget it, using the FSRS spaced-repetition scheduler.
 You can do the day's work at the desk or on your phone through a Telegram bot.
 
-Before that, you sort: go through any list one word at a time — **I Know** or
-**I Don't Know** — or work through it in a table. The words you mark Unknown
+Before that, you sort: open a list and go through it one word at a time —
+**Know or don't know?** — or work through its words in a table. The words you mark Unknown
 are the ones your study plan teaches; the ones you know are never offered.
 
 Nothing is hidden. Every answer, every change of status and every word's path
@@ -34,11 +34,11 @@ local SQLite file. The only network use is the optional Telegram bot.
 
 ![A review card](docs/screenshots/study-session.png)
 
-![Lists: continue sorting, overview and your lists](docs/screenshots/home.png)
+![Lists: the overview and your lists](docs/screenshots/home.png)
 
 ![Today in dark mode](docs/screenshots/study-dark.png)
 
-![Flashcards in dark mode](docs/screenshots/flashcard-dark.png)
+![Know or don't know? in dark mode](docs/screenshots/flashcard-dark.png)
 
 </details>
 
@@ -105,7 +105,9 @@ local SQLite file. The only network use is the optional Telegram bot.
   each opening with how the last answer went.
 - **Picks up where you left off.** The session is saved after every step: if
   LexiTrack restarts, `/review` or any tap shows the step you were on.
-- **An evening reminder**, only if something is still waiting.
+- **An evening reminder**: what is still waiting — or, on a quiet day, that
+  the day is done and what tomorrow holds, or why there is nothing to learn
+  and what to do next.
 - **A weekly summary** on Sunday evening: the week's answers, words learned
   and the words giving you trouble.
 - **Private.** The bot answers only your chat. Its token lives in a `.env`
@@ -118,14 +120,17 @@ local SQLite file. The only network use is the optional Telegram bot.
   them.
 - **Languages.** Lists and words have a language, so English "gift" and German
   "Gift" are different words with separate progress.
-- **Flashcard mode.** One large word, two equal answer buttons, keyboard-first.
-  ← and → step back and forward through your answers without changing them.
-- **List mode.** A searchable, sortable table with CEFR level filters, a
+- **A list's words.** A searchable, sortable table with CEFR level filters, a
   details panel, and a floating bar for bulk Known / Unknown / Not reviewed
-  and Copy to / Move to another list — each with Undo.
+  and Copy to / Move to another list — each with Undo, counted down by a
+  ring beside it.
+- **Know or don't know?** One large word, two equal answer buttons,
+  keyboard-first, to sort a list. ← and → step back and forward through your
+  answers without changing them.
 - **Definitions and contexts** on the card, in the details panel and in
   exports; contexts imported from a JSON file, too.
-- **Unknown Words manager.** Every word you did not know, across all lists.
+- **Unknown Words.** Every word you did not know, across all lists, from the
+  Unknown tile on Lists.
 - **Import PDF and JSON**, several files at once, with a preview first.
 - **Export with a preview**: PDF, CSV or JSON, alphabetically or by CEFR level.
 - **Ctrl+K** searches commands, lists and words from anywhere.
@@ -254,24 +259,25 @@ With no study plan yet, the Today page asks three questions: what to learn —
 **all your Unknown words** by default, with how many that is, or only some
 lists — how many new words a day, with how long that will take, and whether
 you want the day's words on your phone. **Start learning** creates the plan.
-If nothing is Unknown yet, it says so: sort a list on **Sort words** first.
+If nothing is Unknown yet, it says so: sort a list first (**Lists ▸ a list ▸
+Know or don't know?**).
 
 **How LexiTrack Works** (`Shift+F1`, the **⋯** menu, or `Ctrl+K`) explains
 a word, the pages, your day, the four ratings and what is recorded.
 
 ### Finding your way
 
-The sidebar on the left reaches every page:
+The sidebar on the left has the phone's three places:
 
 - **Today** — the day's new words and reviews. The number beside it is what
   is waiting.
+- **Lists** — the overview and your lists. Click a list to open it: its
+  **Words**, and **Know or don't know?** to mark what you already know. The
+  **Unknown** tile opens every word you did not know, across all lists.
 - **Progress** — what has been learned here, and every answer.
-- Under **Library**: **Lists** (your lists), **Sort words** (going through a
-  list to mark what you already know) and **Unknown** (every word you did not
-  know, with their count).
-- At the foot: **Export and backup** (words, word contexts, your learning
-  data, backups and restoring them), **Settings**, the light/dark switch and
-  the **⋯** menu with everything else.
+- At the foot: **Export** (everything in one file, any words, your answers),
+  **Backups** (a copy now, the daily copies, restoring), **Settings**, the
+  light/dark switch and the **⋯** menu with everything else.
 
 On a narrow window the sidebar folds to its icons; hover over one for its
 name. On a wide one the pages keep to a readable width instead of stretching.
@@ -391,7 +397,7 @@ move with it.
 
 **Marking a word Known** takes it out of your new words and your reviews,
 whether you knew it before LexiTrack or learned it here. What happens next
-depends on *Keep reviewing words learned here* (Settings → Learning):
+depends on *Keep reviewing words learned here* (Settings → Reviews and memory):
 
 1. **Off.** Known words are never asked again.
 2. **On** (the default). A word you *learned here* keeps coming back now and
@@ -466,21 +472,22 @@ never touches what you have already learned.
 ![The Study Plan window](docs/screenshots/study-plan.png)
 
 A freshly imported list is all "never answered", so it has nothing Unknown to
-teach, and its row says so: sort it on Sort words first, or turn on
-*Settings → Learning → Offer words you have never answered*.
+teach, and its row says so: sort it first (a list ▸ Know or don't know?),
+or turn on *Settings → Reviews and memory → Offer words you have never
+answered*.
 
 ### Telegram
 
 1. In Telegram, open **@BotFather**, send `/newbot` and answer its two
    questions. It replies with a token.
 2. Copy `.env.example` to `.env` (or press **Open .env** in *Settings →
-   Telegram*), paste the token after `LEXITRACK_TELEGRAM_TOKEN=` and save.
-3. In *Settings → Telegram*, press **Reload .env**, switch the bot on and save.
+   Reminders*), paste the token after `LEXITRACK_TELEGRAM_TOKEN=` and save.
+3. In *Settings → Reminders*, press **Reload .env**, switch the bot on and save.
 4. Open your bot in Telegram and send `/start`. That chat becomes the only one
    the bot answers; you can also fix it with `LEXITRACK_TELEGRAM_CHAT_ID`.
 
-The bot sends the day's words at 06:00 and a reminder at 21:00 if something is
-left (both hours are settings), each with a button for each session:
+The bot sends the day's words at 06:00 and a reminder at 21:00 (both hours
+are settings; on a day with nothing to do, both say why and what next), each with a button for each session:
 **▶ Reviews** and **▶ New words**. `/today` shows today's words, `/review`
 starts the reviews and `/learn` the new words — or resumes the one in
 progress. When the reviews are done and new words are waiting, the bot asks:
@@ -492,19 +499,22 @@ with Windows* to have it come back after a restart. If the computer was off at
 06:00, the message comes when it starts — once, never a pile of old ones.
 Every card after an answer has **↶ Undo** for a mis-tap, and on Sunday
 evening a **weekly summary** arrives (it can be switched off in *Settings →
-Telegram*).
+Reminders*).
 
 `.env` is ignored by git and never copied into a backup. If a token ever leaks,
 revoke it in @BotFather with `/revoke` and paste the new one.
 
 ### Settings
 
-**Settings** (`Ctrl+,`) groups everything into pages: **Learning** (new words
-a day, the review limit, when a word is offered as known, the day boundary
-and the message hours), **Telegram**,
-**Appearance**, **Data** (Start with Windows, backups, the review history as
-CSV, starting over), **Advanced** (the scheduler, the session order, the
-simulator) and **About**. Each setting has a one-line explanation beside it.
+**Settings** (`Ctrl+,`) groups everything into pages, as on the phone:
+**Reviews and memory** (new words a day, the review limit, Known words, and
+the hour the day starts — 04:00, so a late night still counts for the evening
+it began in; changing it moves every review to the new start of its day),
+**Reminders** (when the morning plan, the evening reminder and the Sunday
+summary come, then the Telegram bot), **Appearance**, **Data** (Start with
+Windows, the data folder, Backups, starting over), **Advanced** (the
+scheduler, the session order, the simulator) and **About**. Each setting has
+a one-line explanation beside it.
 
 The review limit is at most 250 a day. When more is due, the most fragile
 words and those you are most likely to have forgotten come first, the rest
@@ -539,12 +549,13 @@ If a file states its language and you choose a list in another language, the
 preview explains the clash instead of importing. Nothing is written until you
 press Import.
 
-### Sorting with flashcards
+### Sorting: Know or don't know?
 
-**Continue** on Lists, or **Sort words**, goes through a list freely, with
-no schedule: this is sorting, and the words you mark I Don't Know are the ones
-your study plan teaches. The list you are reviewing is the name at the top — click it to
-switch lists. Where the word came from is the small "Source" line on the card.
+Open a list on **Lists**, then **Know or don't know?** (`Ctrl+1`): it goes
+through the list freely, with no schedule. This is sorting, and the words you
+mark I Don't Know are the ones your study plan teaches. The list is the name
+at the top — click it to switch lists; **← Lists** goes back. Where the word
+came from is the small "Source" line on the card.
 
 ![Flashcards, stepped back to an earlier answer](docs/screenshots/flashcard.png)
 
@@ -552,9 +563,9 @@ Press **←** (or Backspace) to step back through your answers and **→** to
 come forward again. The card shows the earlier word with its current status
 and says so; nothing changes unless you answer again or press R.
 
-### Sorting as a list
+### A list's words
 
-Switch to **List** (`Ctrl+2`). Search, filter by status or CEFR level (click
+A list opens on its **Words** (`Ctrl+2`). Search, filter by status or CEFR level (click
 A1, B2… to combine levels), sort by any column, select rows
 (`Shift`/`Ctrl`+click, `Ctrl+A`) and mark them together. The **details panel**
 on the right follows the current row: the word, its length, CEFR level, part
@@ -570,7 +581,7 @@ undone. Moving to another word, or quitting, with unsaved changes asks
 whether to save them. **Delete word…** removes the word from LexiTrack
 altogether, after asking (it can be added again later, starting afresh).
 
-![List mode with a selection](docs/screenshots/list-mode.png)
+![A list's words, with a selection](docs/screenshots/list-mode.png)
 
 Selecting words brings up a bar floating over the bottom of the table, so
 the rows never move. **Copy to** and **Move to** send the selection to another
@@ -587,7 +598,8 @@ deletes the list.
 
 ### Unknown Words
 
-Every word you answered "I Don't Know", across all lists. Mark words Known or
+Every word you answered "I Don't Know", across all lists — the **Unknown**
+tile on Lists, or `Alt+U`. Mark words Known or
 Not reviewed (with Undo), collect them into a list such as My Difficult
 Words, or export them.
 
@@ -595,7 +607,7 @@ Words, or export them.
 
 ### Exporting
 
-**Export** (`Ctrl+E`) offers what fits where you are: today's new words or the words you find hard on Today, and the
+**Export Words** (`Ctrl+E`) offers what fits where you are: today's new words or the words you find hard on Today, and the
 current list, its unknown words, your selection or all unknown words
 elsewhere. The window shows the file before you save it — the real first page
 of the PDF, or the first lines of the CSV or JSON — and follows any change
@@ -618,32 +630,42 @@ back whole, whichever columns it shows.
   <img src="docs/screenshots/export-pdf.png" alt="A page of an exported PDF" width="560">
 </p>
 
-### Export and backup
+### Export
 
-**Export and backup** in the sidebar gathers every way out of LexiTrack, and
-back in:
+**Export** in the sidebar gathers every way out of LexiTrack, as on the
+phone:
 
+- **Everything, in one file** — a `.lexitrack` file with words, lists,
+  statuses, plans, cards, every answer and question, contexts and settings,
+  as readable JSON in a ZIP. Restore it in Backups, here or on another
+  computer.
 - **Words**, chosen by list (every list, one, or several ticked), status,
   CEFR level, where they are in your plan (not started, in progress, hard for
   you, in long-term memory) and whether they have contexts, as PDF, CSV or
-  JSON through the preview above.
-- **Word contexts** — described below.
-- **Learning data** as CSV, for all time or the last 7, 30, 90 or 365 days:
+  JSON through the preview above; and their **contexts**, described below.
+- **Your answers** as CSV, for all time or the last 7, 30, 90 or 365 days:
   every answer, with its question, whether it was right, its rating and the
   schedule it produced; and every question asked — task, right or wrong,
   effort, time — practice included.
-- **Backups**: the daily copy (and *Back up now*); **everything in one file**,
-  a `.lexitrack` file with words, lists, statuses, plans, cards, every review
-  and attempt, contexts and settings, as readable JSON in a ZIP; and restoring
-  either kind.
 
-A PDF or CSV is for reading, not a backup. A restore replaces everything,
-asks first, and saves a copy of what is there now before it starts; it either
-all happens or none of it does. A `.lexitrack` file must come from the same
-version of the data (a newer or older one is refused, and says so); a daily
-copy from an older version is upgraded as it is restored. The bot token is in
-neither; a `.lexitrack` file also leaves out what belongs to one machine, such
-as the Telegram chat link.
+A PDF or CSV is for reading, not a backup.
+
+### Backups
+
+**Backups** in the sidebar (or *Settings → Data → Backups…*):
+
+- **Back up now** — a copy is also made every day LexiTrack runs; the newest
+  ten are kept.
+- **The daily copies**, newest first: pick one and **Restore…** (or
+  double-click it) to go back to that day.
+- **Restore from a file…** — a `.lexitrack` file from Export.
+
+A restore replaces everything, asks first, and saves a copy of what is there
+now before it starts; it either all happens or none of it does. A
+`.lexitrack` file must come from the same version of the data (a newer or
+older one is refused, and says so); a daily copy from an older version is
+upgraded as it is restored. The bot token is in neither; a `.lexitrack` file
+also leaves out what belongs to one machine, such as the Telegram chat link.
 
 ### Word contexts
 
@@ -660,7 +682,7 @@ hand or with any tool you like — an LLM, a dictionary, your own notes:
 ]
 ```
 
-**Export and backup → Word Contexts…** exports words — all of them, a list,
+**Export → Word contexts…** exports words — all of them, a list,
 your plan or a selection, optionally only those without contexts — with their
 length, level, part of speech, definition and contexts, to be filled in; the
 filled file comes back through the same window, which shows what it would add
@@ -712,12 +734,13 @@ key in one place, with a filter.
 | | `F1` | Keyboard Shortcuts |
 | | `Shift+F1` | How LexiTrack Works |
 | | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous page |
-| | `Alt+T` / `Alt+P` / `Alt+L` / `Alt+S` / `Alt+U` | Today / Progress / Lists / Sort words / Unknown |
+| | `Alt+T` / `Alt+L` / `Alt+P` | Today / Lists / Progress |
+| | `Alt+S` / `Alt+U` | The current list / Unknown Words |
 | | `Ctrl+P` | Study plan |
 | | `Ctrl+,` | Settings |
 | | `Ctrl+L` | Switch list |
-| | `Ctrl+1` / `Ctrl+2` | Flashcard / List mode |
-| | `Ctrl+O` · `Ctrl+N` · `Ctrl+E` | Import · New list · Export |
+| | `Ctrl+1` / `Ctrl+2` | Know or don't know? / the list's words |
+| | `Ctrl+O` · `Ctrl+N` · `Ctrl+E` | Import · New list · Export words |
 | | `Ctrl+T` | Light / dark |
 | | `Ctrl+Q` | Quit (the window's × only hides to the tray while the bot is on) |
 

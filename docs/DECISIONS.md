@@ -1562,3 +1562,18 @@ went wrong; they deserve a page that holds only that.
 apart from the switch that sends them. The phone groups them under
 *Reminders*; so does the desk now, and the page says what a reminder holds,
 including on a quiet day (90).
+
+---
+
+## 94. The message box in the theme's colours, Undo counted down
+
+**Decision.** The toast is drawn in the theme's own colours (raised
+surface, strong border, the text colour), no longer in the inverse ones.
+Undo is offered for five seconds, counted down by a ring with the seconds
+left beside the button (`CountdownRing`); a message without Undo stays six
+seconds, as before. The window's toast keeps above the totals strip under
+a list.
+
+**Reason.** The same choice as the phone's: an inverse box came out white
+on the dark theme, and an Undo with no sign of how long it lasts either
+lingers or vanishes before it is read.

@@ -211,7 +211,7 @@ target retention (90%), one at the Known target (`known_retention`, 85%).
   the Known scheduler; its FSRS state is shared, only the interval changes
   (`SrsScheduler.target_due`). `params_hash` records which target was used.
 - **Reconciliation** (`status_changed(before)`), called by every status
-  change — the study page, the tables, Sort words, Undo, the bot: Known with
+  change — the study page, the tables, Know or don't know?, Undo, the bot: Known with
   *Keep reviewing* off → archive; archived and no longer excluded → resume
   (as returning); Known-ness changed → retarget.
 - **Retargeting** (`_retarget`). A card due before tomorrow stays, unless it

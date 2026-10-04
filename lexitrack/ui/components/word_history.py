@@ -87,7 +87,7 @@ def status_sentence(step: JourneyStep) -> str:
     elif cause is StatusCause.UNDO:
         text = f"Back to {_status_word(to)}: an answer or a change was taken back"
     elif cause is StatusCause.SORTING:
-        text = f"Marked {_status_word(to)} on Sort words"
+        text = f"Marked {_status_word(to)} in Know or don't know?"
     elif to is ReviewStatus.NOT_REVIEWED:
         text = "Marked not reviewed by hand"
     else:

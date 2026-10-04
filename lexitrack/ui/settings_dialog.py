@@ -117,7 +117,7 @@ class SettingsDialog(QDialog):
 
         self.nav = QListWidget()
         self.nav.setObjectName("SettingsNav")
-        self.nav.setFixedWidth(168)
+        self.nav.setFixedWidth(196)
         self.nav.setFrameShape(QFrame.Shape.NoFrame)
         self.pages = QStackedWidget()
         self._page_widgets: dict[str, QWidget] = {

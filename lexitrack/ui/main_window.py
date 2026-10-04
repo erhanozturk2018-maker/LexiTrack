@@ -1,17 +1,18 @@
 """The application window: navigation, menus and the current-list context.
 
-Five destinations, reached from the sidebar (:mod:`.components.sidebar`):
+Three destinations in the sidebar (:mod:`.components.sidebar`), as the
+phone's tabs (DECISIONS 91):
 
 * **Today** — today's new words and today's reviews, from the study plan. It
   comes first because it is the only page that says what to do *now*; the
   others are places to look things up or to work freely.
-* **Progress** — what has been learned here, and every answer.
-* Under **Library**:
+* **Lists** — the overview and your lists. Inside it:
 
-  * **Lists** — continue sorting, overview, your lists.
-  * **Sort words** — the current list, as flashcards or as a table, sorted
+  * **a list** (REVIEW) — its words, and *Know or don't know?* to sort them
     into Known and Unknown. Free: no schedule, any list, any time.
-  * **Unknown** — every unknown word, across lists.
+  * **Unknown Words** (UNKNOWN) — every unknown word, across lists, from
+    the Unknown tile.
+* **Progress** — what has been learned here, and every answer.
 
 The internal page keys (``STUDY``, ``HOME``, ``REVIEW``…) predate the names
 on screen and are kept, so settings and tests that name them stay valid.
@@ -354,6 +355,8 @@ class MainWindow(QMainWindow):
         # One toast for the window, so a message from the Study page appears in
         # the same place as one from a list action.
         self._toast_widget = Toast(central)
+        # Above the totals strip under a list, not over it.
+        self._toast_widget.avoid(self.review.stats)
 
     def _build_sidebar(self) -> Sidebar:
         m = METRICS

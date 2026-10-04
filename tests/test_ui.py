@@ -1483,3 +1483,39 @@ def test_cefr_order_asks_the_pdf_for_level_headings(qapp, loaded) -> None:
     dialog._order_buttons[ExportOrder.ALPHABETICAL].setChecked(True)
     assert not dialog._content().group_by_level
 
+
+
+def test_undo_is_counted_down_and_goes_in_five_seconds(qtbot, window) -> None:
+    """As on the phone: a ring beside Undo counts down its five seconds."""
+    from lexitrack.ui.components import toast as toast_module
+
+    toast = window._toast_widget
+    undone = []
+    toast.show_message("“alpha”: Known", undo=lambda: undone.append(True))
+    assert toast.ring.isVisibleTo(toast)
+    assert toast.ring.seconds == 5
+    assert not toast.ring.grab().isNull(), "the ring draws"
+    assert toast._timer.interval() == toast_module.UNDO_MS == 5000
+    toast.undo()
+    assert undone == [True] and toast.isHidden()
+
+    toast.show_message("Exported 3 words.")
+    assert not toast.ring.isVisibleTo(toast), "no ring without Undo"
+    assert toast._timer.interval() == toast_module.DURATION_MS
+
+
+def test_a_list_read_again_keeps_its_place(qtbot, window, loaded) -> None:
+    """A guard: the phone's list once went back to its top after every change."""
+    list_id = loaded.lists()[0].id
+    for index in range(80):
+        loaded.add_word(list_id, f"word{chr(97 + index % 26)}{chr(97 + index // 26)}")
+    window.open_review(list_id, ModeSwitch.LIST)
+    window.resize(1100, 600)
+    window.show()
+    qtbot.waitExposed(window)
+    bar = window.review.table.view.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum() // 2)
+    place = bar.value()
+    window.review.refresh(reload_table=True)
+    assert bar.value() == place, "the same list read again stays where it was"

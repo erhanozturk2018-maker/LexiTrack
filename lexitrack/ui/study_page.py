@@ -277,7 +277,7 @@ class StudyPage(QWidget):
             radio.setMinimumHeight(32)
         self.setup_none = _label("", "SetupWarning", wrap=True)
         body.addWidget(self.setup_none)
-        self.setup_review = QPushButton("Go to Sort words \u2192")
+        self.setup_review = QPushButton("Know or don't know? \u2192")
         self.setup_review.setObjectName("LinkButton")
         self.setup_review.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_review.clicked.connect(self.show_review.emit)
@@ -338,8 +338,9 @@ class StudyPage(QWidget):
         )
         nothing = outlook.to_introduce == 0
         self.setup_none.setText(
-            "You have no Unknown words yet. Sort a list on Sort words first: the "
-            "words you mark I Don't Know are the ones LexiTrack teaches."
+            "You have no Unknown words yet. Sort a list first (Lists ▸ a list ▸ Know "
+            "or don't know?): the words you mark I Don't Know are the ones LexiTrack "
+            "teaches."
             if nothing
             else ""
         )

@@ -411,7 +411,8 @@ def _list_meta(outlook: PlanOutlook, include_not_reviewed: bool) -> str:
         # The trap a fresh import falls into: nothing is Unknown yet, so the
         # list would teach nothing and nobody would say why.
         text += (
-            f"\n{outlook.not_reviewed:,} never answered: sort them on Sort words first"
+            f"\n{outlook.not_reviewed:,} never answered: sort them first (Lists ▸ a list ▸ "
+            "Know or don't know?)"
         )
     return text
 
@@ -429,7 +430,8 @@ def _summary_text(outlook: PlanOutlook, per_day: int) -> str:
         if outlook.in_progress:
             first += f" {outlook.in_progress:,} words are still being reviewed."
         return (
-            f"{first} To learn more, mark words Unknown on Sort words or add a list."
+            f"{first} To learn more, mark words Unknown (Lists ▸ a list ▸ Know or don't "
+            "know?) or add a list."
         )
     parts = [f"{outlook.to_introduce:,} words to learn"]
     if outlook.in_progress:
