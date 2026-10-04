@@ -1518,3 +1518,28 @@ as the phone's tabs do.
 (sorting a list) and Today (the schedule), and two sidebar pages (*Sort
 words*, *Unknown*) were views of the lists. Grouped as on the phone, each
 place has one job, and sorting sits where the words are.
+
+---
+
+## 92. Export and Backups are two pages
+
+**Decision.** The sidebar's *Export and backup* becomes two items, as on
+the phone:
+
+- **Export** (`ui/export_center.py`): *Everything, in one file* (the
+  portable `.lexitrack`) first; then *Words* — any set, by list, status,
+  level, learning state and contexts, previewed before saving — with their
+  contexts; then *Your answers*: every answer and every question, for a
+  period.
+- **Backups** (`ui/backups_dialog.py`): *Back up now*; the daily copies,
+  listed newest first, each restorable (*Restore…*, or a double-click);
+  *Restore from a file…* for a `.lexitrack`; the folder.
+- **Settings ▸ Data** no longer repeats *Back up now* and *Export
+  history*: one *Backups…* button opens the Backups page.
+- The commands follow: *Export Words…* (Ctrl+E, the words on screen),
+  *Export…*, *Backups…*, *Back Up Now*.
+
+**Reason.** One long page mixed five word filters, two answer exports and
+four ways to back up and restore, and Settings repeated part of it. Taking
+a copy and going back to one are what a learner looks for when something
+went wrong; they deserve a page that holds only that.

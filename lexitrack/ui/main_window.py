@@ -48,7 +48,6 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
-    QFileDialog,
     QHBoxLayout,
     QMainWindow,
     QMenu,
@@ -64,6 +63,7 @@ from ..services.learning_service import LearningService
 from ..services.maintenance import Maintenance
 from ..services.progress import ProgressService
 from ..services.vocabulary_service import VocabularyService
+from .backups_dialog import BackupsDialog
 from .command_palette import Command, CommandPalette
 from .components.cards import ModeSwitch
 from .components.sidebar import Sidebar
@@ -196,14 +196,15 @@ class MainWindow(QMainWindow):
                     lambda: self.actions.import_into(None), "Ctrl+O", "open pdf json add"),
             Command("New List\u2026", "Create an empty list and add words to it",
                     self.actions.create_list, "Ctrl+N", "create"),
-            Command("Export\u2026", "Save words as PDF, CSV or JSON, with a preview first",
+            Command("Export Words\u2026",
+                    "The words on screen as PDF, CSV or JSON, with a preview first",
                     self.export, "Ctrl+E", "save pdf csv json print"),
-            Command("Export Answer History\u2026", "Every answer you have given, as a CSV file",
-                    self.export_history, None, "review log csv spreadsheet"),
-            Command("Export and Backup\u2026",
-                    "Words as files, learning data, backups, and restoring them",
+            Command("Export\u2026",
+                    "Everything in one file, any words, every answer and question",
                     self.open_export_center, None,
-                    "backup restore portable lexitrack csv pdf json save"),
+                    "portable lexitrack csv pdf json save answers history"),
+            Command("Backups\u2026", "Back up now, go back to a day, restore from a file",
+                    self.open_backups, None, "backup restore copy portable lexitrack"),
             Command("Word Contexts\u2026",
                     "Export words with their contexts; import a file of contexts",
                     self.open_content, None, "contexts sentences examples json llm import"),
@@ -261,10 +262,10 @@ class MainWindow(QMainWindow):
         menu = self.app_menu
         menu.clear()
         groups = (
-            ("Import\u2026", "New List\u2026", "Export\u2026"),
-            ("Export and Backup\u2026", "Word Contexts\u2026", "Export Answer History\u2026",
-             "Back Up Now", "Open Backups Folder"),
-            ("Study Plan\u2026", "Switch List\u2026", "Flashcard Mode", "List Mode"),
+            ("Import\u2026", "New List\u2026", "Export Words\u2026"),
+            ("Export\u2026", "Word Contexts\u2026", "Backups\u2026", "Back Up Now"),
+            ("Study Plan\u2026", "Switch List\u2026", "Know or Don't Know?",
+             "Words of the Current List"),
             ("Settings\u2026", "Switch to Dark Mode", "Switch to Light Mode",
              "How LexiTrack Works", "Keyboard Shortcuts"),
             ("Open Data Folder", "Reset All Progress\u2026", "About LexiTrack"),
@@ -371,8 +372,10 @@ class MainWindow(QMainWindow):
         self.tab_buttons = sidebar.items
 
         sidebar.start_foot()
-        self.export_button = sidebar.add_action("Export and backup", "export")
+        self.export_button = sidebar.add_action("Export", "export")
         self.export_button.clicked.connect(self.open_export_center)
+        self.backups_button = sidebar.add_action("Backups", "backups")
+        self.backups_button.clicked.connect(self.open_backups)
         settings = sidebar.add_action("Settings", "settings", "Ctrl+,")
         settings.clicked.connect(self.open_settings)
         sidebar.add_spacing(m.space_2)
@@ -660,10 +663,14 @@ class MainWindow(QMainWindow):
         ExportDialog(self._service, scopes, parent=self).exec()
 
     def open_export_center(self) -> None:
-        """Every way out of LexiTrack, and back in (ui/export_center.py)."""
-        center = ExportCenter(self._service, self._engine, self.open_content, parent=self)
-        center.exec()
-        if center.changed:
+        """Every way out of LexiTrack (ui/export_center.py)."""
+        ExportCenter(self._service, self._engine, self.open_content, parent=self).exec()
+
+    def open_backups(self) -> None:
+        """A copy now, the daily copies, and restoring one (ui/backups_dialog.py)."""
+        dialog = BackupsDialog(self._service, self._engine, parent=self)
+        dialog.exec()
+        if dialog.changed:
             # Restored: everything on screen is from before; read it again.
             self.review.session = None
             self._ensure_current_list()
@@ -689,17 +696,6 @@ class MainWindow(QMainWindow):
 
     def _maintenance(self) -> Maintenance:
         return Maintenance(self._service.database, self._engine.clock)
-
-    def export_history(self) -> None:
-        """Every answer, undone ones included and marked, as a CSV file."""
-        default = paths.exports_dir() / f"review-history-{self._engine.clock.today()}.csv"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Answer History", str(default), "CSV files (*.csv)"
-        )
-        if not path:
-            return
-        rows = self._maintenance().export_review_log(path)
-        self._toast(f"Exported {rows:,} answers.")
 
     def backup_now(self) -> None:
         target = self._maintenance().backup()

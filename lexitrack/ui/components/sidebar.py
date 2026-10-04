@@ -55,6 +55,8 @@ ICONS: dict[str, str] = {
     '<path d="M4 18h11"/><path d="M19 18h1"/><circle cx="15" cy="6" r="2"/>'
     '<circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
     "search": '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+    "backups": '<path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/>'
+    '<path d="M12 8v4l3 2"/>',
 }
 
 _renderers: dict[tuple[str, str], QSvgRenderer] = {}

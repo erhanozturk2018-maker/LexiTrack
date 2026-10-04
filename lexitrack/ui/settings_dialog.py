@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -47,7 +46,7 @@ from ..core.errors import LexiTrackError
 from ..core.logging_config import set_file_logging
 from ..models.settings import Setting
 from ..services.learning_service import LearningService
-from ..services.maintenance import KEEP_BACKUPS, Maintenance
+from ..services.maintenance import Maintenance
 from ..services.optimizer import FitResult, Personaliser
 from ..services.review_queue import HARD_CEILING, effective_capacity
 from ..services.simulation import DEFAULT_PROFILE, PROFILES, simulate_current_settings
@@ -396,21 +395,15 @@ class SettingsDialog(QDialog):
         layout.addWidget(storage)
 
         backups = _Group("BACKUPS")
-        self.backup_label = QLabel()
-        self.backup_label.setObjectName("SettingHint")
-        self.backup_label.setWordWrap(True)
-        backup_now = QPushButton("Back up now")
-        backup_now.clicked.connect(self._backup_now)
-        backups.add("Daily copy", self.backup_label, backup_now)
-        history = QPushButton("Export history")
-        history.clicked.connect(self._export_history)
+        open_backups = QPushButton("Backups…")
+        open_backups.clicked.connect(self._open_backups)
         backups.add(
-            "Review history",
-            "Every answer you have given, as a CSV file for a spreadsheet.",
-            history,
+            "Copies of your data",
+            "One a day, the newest ten kept: back up now, go back to a day, or restore "
+            "from a file. Exports (every answer too) are under Export.",
+            open_backups,
         )
         layout.addWidget(backups)
-        self._show_backups()
 
         over = _Group("STARTING OVER")
         reset = QPushButton("Reset progress")
@@ -865,38 +858,13 @@ class SettingsDialog(QDialog):
     def _maintenance(self) -> Maintenance:
         return Maintenance(self._service.database, self._engine.clock)
 
-    def _show_backups(self) -> None:
-        maintenance = self._maintenance()
-        existing = maintenance.backups()
-        # The folder is in the tooltip rather than the text: a full path in a
-        # one-line hint breaks mid-word, and the data folder row shows it.
-        if existing:
-            newest = existing[0].stem.replace("vocabulary-", "")
-            text = (
-                f"Made every day, the newest {KEEP_BACKUPS} kept. "
-                f"Latest: {newest} · {len(existing)} kept."
-            )
-        else:
-            text = f"Made every day, the newest {KEEP_BACKUPS} kept. None yet."
-        self.backup_label.setToolTip(str(maintenance.directory))
-        self.backup_label.setText(text)
+    def _open_backups(self) -> None:
+        from .backups_dialog import BackupsDialog
 
-    def _backup_now(self) -> None:
-        target = self._maintenance().backup()
-        if target is None:
-            show_error(self.error, "The backup failed. The log file has the details.")
-        self._show_backups()
-
-    def _export_history(self) -> None:
-        default = paths.exports_dir() / f"review-history-{self._engine.clock.today()}.csv"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Review History", str(default), "CSV files (*.csv)"
-        )
-        if not path:
-            return
-        rows = self._maintenance().export_review_log(path)
-        show_error(self.error, None)
-        self.backup_label.setText(f"Exported {rows:,} reviews to {path}.")
+        dialog = BackupsDialog(self._service, self._engine, parent=self)
+        dialog.exec()
+        if dialog.changed:
+            self.changed.emit()
 
     def _reset_progress(self) -> None:
         if not confirm(
@@ -905,7 +873,7 @@ class SettingsDialog(QDialog):
             "Mark every word as not reviewed and clear the study schedule, every "
             "answer you have given and the history of how each word was learned?"
             "\n\nYour answers are also what LexiTrack would learn your memory "
-            "from. To keep a copy, cancel and use Export history first.\n\n"
+            "from. To keep a copy, cancel and use Export ▸ Every answer first.\n\n"
             "Your words, lists, definitions and plans are kept, and yesterday's "
             "backup stays in the data folder.",
             "Reset progress",

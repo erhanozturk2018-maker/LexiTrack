@@ -1299,7 +1299,7 @@ def test_shortcuts_window_fits_the_screen_and_filters(qtbot, window) -> None:
 
     dialog.filter.setText("export")
     visible = [text.text() for _caps, text, _h in dialog._rows if not text.isHidden()]
-    assert visible == ["Export"]
+    assert visible == ["Export Words"]
     keys = {keys for _title, entries in window.shortcut_sections() for keys, _ in entries}
     assert {"Ctrl+K", "Ctrl+E", "F1", "K"} <= keys
 

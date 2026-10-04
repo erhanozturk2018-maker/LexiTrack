@@ -1,18 +1,17 @@
-"""Export and backup: every way out of LexiTrack, and the way back in.
+"""Export: every way out of LexiTrack, on one page, as on the phone.
 
-One window instead of scattered menu items. What is in it answers four
-questions:
+Backups have a page of their own (backups_dialog.py). This one answers:
 
+* **Everything** — the portable ``.lexitrack`` file: words, lists,
+  statuses, plans, cards, every review and question, contexts, settings.
+  Restored from Backups, here or on another computer.
 * **Which words?** Any set — one list, several or all of them, by status, by
   level, by where they are in learning, by whether they have contexts — as a
   PDF, CSV or JSON file, previewed before it is saved, with the columns
-  chosen there (the Export dialog).
-* **Word contexts** — words out with their contexts, a file of contexts in.
-* **Learning data** — every answer and every attempt, as CSV, to look at in a
-  spreadsheet: all of it, or the last so many days.
-* **Backup** — a copy now, the daily copies, and the portable ``.lexitrack``
-  file with everything; and restoring from either, after saving a copy of
-  what is there.
+  chosen there (the Export dialog). Their contexts too, as a file to edit
+  and bring back.
+* **Your answers** — every answer and every question asked, as CSV, to look
+  at in a spreadsheet: all of it, or the last so many days.
 """
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -46,7 +44,7 @@ from ..services.maintenance import Maintenance
 from ..services.vocabulary_service import VocabularyService
 from ..services.word_filter import LearningState, WordFilter, filter_words
 from .components.settings_rows import CONTROL_WIDTH, SettingsGroup, page, scrolled
-from .dialogs import confirm, error_label, show_error
+from .dialogs import error_label, show_error
 from .export_dialog import ExportDialog, ExportScope
 from .theme.palette import METRICS
 
@@ -163,17 +161,17 @@ class ExportCenter(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Export and Backup")
+        self.setWindowTitle("Export")
         self._service = service
         self._engine = engine
         self._open_content = open_content
         self._maintenance = Maintenance(service.database, engine.clock)
-        #: Set when data was restored, for the window behind to reload.
+        #: Nothing here changes the data (restoring is on Backups); kept for
+        #: callers that ask.
         self.changed = False
         self.resize(760, 780)
         self._build()
         self._refresh_words()
-        self._refresh_backups()
 
     # -- building --------------------------------------------------------------
 
@@ -182,10 +180,23 @@ class ExportCenter(QDialog):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         body, layout = page(
-            "Export and backup",
+            "Export",
             "Everything that is yours can leave LexiTrack, in files anything can read — "
-            "and come back.",
+            "and come back. Backups are on their own page.",
         )
+
+        everything = SettingsGroup("EVERYTHING, IN ONE FILE")
+        export_all = QPushButton("Export everything…")
+        export_all.setProperty("variant", "primary")
+        export_all.clicked.connect(self._export_portable)
+        everything.add(
+            "Everything",
+            "A .lexitrack file: words, lists, statuses, plans, cards, every answer and "
+            "question, contexts, settings. Keep it somewhere safe; restore it in Backups, "
+            "here or on another computer.",
+            export_all,
+        )
+        layout.addWidget(everything)
 
         words = SettingsGroup("WORDS")
         self.from_list = ListPicker(self._service.lists())
@@ -222,23 +233,21 @@ class ExportCenter(QDialog):
             words.add(title, hint, combo)
         self.words_count = _hint()
         self.export_words_button = QPushButton("Export…")
-        self.export_words_button.setProperty("variant", "primary")
         self.export_words_button.clicked.connect(self._export_words)
         words.add("Words", self.words_count, self.export_words_button)
-        layout.addWidget(words)
 
         if self._open_content is not None:
-            content = SettingsGroup("WORD CONTEXTS")
             button = QPushButton("Word contexts…")
             button.clicked.connect(self._content)
-            content.add(
-                "Contexts",
-                "Export words with their contexts as JSON, and import a file of contexts.",
+            words.add(
+                "Their contexts",
+                "Words with their contexts as JSON, to edit and bring back in.",
                 button,
             )
-            layout.addWidget(content)
 
-        data = SettingsGroup("LEARNING DATA")
+        layout.addWidget(words)
+
+        data = SettingsGroup("YOUR ANSWERS")
         self.period = QComboBox()
         for label, days in _PERIODS:
             self.period.addItem(label, days)
@@ -255,55 +264,12 @@ class ExportCenter(QDialog):
         attempts = QPushButton("Export…")
         attempts.clicked.connect(self._export_attempts)
         data.add(
-            "Every attempt",
+            "Every question",
             "Each question asked — task, right or wrong, effort, time — practice "
             "included, as CSV.",
             attempts,
         )
         layout.addWidget(data)
-
-        backup = SettingsGroup("BACKUP")
-        self.backup_hint = _hint()
-        backup_now = QPushButton("Back up now")
-        backup_now.clicked.connect(self._backup_now)
-        backup.add("Daily copy", self.backup_hint, backup_now)
-        export_all = QPushButton("Export…")
-        export_all.clicked.connect(self._export_portable)
-        backup.add(
-            "Everything, in one file",
-            "A .lexitrack file: words, lists, statuses, plans, cards, every review and "
-            "attempt, contexts, settings. Readable JSON inside.",
-            export_all,
-        )
-        restore_file = QPushButton("Restore…")
-        restore_file.clicked.connect(self._restore_portable)
-        backup.add(
-            "Restore a .lexitrack file",
-            "Replaces everything with the file's contents. A copy of what is here now "
-            "is saved first.",
-            restore_file,
-        )
-        row = QWidget()
-        row.setObjectName("PanelBody")
-        line = QHBoxLayout(row)
-        line.setContentsMargins(0, 0, 0, 0)
-        line.setSpacing(m.space_2)
-        self.backup_choice = QComboBox()
-        self.backup_choice.setFixedWidth(_WIDE)
-        line.addWidget(self.backup_choice)
-        self.restore_backup_button = QPushButton("Restore…")
-        self.restore_backup_button.clicked.connect(self._restore_backup)
-        line.addWidget(self.restore_backup_button)
-        backup.add(
-            "Restore a daily copy",
-            "Back to how things were on that day. A copy of what is here now is saved "
-            "first.",
-            row,
-        )
-        folder = QPushButton("Open")
-        folder.clicked.connect(self._open_folder)
-        backup.add("Backups folder", str(self._maintenance.directory), folder)
-        layout.addWidget(backup)
 
         self.message = _hint()
         layout.addWidget(self.message)
@@ -379,33 +345,12 @@ class ExportCenter(QDialog):
             self._say(f"{rows:,} answers written to {path.name}.")
 
     def _export_attempts(self) -> None:
-        path = self._save_csv("Export Every Attempt", "attempts")
+        path = self._save_csv("Export Every Question", "questions")
         if path:
             rows = self._maintenance.export_attempts(path, since=self._since())
-            self._say(f"{rows:,} attempts written to {path.name}.")
+            self._say(f"{rows:,} questions written to {path.name}.")
 
-    # -- backup --------------------------------------------------------------------
-
-    def _refresh_backups(self) -> None:
-        backups = self._maintenance.backups()
-        self.backup_hint.setText(
-            f"Made every day, the newest ten kept. Latest: {backups[0].stem[11:]}."
-            if backups
-            else "Made every day, the newest ten kept. None yet."
-        )
-        self.backup_choice.clear()
-        for backup in backups:
-            self.backup_choice.addItem(backup.stem.replace("vocabulary-", ""), str(backup))
-        self.backup_choice.setEnabled(bool(backups))
-        self.restore_backup_button.setEnabled(bool(backups))
-
-    def _backup_now(self) -> None:
-        target = self._maintenance.backup()
-        if target is None:
-            show_error(self.error, "The backup failed. The log file has the details.")
-        else:
-            self._say(f"Backed up to {target.name}.")
-        self._refresh_backups()
+    # -- everything ----------------------------------------------------------------
 
     def _export_portable(self) -> None:
         default = paths.exports_dir() / f"lexitrack-{self._engine.clock.today()}.lexitrack"
@@ -423,72 +368,6 @@ class ExportCenter(QDialog):
             f"Everything written to {summary.path.name}: {summary.words:,} words and "
             f"{summary.reviews:,} reviews."
         )
-
-    def _restore_portable(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Restore Everything", str(paths.exports_dir()), "LexiTrack backup (*.lexitrack)"
-        )
-        if not path:
-            return
-        try:
-            summary = portable.read(path)
-        except LexiTrackError as exc:
-            show_error(self.error, str(exc))
-            return
-        if not confirm(
-            self,
-            "Replace everything?",
-            f"{Path(path).name} holds {summary.words:,} words and {summary.reviews:,} "
-            f"reviews, saved {summary.created_at[:10]}. Everything here now — words, "
-            "lists, progress, content, settings — is replaced by it.\n\nA copy of what is "
-            "here now is saved in the backups folder first.",
-            "Replace everything",
-            irreversible=False,
-        ):
-            return
-        try:
-            safety = self._maintenance.safety_copy()
-            portable.restore(self._service.database, path)
-        except LexiTrackError as exc:
-            show_error(self.error, str(exc))
-            return
-        self._restored(f"Restored from {Path(path).name}. What was here is in {safety.name}.")
-
-    def _restore_backup(self) -> None:
-        path = self.backup_choice.currentData()
-        if not path:
-            return
-        if not confirm(
-            self,
-            "Go back to that day?",
-            f"Everything goes back to the copy of {self.backup_choice.currentText()}; "
-            "anything done since is replaced.\n\nA copy of what is here now is saved in "
-            "the backups folder first.",
-            "Restore",
-            irreversible=False,
-        ):
-            return
-        try:
-            safety = self._maintenance.restore_backup(path)
-        except LexiTrackError as exc:
-            show_error(self.error, str(exc))
-            return
-        self._restored(
-            f"Restored the copy of {self.backup_choice.currentText()}. What was here is in "
-            f"{safety.name}."
-        )
-
-    def _restored(self, text: str) -> None:
-        self.changed = True
-        self._engine.refresh_settings()
-        self._say(text)
-        self._refresh_words()
-        self._refresh_backups()
-
-    def _open_folder(self) -> None:
-        folder = self._maintenance.directory
-        folder.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _say(self, text: str) -> None:
         show_error(self.error, None)

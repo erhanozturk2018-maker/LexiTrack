@@ -1,4 +1,4 @@
-"""Export and backup (ui/export_center.py, services/word_filter.py)."""
+"""Export and Backups (ui/export_center.py, ui/backups_dialog.py, services/word_filter.py)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from lexitrack.models.user_word_state import ReviewStatus
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.vocabulary_service import VocabularyService
 from lexitrack.services.word_filter import LearningState, WordFilter, filter_words
+from lexitrack.ui import backups_dialog
 from lexitrack.ui import export_center as module
+from lexitrack.ui.backups_dialog import BackupsDialog
 from lexitrack.ui.export_center import ExportCenter
 
 
@@ -80,13 +82,17 @@ def test_the_window_counts_exports_and_restores(
     center._export_portable()
     assert target.exists() and "4 words" in center.message.text()
 
-    # Something changes after the backup, then the backup is restored.
+    # Something changes after the export; the file is restored, from Backups.
     database.connection.execute("DELETE FROM srs_cards")
-    monkeypatch.setattr(module.QFileDialog, "getOpenFileName", lambda *a, **k: (str(target), ""))
-    monkeypatch.setattr(module, "confirm", lambda *a, **k: True)
-    center._restore_portable()
-    assert center.changed
-    assert "Restored from all.lexitrack" in center.message.text()
+    backups = BackupsDialog(service, engine)
+    qtbot.addWidget(backups)
+    monkeypatch.setattr(
+        backups_dialog.QFileDialog, "getOpenFileName", lambda *a, **k: (str(target), "")
+    )
+    monkeypatch.setattr(backups_dialog, "confirm", lambda *a, **k: True)
+    backups._restore_portable()
+    assert backups.changed
+    assert "Restored from all.lexitrack" in backups.message.text()
     assert database.connection.execute("SELECT COUNT(*) FROM srs_cards").fetchone()[0] == 1
 
 
@@ -100,10 +106,14 @@ def test_nothing_is_replaced_without_saying_yes(
     monkeypatch.setattr(module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
     center._export_portable()
     database.connection.execute("DELETE FROM list_words")
-    monkeypatch.setattr(module.QFileDialog, "getOpenFileName", lambda *a, **k: (str(target), ""))
-    monkeypatch.setattr(module, "confirm", lambda *a, **k: False)
-    center._restore_portable()
-    assert not center.changed
+    backups = BackupsDialog(service, engine)
+    qtbot.addWidget(backups)
+    monkeypatch.setattr(
+        backups_dialog.QFileDialog, "getOpenFileName", lambda *a, **k: (str(target), "")
+    )
+    monkeypatch.setattr(backups_dialog, "confirm", lambda *a, **k: False)
+    backups._restore_portable()
+    assert not backups.changed
     assert database.connection.execute("SELECT COUNT(*) FROM list_words").fetchone()[0] == 0
 
 
@@ -116,7 +126,7 @@ def test_answers_and_attempts_export(setup, qtbot, tmp_path: Path, monkeypatch) 
     center._export_answers()
     assert target.exists() and "answers written" in center.message.text()
     center._export_attempts()
-    assert "attempts written" in center.message.text()
+    assert "questions written" in center.message.text()
 
 
 def test_words_narrow_by_whether_they_have_contexts(setup, database: Database) -> None:
@@ -166,3 +176,36 @@ def test_learning_data_covers_the_chosen_period(
     center._export_answers()
     today = date.fromisoformat(engine.clock.today())
     assert calls == [None, today - timedelta(days=6)]
+
+
+def test_backups_lists_the_daily_copies_and_goes_back_to_one(
+    setup, qtbot, monkeypatch, database: Database
+) -> None:
+    """Backups is its own page: a copy now, the copies, and restoring one."""
+    service, engine, words, _first = setup
+    backups = BackupsDialog(service, engine)
+    qtbot.addWidget(backups)
+    assert backups.copies.count() == 0
+    assert not backups.restore_button.isEnabled()
+    assert "None yet" in backups.latest.text()
+
+    backups._backup_now()
+    assert backups.copies.count() == 1
+    assert backups.restore_button.isEnabled()
+    assert "Backed up to" in backups.message.text()
+
+    engine.introduce([words["apple"]])
+    monkeypatch.setattr(backups_dialog, "confirm", lambda *a, **k: True)
+    backups._restore_backup()
+    assert backups.changed
+    assert "Restored the copy of" in backups.message.text()
+    assert database.connection.execute("SELECT COUNT(*) FROM srs_cards").fetchone()[0] == 0
+
+
+def test_the_export_page_holds_no_backups(setup, qtbot) -> None:
+    service, engine, _words, _first = setup
+    center = ExportCenter(service, engine)
+    qtbot.addWidget(center)
+    assert center.windowTitle() == "Export"
+    assert not hasattr(center, "_restore_portable")
+    assert not hasattr(center, "backup_choice")
