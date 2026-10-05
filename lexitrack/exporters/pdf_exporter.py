@@ -7,7 +7,10 @@ produced them, so a list built from a novel exports exactly as well as one
 built from Oxford — the fields it cannot fill simply show a dash.
 
 Without contexts (exporters/sheet.py) the sheet is a table: word, part of
-speech, level, length and definition, as chosen. With contexts it becomes a
+speech, level, length, status and definition, as chosen. The status is a tag
+in the app's meaning colours with its name written in it — green Known, amber
+Unknown, grey Not reviewed — so a black-and-white print still says it, and the
+caption counts each. With contexts it becomes a
 list of entries, one per word — the word and its details on a line, then its
 definition, then its contexts with the word in bold — because sentences do
 not fit in table cells. Exported in CEFR order, either form starts each level
@@ -63,10 +66,11 @@ from reportlab.platypus.flowables import HRFlowable
 
 from ..core.errors import ExportError
 from ..models.context import find_word
+from ..models.user_word_state import ReviewStatus
 from ..parsers.lexitrack_pdf import WORD_LIST_FILE, WORD_LIST_FORMAT
 from ..repositories.word_repository import StoredWord
 from .json_exporter import build_json_document
-from .sheet import ExportColumn, WordSheet
+from .sheet import STATUS_NAMES, ExportColumn, WordSheet, status_tally
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +81,13 @@ _INK = colors.HexColor("#1B1F24")
 _MUTED = colors.HexColor("#6B7280")
 _RULE = colors.HexColor("#D8DCE2")
 _BAND = colors.HexColor("#F4F6F8")
+
+#: A status tag's fill and ink: the app's soft and text tones (ui/theme/palette.py).
+_STATUS_TONES: dict[ReviewStatus, tuple[str, str]] = {
+    ReviewStatus.KNOWN: ("#E4F4EE", "#08644A"),
+    ReviewStatus.UNKNOWN: ("#FBF0E1", "#8A4E07"),
+    ReviewStatus.NOT_REVIEWED: ("#EDEFF3", "#5B6573"),
+}
 
 _MARGIN = 18 * mm
 #: The label column of an entry.
@@ -89,6 +100,7 @@ _TABLE_COLUMNS: tuple[tuple[ExportColumn | None, str, float], ...] = (
     (ExportColumn.PART_OF_SPEECH, "PART OF SPEECH", 0.20),
     (ExportColumn.CEFR, "CEFR", 0.10),
     (ExportColumn.LENGTH, "LENGTH", 0.09),
+    (ExportColumn.STATUS, "STATUS", 0.20),
     (ExportColumn.DEFINITION, "DEFINITION", 0.48),
 )
 
@@ -136,6 +148,8 @@ def _build(
     generated = datetime.now().strftime("%d %B %Y")
     footer_text = f"LexiTrack  ·  {title}  ·  {generated}"
     caption = subtitle or _default_subtitle(len(words))
+    if sheet.has(ExportColumn.STATUS) and words:
+        caption += " · " + status_tally(word.status for word in words)
     fonts = fonts_for(_texts(words, sheet, (title, caption, footer_text)))
 
     document = BaseDocTemplate(
@@ -345,6 +359,8 @@ def _word_table(
                 cells.append(_cell(word.cefr_level, styles))
             elif column is ExportColumn.LENGTH:
                 cells.append(_cell(str(word.length), styles))
+            elif column is ExportColumn.STATUS:
+                cells.append(Paragraph(_status_tag(word.status, styles), styles["cell"]))
             else:
                 cells.append(_definition_cell(word, styles))
         rows.append(cells)
@@ -389,6 +405,8 @@ def _entry(
     if meta:
         head += f"   <font name='{styles['cell'].fontName}' size=9 color='#6B7280'>" \
             f"{'  ·  '.join(meta)}</font>"
+    if sheet.has(ExportColumn.STATUS):
+        head += "   " + _status_tag(word.status, styles, size=8.5)
 
     rows: list[list[object]] = []
 
@@ -417,6 +435,17 @@ def _entry(
         )
     )
     return KeepTogether([Paragraph(head, styles["entry"]), fields])
+
+
+def _status_tag(status: ReviewStatus, styles: dict[str, ParagraphStyle], size: float = 8) -> str:
+    """The status as inline markup: its name, bold, on its soft tone."""
+    fill, ink = _STATUS_TONES[status]
+    # One line: "Not reviewed" never breaks inside its tag.
+    name = STATUS_NAMES[status].replace(" ", "&nbsp;")
+    return (
+        f"<font name='{styles['word'].fontName}' size={size} color='{ink}' "
+        f"backColor='{fill}'>&nbsp;{name}&nbsp;</font>"
+    )
 
 
 def _marked(text: str, word: str) -> str:

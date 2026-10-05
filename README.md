@@ -616,7 +616,11 @@ PDF in CEFR order starts each level with a heading. Press **Enter** to keep
 the defaults and choose where to save.
 
 **Columns** are ticked one by one: part of speech, CEFR level, length,
-definition and contexts. With contexts, a PDF lists each word as an entry —
+status, definition and contexts. **Status** (off by default) shows whether
+each word is Known, Unknown or Not reviewed: in a PDF as a small tag in the
+app's green, amber or grey with the status written in it, so it prints in
+black and white too, and the line under the title counts each. An import
+never changes a status. With contexts, a PDF lists each word as an entry —
 its definition, then its contexts with the word in bold; the summary says how
 many of the words have contexts. Nothing about scheduling is ever in a word
 export. A JSON word list always holds every field — length and contexts

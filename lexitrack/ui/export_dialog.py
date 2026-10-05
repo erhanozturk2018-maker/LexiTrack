@@ -17,7 +17,8 @@ format honours it: a JSON file exported "by CEFR level" imports back in that
 order.
 
 A PDF or CSV holds the columns ticked under COLUMNS: part of speech, CEFR
-level, length, definition and contexts. A JSON word list always holds every
+level, length, status (Known, Unknown or Not reviewed), definition and
+contexts. A JSON word list always holds every
 field, contexts included, so the columns do not apply to it.
 """
 

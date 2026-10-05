@@ -1577,3 +1577,24 @@ a list.
 **Reason.** The same choice as the phone's: an inverse box came out white
 on the dark theme, and an Undo with no sign of how long it lasts either
 lingers or vanishes before it is read.
+
+---
+
+## 95. A Status column in word exports
+
+**Decision.** A PDF or CSV can show each word's status — Known, Unknown or
+Not reviewed — as a column of its own, ticked under *Columns* and off by
+default. In a PDF table it is a tag in the app's meaning colours (green
+Known, amber Unknown, grey Not reviewed) with the status written in it; with
+contexts it follows the word's details on the entry's first line; and the
+line under the title counts each status. A CSV gets a *Status* column.
+
+The status is for reading only. The JSON word list — the file that imports
+back, and the one a PDF carries inside it — never holds it, and an import
+never sets one. The phone has the same column (mobile D-23).
+
+**Reason.** A printed list is often a check of where one stands: which of
+these do I know? Colour alone would not survive a black-and-white printer,
+so the name is always written. Keeping the status out of the word list means
+a list shared with someone else does not tell their LexiTrack what this
+learner knows.

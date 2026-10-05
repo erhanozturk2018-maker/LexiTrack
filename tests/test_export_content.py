@@ -1,7 +1,7 @@
 """Word exports with contexts (exporters/, services/export_service.py).
 
 A PDF or CSV shows the chosen columns — part of speech, level, length,
-definition, contexts; a JSON word list holds every field; nothing about
+status, definition, contexts; a JSON word list holds every field; nothing about
 scheduling is ever in a word export.
 """
 
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 
 from lexitrack.database.connection import Database
 from lexitrack.exporters import pdf_exporter
+from lexitrack.models.user_word_state import ReviewStatus
 from lexitrack.services.export_service import DEFAULT_COLUMNS, ExportColumn, ExportFormat
 from lexitrack.services.learning_service import LearningService
 from lexitrack.services.vocabulary_service import VocabularyService
@@ -74,7 +75,8 @@ def test_a_csv_holds_the_chosen_columns(words, tmp_path: Path) -> None:
     content = replace(service.export_content_for_list(list_id), columns=ALL)
     rows = _csv(service.export(content, tmp_path / "a.csv", ExportFormat.CSV))
     assert list(rows[0]) == [
-        "Word", "Part of Speech", "CEFR", "Length", "Definition", "Contexts", "Sources",
+        "Word", "Part of Speech", "CEFR", "Length", "Status", "Definition", "Contexts",
+        "Sources",
     ]
     first = next(row for row in rows if row["Word"] == "reluctant")
     assert first["Length"] == "9"
@@ -105,12 +107,43 @@ def test_no_scheduling_data_is_ever_in_a_word_export(words, tmp_path: Path) -> N
     engine = LearningService(service.database)
     engine.create_plan("Plan", list_ids=[list_id])
     engine.introduce()
-    content = replace(service.export_content_for_list(list_id), columns=ALL)
+    # Every column but the status, whose "Not reviewed" is a status, not a schedule.
+    columns = tuple(column for column in ALL if column is not ExportColumn.STATUS)
+    content = replace(service.export_content_for_list(list_id), columns=columns)
     header = " ".join(_csv(service.export(content, tmp_path / "a.csv", ExportFormat.CSV))[0])
     text = _pdf_text(service.export(content, tmp_path / "a.pdf", ExportFormat.PDF))
     for scheduling in ("due", "stability", "difficulty", "interval", "review", "state"):
         assert scheduling not in header.casefold()
         assert scheduling not in text.casefold()
+
+
+def test_the_status_column_says_known_unknown_or_not_reviewed(words, tmp_path: Path) -> None:
+    service, list_id, ids = words
+    service.set_status([ids["reluctant"]], ReviewStatus.KNOWN)
+    content = replace(
+        service.export_content_for_list(list_id),
+        columns=(ExportColumn.CEFR, ExportColumn.STATUS),
+    )
+    rows = _csv(service.export(content, tmp_path / "a.csv", ExportFormat.CSV))
+    assert list(rows[0]) == ["Word", "CEFR", "Status", "Sources"]
+    assert {row["Word"]: row["Status"] for row in rows} == {
+        "reluctant": "Known", "commute": "Not reviewed",
+    }
+
+    for columns in (content.columns, (*content.columns, ExportColumn.CONTEXTS)):
+        text = _pdf_text(service.export(replace(content, columns=columns),
+                                        tmp_path / "a.pdf", ExportFormat.PDF))
+        assert "Known" in text and "Not reviewed" in text
+        # The caption counts each status.
+        assert "1 known · 0 unknown · 1 not reviewed" in text
+
+    # Off by default; and the embedded word list never carries a status.
+    plain = _pdf_text(service.export(service.export_content_for_list(list_id),
+                                     tmp_path / "b.pdf", ExportFormat.PDF))
+    assert "Known" not in plain
+    data = json.loads(service.export(content, tmp_path / "a.json", ExportFormat.JSON)
+                      .read_text(encoding="utf-8"))
+    assert "status" not in json.dumps(data)
 
 
 def test_a_pdf_with_contexts_lists_each_word_as_an_entry(words, tmp_path: Path) -> None:

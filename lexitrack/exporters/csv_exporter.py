@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ..core.errors import ExportError
 from ..repositories.word_repository import StoredWord
-from .sheet import ExportColumn, WordSheet
+from .sheet import STATUS_NAMES, ExportColumn, WordSheet
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ _TITLES = {
     ExportColumn.PART_OF_SPEECH: "Part of Speech",
     ExportColumn.CEFR: "CEFR",
     ExportColumn.LENGTH: "Length",
+    ExportColumn.STATUS: "Status",
     ExportColumn.DEFINITION: "Definition",
     ExportColumn.CONTEXTS: "Contexts",
 }
@@ -74,6 +75,8 @@ def row(word: StoredWord, sheet: WordSheet) -> list[str]:
             cells.append(word.cefr_level or "")
         elif column is ExportColumn.LENGTH:
             cells.append(str(word.length))
+        elif column is ExportColumn.STATUS:
+            cells.append(STATUS_NAMES[word.status])
         elif column is ExportColumn.DEFINITION:
             cells.append(word.definition or "")
         elif column is ExportColumn.CONTEXTS:
