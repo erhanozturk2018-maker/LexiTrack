@@ -617,12 +617,26 @@ the defaults and choose where to save.
 
 **Columns** are ticked one by one: part of speech, CEFR level, length,
 status, definition and contexts. **Status** (off by default) shows whether
-each word is Known, Unknown or Not reviewed: in a PDF as a small tag in the
-app's green, amber or grey with the status written in it, so it prints in
-black and white too, and the line under the title counts each. An import
-never changes a status. With contexts, a PDF lists each word as an entry —
-its definition, then its contexts with the word in bold; the summary says how
-many of the words have contexts. Nothing about scheduling is ever in a word
+each word is Known, Unknown or Not reviewed: in a PDF as a dot in the app's
+green, amber or grey with the status written beside it, so it prints in
+black and white too, and the top of the sheet counts each. An import never
+changes a status.
+
+A PDF is set like a page of a dictionary, in Source Serif 4 (embedded, so it
+looks the same everywhere, and the same as the phone's): the list's name and
+how many words at the top, then a table with only hairlines between rows —
+the word in semibold, its type in grey italic, the definition in plain text.
+With contexts it lists each word as an entry instead — the word and its type,
+the definition, then its contexts in italic with the word in semibold — and
+an entry never splits across pages. In CEFR order each level has a heading,
+and the rows under it do not repeat the level.
+
+<p align="center">
+  <img src="docs/pdf/word-list-table.png" width="40%" alt="A PDF word list as a table">
+  &nbsp;
+  <img src="docs/pdf/word-list-entries.png" width="40%" alt="A PDF word list with contexts">
+</p>
+ Nothing about scheduling is ever in a word
 export. A JSON word list always holds every field — length and contexts
 included — and is the file that imports back. A PDF carries that same word
 list inside it, so a PDF LexiTrack exported — here or on the phone — imports

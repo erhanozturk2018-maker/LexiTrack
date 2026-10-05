@@ -9,8 +9,7 @@ exported on their own.
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -46,14 +45,6 @@ STATUS_NAMES: dict[ReviewStatus, str] = {
     ReviewStatus.UNKNOWN: "Unknown",
     ReviewStatus.NOT_REVIEWED: "Not reviewed",
 }
-
-
-def status_tally(statuses: Iterable[ReviewStatus]) -> str:
-    """``12 known · 30 unknown · 8 not reviewed``."""
-    counts = Counter(statuses)
-    return " · ".join(
-        f"{counts[status]:,} {name.lower()}" for status, name in STATUS_NAMES.items()
-    )
 
 
 #: Every column, in the order they are shown.

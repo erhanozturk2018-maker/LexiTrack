@@ -29,7 +29,7 @@ from pathlib import Path
 from ..core.errors import ExportError
 from ..exporters.csv_exporter import export_words_csv
 from ..exporters.json_exporter import build_json_document, export_words_json
-from ..exporters.pdf_exporter import export_words_pdf
+from ..exporters.pdf_exporter import export_words_pdf, long_date
 from ..exporters.sheet import ALL_COLUMNS, DEFAULT_COLUMNS, ExportColumn, WordSheet
 from ..models.language import UNDETERMINED
 from ..models.user_word_state import ReviewStatus
@@ -218,8 +218,7 @@ class ExportService:
 
 def _subtitle(count: int, description: str) -> str:
     noun = "word" if count == 1 else "words"
-    stamp = datetime.now().strftime("%d %B %Y")
-    return f"{count:,} {noun} {description} · exported {stamp}"
+    return f"{count:,} {noun} {description}  ·  {long_date(datetime.now())}"
 
 
 def _common_language(words: Sequence[StoredWord]) -> str:

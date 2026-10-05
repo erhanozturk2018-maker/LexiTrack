@@ -1598,3 +1598,38 @@ these do I know? Colour alone would not survive a black-and-white printer,
 so the name is always written. Keeping the status out of the word list means
 a list shared with someone else does not tell their LexiTrack what this
 learner knows.
+
+---
+
+## 96. A PDF reads like a dictionary page
+
+**Decision.** Word PDFs are set in **Source Serif 4** (regular, semibold,
+italic, semibold italic; SIL Open Font License), shipped in
+`lexitrack/exporters/fonts` and embedded, in the same layout as the phone's
+(mobile D-29):
+
+- a quiet top: *LexiTrack · Word list* in small spaced capitals, the list's
+  name large, the caption (how many words, which, and the date), and, with
+  the Status column, how many are Known, Unknown and Not reviewed; a rule
+  under it;
+- a table with no vertical lines and no shading: the word in semibold, its
+  type in grey italic, the definition in plain text, a hairline between
+  rows, the header in small grey capitals, repeated on every page;
+- with contexts, dictionary entries: the word and its type on a line, the
+  status at the right, the definition, then the contexts in italic with the
+  word in semibold; an entry never splits across pages, and a level heading
+  never ends one;
+- a status is a coloured dot and its name, not a filled tag;
+- under a level heading the rows do not repeat the level;
+- the footer: the list's name and *page / pages*.
+
+Characters Source Serif lacks (it has Latin, Greek and Cyrillic) still send
+the sheet to a system font that has them, as before (§88).
+
+**Reason.** The sheets looked like a spreadsheet, and the phone's did not
+look like the desk's. A serif reads as a reference page, which a word list
+is. Times New Roman was asked for, for its formal look; it cannot be shipped
+with the app (its licence) and it was made for narrow newspaper columns, so
+it is dense at small sizes. Source Serif keeps the formal look, is open, and
+was drawn for reading on paper and on screen. It replaces Bitstream Vera,
+which had no Cyrillic.

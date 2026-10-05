@@ -134,8 +134,8 @@ def test_the_status_column_says_known_unknown_or_not_reviewed(words, tmp_path: P
         text = _pdf_text(service.export(replace(content, columns=columns),
                                         tmp_path / "a.pdf", ExportFormat.PDF))
         assert "Known" in text and "Not reviewed" in text
-        # The caption counts each status.
-        assert "1 known · 0 unknown · 1 not reviewed" in text
+        # The top of the sheet counts each status.
+        assert "• Known 1      • Unknown 0      • Not reviewed 1" in text
 
     # Off by default; and the embedded word list never carries a status.
     plain = _pdf_text(service.export(service.export_content_for_list(list_id),
@@ -151,24 +151,28 @@ def test_a_pdf_with_contexts_lists_each_word_as_an_entry(words, tmp_path: Path) 
     content = replace(service.export_content_for_list(list_id), columns=ALL)
     target = service.export(content, tmp_path / "a.pdf", ExportFormat.PDF)
     text = _pdf_text(target)
-    for expected in ("DEFINITION", "CONTEXTS", "unwilling and hesitant",
-                     "A reluctant witness spoke.", "9 letters"):
+    for expected in ("unwilling and hesitant", "A reluctant witness spoke.", "9 letters"):
         assert expected in text, expected
-    # The word in a context is set in bold.
+    assert "DEFINITION" not in text, "entries, not a table"
+    # The word in a context is set in semibold.
     with pymupdf.open(target) as document:
         spans = [
             span for block in document[0].get_text("dict")["blocks"]
             for line in block.get("lines", []) for span in line["spans"]
         ]
-    assert any(span["text"] == "reluctant" and "Bold" in span["font"] for span in spans)
+    assert any(
+        span["text"] == "reluctant" and "SemiboldIta" in span["font"] for span in spans
+    )
 
 
 def test_the_pdf_font_covers_the_text(caplog, monkeypatch) -> None:
-    assert pdf_exporter.fonts_for(["ş ğ ı İ ö ü ç ß ñ é"]).regular == "LexiVera"
+    serif = "LexiSourceSerif4"
+    assert pdf_exporter.fonts_for(["ş ğ ı İ ö ü ç ß ñ é"]).regular == serif
+    assert pdf_exporter.fonts_for(["неохотный", "απρόθυμος"]).regular == serif
     monkeypatch.setattr(pdf_exporter, "system_families", lambda: [])
     with caplog.at_level(logging.WARNING, logger=pdf_exporter.__name__):
-        fonts = pdf_exporter.fonts_for(["неохотный"])
-    assert fonts.regular == "LexiVera", "the export is still written"
+        fonts = pdf_exporter.fonts_for(["متردد"])
+    assert fonts.regular == serif, "the export is still written"
     assert "No installed font" in caplog.text
 
 
@@ -176,8 +180,8 @@ def test_the_pdf_font_covers_the_text(caplog, monkeypatch) -> None:
     not all(f.exists() for f in dict(pdf_exporter.system_families()).get("Arial", ())),
     reason="Arial is not installed",
 )
-def test_cyrillic_is_set_in_a_system_font_that_has_it() -> None:
-    assert pdf_exporter.fonts_for(["неохотный"]).regular == "LexiArial"
+def test_arabic_is_set_in_a_system_font_that_has_it() -> None:
+    assert pdf_exporter.fonts_for(["متردد"]).regular == "LexiArial"
 
 
 def test_the_dialog_offers_every_column(qapp, qtbot, words) -> None:
@@ -219,7 +223,9 @@ def test_the_dialog_remembers_the_columns(
     first._column_boxes[ExportColumn.PART_OF_SPEECH].setChecked(False)
     first._column_boxes[ExportColumn.CONTEXTS].setChecked(True)
     first._export()
-    assert "CONTEXTS" in _pdf_text(tmp_path / "out.pdf")
+    # Contexts make the sheet a list of entries, without the table's header.
+    text = _pdf_text(tmp_path / "out.pdf")
+    assert "She was reluctant to leave." in text and "DEFINITION" not in text
 
     second = ExportDialog(service, [scope])
     qtbot.addWidget(second)

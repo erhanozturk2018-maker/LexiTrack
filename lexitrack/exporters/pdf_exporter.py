@@ -1,26 +1,31 @@
 """PDF export of vocabulary.
 
-The output is LexiTrack's own study sheet, not an imitation of the Oxford
-layout: a titled, paginated document designed to be printed and worked
-through. It takes ``StoredWord`` objects and knows nothing about which parser
-produced them, so a list built from a novel exports exactly as well as one
-built from Oxford — the fields it cannot fill simply show a dash.
+The output is LexiTrack's own study sheet, set like a page of a dictionary: a
+quiet top (*LexiTrack · Word list* in small spaced capitals, the list's name,
+how many words and when, and — with the Status column — how many are Known,
+Unknown and Not reviewed), then the words. It takes ``StoredWord`` objects
+and knows nothing about which parser produced them, so a list built from a
+novel exports exactly as well as one built from Oxford — the fields it
+cannot fill simply show a dash.
 
 Without contexts (exporters/sheet.py) the sheet is a table: word, part of
-speech, level, length, status and definition, as chosen. The status is a tag
-in the app's meaning colours with its name written in it — green Known, amber
-Unknown, grey Not reviewed — so a black-and-white print still says it, and the
-caption counts each. With contexts it becomes a
-list of entries, one per word — the word and its details on a line, then its
-definition, then its contexts with the word in bold — because sentences do
-not fit in table cells. Exported in CEFR order, either form starts each level
-with a heading, so a printed list reads A1, then A2, and so on.
+speech, level, length, status and definition, as chosen. It has no vertical
+lines and no shading — a rule under the header (repeated on every page) and a
+hairline between rows are enough to follow a line across the page. With
+contexts it becomes a list of entries, one per word: the word and its type
+on a line with the status at the right, then the definition, then the
+contexts in italic with the word in semibold. An entry never splits across
+pages. Exported in CEFR order, either form starts each level with a heading,
+and the rows under it do not repeat the level.
 
-The text is set in Bitstream Vera, which ships with ReportLab and is embedded
-in the file, so a sheet looks the same everywhere and covers the Latin
-alphabets (Turkish, German, Spanish, French…). A sheet holding characters Vera
-lacks — Cyrillic, Greek — is set in a system font that has them, where one is
-installed.
+A status is a coloured dot and its name — green Known, amber Unknown, grey
+Not reviewed — so a black-and-white print still says it.
+
+The text is set in Source Serif 4 (SIL Open Font License), shipped in
+``exporters/fonts`` and embedded in the file, so a sheet looks the same
+everywhere — the phone's PDFs use the same font and layout — and covers the
+Latin, Greek and Cyrillic alphabets. A sheet holding characters it lacks is
+set in a system font that has them, where one is installed.
 
 Every PDF also carries its words as an embedded file, ``lexitrack-words.json``
 in the JSON word-list format, the same file the phone embeds. Importing the
@@ -34,26 +39,28 @@ import io
 import json
 import logging
 import os
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import cache
 from pathlib import Path
 from typing import Any
 
 import pymupdf
-import reportlab
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.fonts import addMapping
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont, TTFontFile
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
     BaseDocTemplate,
     CondPageBreak,
+    Flowable,
     Frame,
     KeepTogether,
     PageTemplate,
@@ -70,38 +77,40 @@ from ..models.user_word_state import ReviewStatus
 from ..parsers.lexitrack_pdf import WORD_LIST_FILE, WORD_LIST_FORMAT
 from ..repositories.word_repository import StoredWord
 from .json_exporter import build_json_document
-from .sheet import STATUS_NAMES, ExportColumn, WordSheet, status_tally
+from .sheet import STATUS_NAMES, ExportColumn, WordSheet
 
 log = logging.getLogger(__name__)
 
 #: Shown where a source provided no value for a column.
 PLACEHOLDER = "—"
 
-_INK = colors.HexColor("#1B1F24")
-_MUTED = colors.HexColor("#6B7280")
-_RULE = colors.HexColor("#D8DCE2")
-_BAND = colors.HexColor("#F4F6F8")
+# The sheet's colours: near-black ink, two greys, a hairline, and the app's
+# meaning colours for Known (green) and Unknown (amber), darkened for paper.
+_INK = colors.HexColor("#1A1D21")
+_MUTED = colors.HexColor("#6B717A")
+_FAINT = colors.HexColor("#9AA0A8")
+_RULE = colors.HexColor("#E2E4E8")
 
-#: A status tag's fill and ink: the app's soft and text tones (ui/theme/palette.py).
+#: A status's dot and the colour of its name.
 _STATUS_TONES: dict[ReviewStatus, tuple[str, str]] = {
-    ReviewStatus.KNOWN: ("#E4F4EE", "#08644A"),
-    ReviewStatus.UNKNOWN: ("#FBF0E1", "#8A4E07"),
-    ReviewStatus.NOT_REVIEWED: ("#EDEFF3", "#5B6573"),
+    ReviewStatus.KNOWN: ("#0E7A57", "#0E7A57"),
+    ReviewStatus.UNKNOWN: ("#A65D08", "#A65D08"),
+    ReviewStatus.NOT_REVIEWED: ("#9AA0A8", "#6B717A"),
 }
 
-_MARGIN = 18 * mm
-#: The label column of an entry.
-_LABEL_WIDTH = 30 * mm
+_SIDE = 56
+_TOP = 58
+_BOTTOM = 60
 
 #: The table's columns: what each shows, its heading, and its share of the width.
 #: The definition takes the slack because it is the only free-text column.
 _TABLE_COLUMNS: tuple[tuple[ExportColumn | None, str, float], ...] = (
-    (None, "WORD", 0.22),
-    (ExportColumn.PART_OF_SPEECH, "PART OF SPEECH", 0.20),
-    (ExportColumn.CEFR, "CEFR", 0.10),
-    (ExportColumn.LENGTH, "LENGTH", 0.09),
-    (ExportColumn.STATUS, "STATUS", 0.20),
-    (ExportColumn.DEFINITION, "DEFINITION", 0.48),
+    (None, "Word", 1.9),
+    (ExportColumn.PART_OF_SPEECH, "Type", 1.5),
+    (ExportColumn.CEFR, "CEFR", 0.8),
+    (ExportColumn.LENGTH, "Length", 0.9),
+    (ExportColumn.STATUS, "Status", 1.6),
+    (ExportColumn.DEFINITION, "Definition", 4.2),
 )
 
 
@@ -145,20 +154,16 @@ def _build(
     group_by_level: bool,
     sheet: WordSheet,
 ) -> None:
-    generated = datetime.now().strftime("%d %B %Y")
-    footer_text = f"LexiTrack  ·  {title}  ·  {generated}"
     caption = subtitle or _default_subtitle(len(words))
-    if sheet.has(ExportColumn.STATUS) and words:
-        caption += " · " + status_tally(word.status for word in words)
-    fonts = fonts_for(_texts(words, sheet, (title, caption, footer_text)))
-
+    footer_text = f"LexiTrack  ·  {title}"
+    fonts = fonts_for(_texts(words, sheet, (title, caption)))
     document = BaseDocTemplate(
         target,
         pagesize=A4,
-        leftMargin=_MARGIN,
-        rightMargin=_MARGIN,
-        topMargin=_MARGIN,
-        bottomMargin=_MARGIN + 6 * mm,
+        leftMargin=_SIDE,
+        rightMargin=_SIDE,
+        topMargin=_TOP,
+        bottomMargin=_BOTTOM,
         title=f"LexiTrack — {title}",
         author="LexiTrack",
         subject="Vocabulary export",
@@ -169,34 +174,56 @@ def _build(
         document.width,
         document.height,
         id="body",
+        leftPadding=0,
+        rightPadding=0,
+        topPadding=0,
+        bottomPadding=0,
     )
-    document.addPageTemplates(
-        PageTemplate(id="page", frames=[frame], onPage=_make_footer(footer_text, fonts))
-    )
+    document.addPageTemplates(PageTemplate(id="page", frames=[frame]))
 
     styles = _styles(fonts)
-    story: list[object] = [Paragraph(_escape(title), styles["title"])]
-    story.append(Paragraph(_escape(caption), styles["subtitle"]))
-    story.append(Spacer(1, 8 * mm))
+    story: list[object] = [
+        _Caps("LexiTrack  ·  Word list", fonts.bold, _FAINT),
+        Spacer(1, 8),
+        Paragraph(_escape(title), styles["title"]),
+        Spacer(1, 4),
+        # Paragraphs fold runs of spaces; the caption keeps its wide separators.
+        Paragraph(_escape(caption).replace("  ", "&nbsp;&nbsp;"), styles["subtitle"]),
+    ]
+    if sheet.has(ExportColumn.STATUS) and words:
+        story += [Spacer(1, 3), Paragraph(_tally(words), styles["subtitle"])]
+    story += [Spacer(1, 14), HRFlowable(width="100%", thickness=0.8, color=_INK, spaceAfter=10)]
 
     if words and group_by_level:
+        # Under a level heading the rows do not repeat the level.
+        levelless = tuple(c for c in sheet.columns if c is not ExportColumn.CEFR)
+        shown = replace(sheet, columns=levelless)
         for index, (level, run) in enumerate(_level_runs(words)):
-            # Not keepWithNext: a level's table can be pages long, and keeping
-            # the heading with all of it would leave a blank first page.
-            story.append(CondPageBreak(40 * mm))
-            if index:
-                story.append(Spacer(1, 6 * mm))
             count = len(run)
-            heading = f"{level or 'No level'}  <font size=10 color='#6B7280'>" \
-                f"{count:,} {'word' if count == 1 else 'words'}</font>"
-            story.append(Paragraph(heading, styles["level"]))
-            story.extend(_body(run, sheet, styles, document.width))
+            heading = Paragraph(
+                f"{_escape(level or 'No level')}"
+                f"<font name='{fonts.regular}' size=9.5 color='#9AA0A8'>"
+                f"&nbsp;&nbsp;&nbsp;{count:,} {'word' if count == 1 else 'words'}</font>",
+                styles["level"] if index else styles["first_level"],
+            )
+            body = _body(run, shown, styles, document.width, fonts)
+            if sheet.has(ExportColumn.CONTEXTS):
+                # A heading never ends a page: it keeps its first entry with it.
+                first = _entry_parts(run[0], shown, styles, document.width)
+                story.append(KeepTogether([heading, *first]))
+                story.extend(body[1:])
+            else:
+                # Not keepWithNext: a level's table can be pages long, and
+                # keeping the heading with all of it would leave a blank page.
+                story.append(CondPageBreak(40 * mm))
+                story.append(heading)
+                story.extend(body)
     elif words:
-        story.extend(_body(words, sheet, styles, document.width))
+        story.extend(_body(words, sheet, styles, document.width, fonts))
     else:
         story.append(Paragraph("There are no words to export.", styles["empty"]))
 
-    document.build(story)
+    document.build(story, canvasmaker=_numbered_canvas(footer_text, fonts))
 
 
 def _with_word_list(pdf: bytes, word_list: Mapping[str, Any]) -> bytes:
@@ -214,22 +241,31 @@ def _with_word_list(pdf: bytes, word_list: Mapping[str, Any]) -> bytes:
 
 
 def _body(
-    words: Sequence[StoredWord], sheet: WordSheet, styles: dict[str, ParagraphStyle], width: float
+    words: Sequence[StoredWord],
+    sheet: WordSheet,
+    styles: dict[str, ParagraphStyle],
+    width: float,
+    fonts: Fonts,
 ) -> list[object]:
     if not sheet.has(ExportColumn.CONTEXTS):
-        return [_word_table(words, sheet, styles, width)]
-    flowables: list[object] = []
-    for index, word in enumerate(words):
-        if index:
-            flowables.append(HRFlowable(width="100%", thickness=0.25, color=_RULE,
-                                        spaceBefore=5, spaceAfter=6))
-        flowables.append(_entry(word, sheet, styles, width))
-    return flowables
+        return [_word_table(words, sheet, styles, width, fonts)]
+    return [_entry(word, sheet, styles, width) for word in words]
 
 
 def _default_subtitle(count: int) -> str:
     word = "word" if count == 1 else "words"
-    return f"{count:,} {word} · generated {datetime.now().strftime('%d %B %Y')}"
+    return f"{count:,} {word}  ·  {long_date(datetime.now())}"
+
+
+def long_date(moment: datetime) -> str:
+    """``5 October 2026``: the sheet is in English, whatever the system's locale."""
+    return f"{moment.day} {_MONTHS[moment.month - 1]} {moment.year}"
+
+
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December",
+)
 
 
 # -- fonts ---------------------------------------------------------------------
@@ -247,13 +283,16 @@ _STYLES = ("", "-Bold", "-Italic", "-BoldItalic")
 
 
 def _bundled() -> tuple[str, tuple[Path, ...]]:
-    folder = Path(reportlab.__file__).parent / "fonts"
-    return "Vera", tuple(folder / name for name in ("Vera.ttf", "VeraBd.ttf", "VeraIt.ttf",
-                                                    "VeraBI.ttf"))
+    """Source Serif 4, shipped with LexiTrack; its semibold serves as bold."""
+    folder = Path(__file__).parent / "fonts"
+    return "SourceSerif4", tuple(
+        folder / f"SourceSerif4-{face}.ttf"
+        for face in ("Regular", "Semibold", "Italic", "SemiboldItalic")
+    )
 
 
 def system_families() -> list[tuple[str, tuple[Path, ...]]]:
-    """Fonts with wider coverage than Vera, where the system has them."""
+    """Fonts that may have what Source Serif lacks, where the system has them."""
     windows = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
     mac = Path("/System/Library/Fonts/Supplemental")
     families = [
@@ -277,7 +316,7 @@ def _coverage(path: Path) -> frozenset[int]:
 
 
 def fonts_for(texts: Iterable[str]) -> Fonts:
-    """Vera when it has every character of ``texts``, else a system font that does."""
+    """Source Serif when it has every character of ``texts``, else a system font that does."""
     needed = {ord(char) for text in texts for char in text if not char.isspace()}
     bundled = _bundled()
     for name, files in (bundled, *system_families()):
@@ -306,7 +345,7 @@ def _texts(
 ) -> Iterable[str]:
     """Every string the sheet will set, for choosing a font that has them all."""
     yield from extra
-    yield PLACEHOLDER
+    yield PLACEHOLDER + "•·"
     for word in words:
         yield from (word.word, word.part_of_speech or "", word.cefr_level or "",
                     word.definition or "")
@@ -316,25 +355,51 @@ def _texts(
 # -- layout --------------------------------------------------------------------
 
 
+class _Caps(Flowable):
+    """A label in small spaced capitals: the quiet structure of the page."""
+
+    def __init__(self, text: str, font: str, color, size: float = 7.5) -> None:
+        super().__init__()
+        self.text = text.upper()
+        self.font = font
+        self.color = color
+        self.size = size
+
+    def wrap(self, available_width: float, available_height: float) -> tuple[float, float]:
+        return available_width, self.size * 1.35
+
+    def draw(self) -> None:
+        text = self.canv.beginText(0, self.size * 0.3)
+        text.setFont(self.font, self.size)
+        text.setCharSpace(1.0)
+        text.setFillColor(self.color)
+        text.textOut(self.text)
+        self.canv.drawText(text)
+
+
 def _styles(fonts: Fonts) -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()["BodyText"]
 
-    def style(name: str, font: str, size: float, leading: float, color, **extra):
+    def style(name: str, font: str, size: float, leading: float, color=_INK, **extra):
+        spacing = {"spaceBefore": 0, "spaceAfter": 0, **extra}
         return ParagraphStyle(name, parent=base, fontName=font, fontSize=size,
-                              leading=leading, textColor=color, **extra)
+                              leading=leading, textColor=color, **spacing)
 
     return {
-        "title": style("LexiTitle", fonts.bold, 20, 24, _INK, spaceAfter=2),
-        "subtitle": style("LexiSubtitle", fonts.regular, 9.5, 13, _MUTED),
-        "header": style("LexiHeader", fonts.bold, 8.5, 11, _MUTED, alignment=TA_LEFT),
-        "word": style("LexiWord", fonts.bold, 10, 13, _INK),
-        "entry": style("LexiEntry", fonts.bold, 12, 16, _INK, spaceAfter=3),
-        "label": style("LexiLabel", fonts.bold, 7, 12, _MUTED),
-        "cell": style("LexiCell", fonts.regular, 9, 12, _INK),
-        "muted": style("LexiMuted", fonts.regular, 9, 12, _MUTED),
-        "level": style("LexiLevel", fonts.bold, 15, 19, _INK, spaceAfter=4),
-        "note": style("LexiNote", fonts.italic, 8.5, 11, _MUTED),
-        "empty": style("LexiEmpty", fonts.italic, 10, 13, _MUTED),
+        "title": style("LexiTitle", fonts.bold, 26, 31),
+        "subtitle": style("LexiSubtitle", fonts.regular, 10, 14, _MUTED),
+        "word": style("LexiWord", fonts.bold, 11, 14),
+        "type": style("LexiType", fonts.italic, 10, 14, _MUTED),
+        "quiet": style("LexiQuiet", fonts.regular, 9.5, 14, _MUTED),
+        "missing": style("LexiMissing", fonts.regular, 10, 14, _FAINT),
+        "status": style("LexiStatus", fonts.regular, 9.5, 14),
+        "status_right": style("LexiStatusRight", fonts.regular, 9.5, 14, alignment=TA_RIGHT),
+        "definition": style("LexiDefinition", fonts.regular, 10.5, 14),
+        "entry": style("LexiEntry", fonts.bold, 14, 18),
+        "context": style("LexiContext", fonts.italic, 10, 13.5, _MUTED, leftIndent=12),
+        "first_level": style("LexiFirstLevel", fonts.bold, 15, 19, spaceAfter=8),
+        "level": style("LexiLevel", fonts.bold, 15, 19, spaceBefore=16, spaceAfter=8),
+        "empty": style("LexiEmpty", fonts.italic, 10.5, 14, _MUTED),
     }
 
 
@@ -343,10 +408,10 @@ def _word_table(
     sheet: WordSheet,
     styles: dict[str, ParagraphStyle],
     width: float,
+    fonts: Fonts,
 ) -> Table:
     shown = [spec for spec in _TABLE_COLUMNS if spec[0] is None or sheet.has(spec[0])]
-    header = [Paragraph(name, styles["header"]) for _column, name, _share in shown]
-    rows: list[list[object]] = [header]
+    rows: list[list[object]] = [[_Caps(name, fonts.bold, _MUTED) for _c, name, _s in shown]]
 
     for word in words:
         cells: list[object] = []
@@ -354,15 +419,15 @@ def _word_table(
             if column is None:
                 cells.append(Paragraph(_escape(word.word), styles["word"]))
             elif column is ExportColumn.PART_OF_SPEECH:
-                cells.append(_cell(word.part_of_speech, styles))
+                cells.append(_cell(word.part_of_speech, styles["type"], styles))
             elif column is ExportColumn.CEFR:
-                cells.append(_cell(word.cefr_level, styles))
+                cells.append(_cell(word.cefr_level, styles["quiet"], styles))
             elif column is ExportColumn.LENGTH:
-                cells.append(_cell(str(word.length), styles))
+                cells.append(_cell(str(word.length), styles["quiet"], styles))
             elif column is ExportColumn.STATUS:
-                cells.append(Paragraph(_status_tag(word.status, styles), styles["cell"]))
+                cells.append(Paragraph(_status_mark(word.status), styles["status"]))
             else:
-                cells.append(_definition_cell(word, styles))
+                cells.append(_cell(word.definition, styles["definition"], styles))
         rows.append(cells)
 
     total = sum(share for _column, _name, share in shown)
@@ -372,16 +437,15 @@ def _word_table(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                # A rule under the header, hairlines between rows: enough
-                # structure to follow a line across the page, no more.
-                ("LINEBELOW", (0, 0), (-1, 0), 0.9, _INK),
-                ("LINEBELOW", (0, 1), (-1, -2), 0.25, _RULE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("BOTTOMPADDING", (0, 0), (-1, 0), 7),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _BAND]),
+                # No vertical lines, no shading: a rule under the header and a
+                # hairline between rows are enough to follow a line across.
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, _MUTED),
+                ("LINEBELOW", (0, 1), (-1, -2), 0.4, _RULE),
             ]
         )
     )
@@ -391,71 +455,82 @@ def _word_table(
 def _entry(
     word: StoredWord, sheet: WordSheet, styles: dict[str, ParagraphStyle], width: float
 ) -> object:
-    """One word as an entry: its line, then each chosen field that has a value."""
-    meta = [
-        _escape(value)
+    """One word as a dictionary entry; never split across pages."""
+    return KeepTogether(_entry_parts(word, sheet, styles, width))
+
+
+def _entry_parts(
+    word: StoredWord, sheet: WordSheet, styles: dict[str, ParagraphStyle], width: float
+) -> list[object]:
+    """An entry's lines: the word, its type and status, definition, contexts."""
+    head = _escape(word.word)
+    if sheet.has(ExportColumn.PART_OF_SPEECH) and word.part_of_speech:
+        head += (f"&nbsp;&nbsp;&nbsp;<font name='{styles['type'].fontName}' size=10.5 "
+                 f"color='#6B717A'>{_escape(word.part_of_speech)}</font>")
+    details = [
+        value
         for column, value in (
-            (ExportColumn.PART_OF_SPEECH, word.part_of_speech),
             (ExportColumn.CEFR, word.cefr_level),
             (ExportColumn.LENGTH, f"{word.length} letters"),
         )
         if sheet.has(column) and value
     ]
-    head = _escape(word.word)
-    if meta:
-        head += f"   <font name='{styles['cell'].fontName}' size=9 color='#6B7280'>" \
-            f"{'  ·  '.join(meta)}</font>"
+    if details:
+        head += (f"&nbsp;&nbsp;&nbsp;<font name='{styles['quiet'].fontName}' size=9.5 "
+                 f"color='#9AA0A8'>{_escape(' · '.join(details))}</font>")
+
+    line: object = Paragraph(head, styles["entry"])
     if sheet.has(ExportColumn.STATUS):
-        head += "   " + _status_tag(word.status, styles, size=8.5)
-
-    rows: list[list[object]] = []
-
-    def add(label: str, value: object) -> None:
-        rows.append([Paragraph(label, styles["label"]), value])
-
-    if sheet.has(ExportColumn.DEFINITION) and word.definition:
-        add("DEFINITION", _definition_cell(word, styles))
-    contexts = sheet.contexts_for(word.id)
-    if contexts:
-        add("CONTEXTS", [Paragraph(_marked(text, word.word), styles["cell"]) for text in contexts])
-    if not rows:
-        rows.append(["", Paragraph(PLACEHOLDER, styles["muted"])])
-
-    fields = Table(rows, colWidths=[_LABEL_WIDTH, width - _LABEL_WIDTH])
-    fields.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                # The same inset as the table's cells: labels line up with the word.
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-            ]
+        line = Table(
+            [[line, Paragraph(_status_mark(word.status), styles["status_right"])]],
+            colWidths=[width * 0.75, width * 0.25],
         )
-    )
-    return KeepTogether([Paragraph(head, styles["entry"]), fields])
+        line.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+
+    parts: list[object] = [line, Spacer(1, 2)]
+    if sheet.has(ExportColumn.DEFINITION) and word.definition:
+        parts.append(Paragraph(_escape(word.definition), styles["definition"]))
+    for text in sheet.contexts_for(word.id):
+        parts.append(Paragraph(_marked(text, word.word), styles["context"]))
+    parts.append(Spacer(1, 11))
+    return parts
 
 
-def _status_tag(status: ReviewStatus, styles: dict[str, ParagraphStyle], size: float = 8) -> str:
-    """The status as inline markup: its name, bold, on its soft tone."""
-    fill, ink = _STATUS_TONES[status]
-    # One line: "Not reviewed" never breaks inside its tag.
+def _status_mark(status: ReviewStatus) -> str:
+    """A dot in the status's colour, then its name: never colour alone."""
+    dot, ink = _STATUS_TONES[status]
     name = STATUS_NAMES[status].replace(" ", "&nbsp;")
-    return (
-        f"<font name='{styles['word'].fontName}' size={size} color='{ink}' "
-        f"backColor='{fill}'>&nbsp;{name}&nbsp;</font>"
+    return f"<font color='{dot}'>•</font>&nbsp;<font color='{ink}'>{name}</font>"
+
+
+def _tally(words: Sequence[StoredWord]) -> str:
+    """``• Known 12   • Unknown 30   • Not reviewed 8``."""
+    counts = Counter(word.status for word in words)
+    return ("&nbsp;" * 6).join(
+        f"{_status_mark(status)} {counts[status]:,}"
+        for status in (ReviewStatus.KNOWN, ReviewStatus.UNKNOWN, ReviewStatus.NOT_REVIEWED)
     )
 
 
 def _marked(text: str, word: str) -> str:
-    """A context with the word in bold, where it can be found."""
+    """A context with the word in semibold italic and ink, where it can be found."""
     span = find_word(text, word)
     if span is None:
         return _escape(text)
     start, end = span
     return (
-        _escape(text[:start]) + "<b>" + _escape(text[start:end]) + "</b>" + _escape(text[end:])
+        _escape(text[:start]) + "<b><font color='#1A1D21'>" + _escape(text[start:end])
+        + "</font></b>" + _escape(text[end:])
     )
 
 
@@ -470,15 +545,10 @@ def _level_runs(words: Sequence[StoredWord]) -> list[tuple[str | None, list[Stor
     return runs
 
 
-def _definition_cell(word: StoredWord, styles: dict[str, ParagraphStyle]) -> object:
-    """The definition; a dash when there is none."""
-    return _cell(word.definition, styles)
-
-
-def _cell(value: str | None, styles: dict[str, ParagraphStyle]) -> Paragraph:
+def _cell(value: str | None, style: ParagraphStyle, styles: dict[str, ParagraphStyle]) -> Paragraph:
     if not value:
-        return Paragraph(PLACEHOLDER, styles["muted"])
-    return Paragraph(_escape(value), styles["cell"])
+        return Paragraph(PLACEHOLDER, styles["missing"])
+    return Paragraph(_escape(value), style)
 
 
 def _escape(text: str) -> str:
@@ -486,26 +556,35 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _make_footer(text: str, fonts: Fonts):
-    """Return an ``onPage`` handler drawing the footer and page number."""
+def _numbered_canvas(text: str, fonts: Fonts):
+    """A canvas that ends each page with the footer: ``text`` and *page / pages*."""
 
-    def draw(canvas, document) -> None:
-        canvas.saveState()
-        canvas.setFont(fonts.regular, 8)
-        canvas.setFillColor(_MUTED)
-        baseline = _MARGIN - 2 * mm
-        canvas.drawString(_MARGIN, baseline, text)
-        canvas.drawRightString(
-            document.pagesize[0] - _MARGIN, baseline, str(canvas.getPageNumber())
-        )
-        canvas.setStrokeColor(_RULE)
-        canvas.setLineWidth(0.4)
-        canvas.line(
-            _MARGIN,
-            baseline + 4 * mm,
-            document.pagesize[0] - _MARGIN,
-            baseline + 4 * mm,
-        )
-        canvas.restoreState()
+    class NumberedCanvas(Canvas):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._pages: list[dict] = []
 
-    return draw
+        def showPage(self) -> None:  # noqa: N802 - ReportLab's name
+            self._pages.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self) -> None:
+            total = len(self._pages)
+            for page in self._pages:
+                self.__dict__.update(page)
+                self._footer(total)
+                super().showPage()
+            super().save()
+
+        def _footer(self, total: int) -> None:
+            self.saveState()
+            self.setFont(fonts.regular, 8)
+            self.setFillColor(_FAINT)
+            baseline = 34
+            self.drawString(_SIDE, baseline, text)
+            self.drawRightString(
+                self._pagesize[0] - _SIDE, baseline, f"{self._pageNumber} / {total}"
+            )
+            self.restoreState()
+
+    return NumberedCanvas
