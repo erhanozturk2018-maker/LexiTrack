@@ -233,3 +233,8 @@ def test_the_dialog_remembers_the_columns(
         ExportColumn.CEFR, ExportColumn.DEFINITION, ExportColumn.CONTEXTS,
     )
     QSettings().clear()
+
+
+def test_numbered_senses_keep_their_lines_in_a_pdf() -> None:
+    # ReportLab joins lines unless told otherwise; markup characters stay text.
+    assert pdf_exporter._escape("1. a <b>\n2. b & c") == "1. a &lt;b&gt;<br/>2. b &amp; c"

@@ -404,7 +404,7 @@ class ReviewCard(QFrame):
             if part
         )
         self.meta_label.setText(meta)
-        parts = [_block("Definition", escape(word.definition or "No definition yet."))]
+        parts = [_block("Definition", _html(word.definition or "No definition yet."))]
         if step.contexts:
             items = "<br>".join(f"“{_marked(c.text, word.word)}”" for c in step.contexts)
             title = "Context" if len(step.contexts) == 1 else "Contexts"
@@ -422,7 +422,7 @@ class ReviewCard(QFrame):
             self.prompt_detail.setText("Which definition fits the word in bold?")
         else:
             self.prompt_label.setObjectName("PromptLabel")
-            self.prompt_label.setText(escape(question.prompt))
+            self.prompt_label.setText(_html(question.prompt))
             self.prompt_detail.setText("Which word is it?")
         repolish(self.prompt_label)
         _fit(self.prompt_label, _INNER_WIDTH)
@@ -500,7 +500,7 @@ class ReviewCard(QFrame):
             "<br>".join(
                 f"<span style='font-weight:600'>{escape(label)}:</span> "
                 + (f"<b>{escape(value)}</b>" if label in ("Word", "Correct answer")
-                   else escape(value))
+                   else _html(value))
                 for label, value in text.lines
             )
         )
@@ -572,6 +572,12 @@ def _fit(label: QLabel, width: int) -> None:
     label.setMinimumHeight(0)
     label.setMaximumHeight(_NO_LIMIT)
     label.setFixedHeight(label.heightForWidth(width))
+
+
+def _html(text: str) -> str:
+    """Plain text for a rich-text label: escaped, its line breaks kept (a
+    definition's numbered senses are one per line)."""
+    return escape(text).replace("\n", "<br>")
 
 
 def _block(title: str, html: str) -> str:

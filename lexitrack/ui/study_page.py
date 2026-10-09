@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..models.definition_text import one_line_definition
 from ..models.srs import Channel, Rating
 from ..models.word_entry import CEFR_ORDER
 from ..services.first_learning import estimate
@@ -735,7 +736,7 @@ class StudyPage(QWidget):
         """Today's words and their meanings, one per line, as copied."""
         lines = []
         for word in self.today_words():
-            meaning = _meaning(word)
+            meaning = one_line_definition(_meaning(word))
             lines.append(f"{word.word} — {meaning}" if meaning else word.word)
         return "\n".join(lines)
 

@@ -47,6 +47,7 @@ from html import escape
 
 from ..models.attempt import Task
 from ..models.context import find_word
+from ..models.definition_text import one_line_definition
 from ..models.srs import Rating
 from ..services.learning_service import AnswerOutcome, DailyPlan
 from ..services.review_flow import Step, StepKind
@@ -535,6 +536,7 @@ def stale(action: str) -> str:
 def _word_line(word: str, definition: str | None) -> str:
     text = f"• <b>{escape(word)}</b>"
     if definition:
+        definition = one_line_definition(definition)
         short = definition if len(definition) <= _DEFINITION_LENGTH else (
             definition[: _DEFINITION_LENGTH - 1].rstrip() + "…"
         )

@@ -552,8 +552,10 @@ def _cell(value: str | None, style: ParagraphStyle, styles: dict[str, ParagraphS
 
 
 def _escape(text: str) -> str:
-    """Escape the characters ReportLab treats as inline markup."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    """Escape the characters ReportLab treats as inline markup, and keep line
+    breaks (a definition's numbered senses are one per line)."""
+    escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return escaped.replace("\n", "<br/>")
 
 
 def _numbered_canvas(text: str, fonts: Fonts):

@@ -780,6 +780,14 @@ required; a typical file looks like:
 { "name": "German A1", "language": "de", "words": ["Haus", "gehen", "kommen"] }
 ```
 
+[`examples/lexitrack_english_core.json`](examples/lexitrack_english_core.json)
+is **LexiTrack English Core**, the word list the phone app ships: 7,091
+English words from A1 to C2, each with its common meanings numbered, in
+simple English, and example sentences for each meaning. In a definition, `~`
+stands for the word itself (under *lap*, “(~ up)” is *lap up*), and a last
+line starting “Note:” gives spellings, irregular forms or register; a
+question never shows the note, since it could name the word (§97).
+
 Importing a JSON file into a list whose words you already have fills in the
 details they lack and adds the contexts they do not have — a file of
 definitions for an Oxford list adds the definitions and changes nothing you

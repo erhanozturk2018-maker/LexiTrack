@@ -174,3 +174,27 @@ def test_the_word_is_picked_out_in_its_other_forms() -> None:
     question = context_to_definition(word, context, POOL, "s")
     start, end = question.highlight
     assert context.text[start:end] == "acquired"
+
+
+def test_a_note_under_the_definition_is_never_shown_in_a_question() -> None:
+    noted = StoredWord(
+        id=99, word="harbor", normalized_word="harbor", part_of_speech="noun",
+        cefr_level="B2", language="en",
+        definition=(
+            "1. an area of water where ships can stay safely\n"
+            "2. to keep a feeling in your mind\n"
+            "Note: British spelling: harbour."
+        ),
+    )
+    pool = OptionPool([
+        *_candidates(),
+        Candidate(id=99, word="harbor", normalized="harbor", language="en",
+                  part_of_speech="noun", cefr_level="B2", definition=noted.definition),
+    ])
+    question = definition_to_word(noted, pool, "seed")
+    assert "harbour" not in question.prompt
+    assert len(question.prompt.split("\n")) == 2
+    context = context_to_definition(
+        noted, WordContext(99, "The boats are in the harbor.", 1), pool, "seed"
+    )
+    assert "Note" not in context.right.text

@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 from ..models.attempt import Task
 from ..models.context import WordContext, find_word
+from ..models.definition_text import sense_count, sense_text
 from ..models.word_entry import CEFR_ORDER
 from ..normalization.word_normalizer import normalize_word
 from ..repositories.word_repository import Candidate, StoredWord
@@ -149,7 +150,7 @@ class OptionPool:
                 not _same_family(target, e)
                 # A word the definition itself uses would be a trap: "sleep"
                 # for "to sleep later than usual".
-                and find_word(target.candidate.definition, e.candidate.word) is None
+                and find_word(target.definition, e.candidate.word) is None
                 and target.definition_key != e.definition_key
                 and all(
                     not _same_family(o, e) and o.definition_key != e.definition_key
@@ -177,7 +178,7 @@ class OptionPool:
                 and target.definition_key != e.definition_key
                 # A definition that names the word, or a word the sentence
                 # contains, would make the choice about something else.
-                and find_word(e.candidate.definition, word.word) is None
+                and find_word(e.definition, word.word) is None
                 and find_word(context, e.candidate.word) is None
                 and all(
                     o.definition_key != e.definition_key and not _same_family(o, e)
@@ -217,7 +218,7 @@ def definition_to_word(word: StoredWord, pool: OptionPool, seed: str) -> Questio
         return None
     others = pool.others_for_word(word, seed)
     options = [Option(word.id, word.word), *(Option(c.id, c.word) for c in others)]
-    return _shuffled(Task.DEFINITION_TO_WORD, word.definition, options, seed)
+    return _shuffled(Task.DEFINITION_TO_WORD, sense_text(word.definition), options, seed)
 
 
 def context_to_definition(
@@ -228,7 +229,10 @@ def context_to_definition(
     if not word.definition:
         return None
     others = pool.others_for_definition(word, context.text, seed)
-    options = [Option(word.id, word.definition), *(Option(c.id, c.definition) for c in others)]
+    options = [
+        Option(word.id, sense_text(word.definition)),
+        *(Option(c.id, sense_text(c.definition)) for c in others),
+    ]
     question = _shuffled(Task.CONTEXT_TO_DEFINITION, context.text, options, seed)
     return Question(
         task=question.task,
@@ -262,13 +266,15 @@ class _Entry:
     #: The words that carry meaning, for telling one word family from another.
     content: frozenset[str]
     senses: int
+    #: The definition as questions show it, without notes.
+    definition: str
     definition_length: int
     definition_key: str
 
     @classmethod
     def of(cls, candidate: Candidate) -> _Entry:
         tokens = _tokens(candidate.word)
-        definition = candidate.definition or ""
+        definition = sense_text(candidate.definition or "")
         return cls(
             candidate=candidate,
             pos=frozenset(_pos_set(candidate.part_of_speech)),
@@ -276,7 +282,8 @@ class _Entry:
             tokens=len(tokens),
             letters=len(candidate.word),
             content=frozenset(t for t in tokens if t not in _FUNCTION_WORDS and len(t) >= 3),
-            senses=_senses(definition),
+            senses=sense_count(definition),
+            definition=definition,
             definition_length=len(definition),
             definition_key=" ".join(definition.casefold().split()),
         )
@@ -342,8 +349,3 @@ def _level_distance(a: int | None, b: int | None) -> float:
     if a is None or b is None:
         return 1.5
     return abs(a - b)
-
-
-def _senses(definition: str) -> int:
-    """How many senses a definition lists: parts between semicolons."""
-    return max(1, sum(1 for part in definition.split(";") if part.strip()))
