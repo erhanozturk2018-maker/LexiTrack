@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 
 from ...core.errors import LexiTrackError
 from ...models.context import WordContext, clean_context, contains_word, same_context
+from ...models.definition_text import clean_definition
 from ...models.user_word_state import ReviewStatus
 from ...repositories.word_repository import StoredWord
 from ...services.vocabulary_service import WordEdit
@@ -314,7 +315,7 @@ class WordPanel(QFrame):
         layout.addWidget(self.definition)
         self.definition_field = QPlainTextEdit()
         self.definition_field.setObjectName("DefinitionField")
-        self.definition_field.setFixedHeight(84)
+        self.definition_field.setFixedHeight(120)
         self.definition_field.setTabChangesFocus(True)
         self.definition_field.setAccessibleName("Definition")
         self.definition_field.setPlaceholderText("Every sense the word is learned in")
@@ -601,7 +602,7 @@ class WordPanel(QFrame):
         """What Save would write."""
         word = self.word
         assert word is not None
-        definition = clean_context(self.definition_field.toPlainText())
+        definition = clean_definition(self.definition_field.toPlainText())
         return WordEdit(
             definition=definition if definition != (word.definition or "") else None,
             changed={row.context.id: row.text for row in self._rows if row.is_edited},
@@ -618,7 +619,7 @@ class WordPanel(QFrame):
 
     def _problem(self) -> str | None:
         """Why Save cannot write what is on screen, if it cannot."""
-        if not clean_context(self.definition_field.toPlainText()):
+        if not clean_definition(self.definition_field.toPlainText()):
             return "The definition cannot be empty: it is what the word is asked from."
         kept = [row for row in self._rows if not row.removed and not (row.is_new and not row.text)]
         for number, row in enumerate(self._rows, start=1):

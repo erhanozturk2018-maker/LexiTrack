@@ -19,6 +19,7 @@ from pathlib import Path
 from ..core.errors import ListError, WordError
 from ..database.connection import Database
 from ..models.context import WordContext, clean_context
+from ..models.definition_text import clean_definition
 from ..models.language import UNDETERMINED
 from ..models.source import Source
 from ..models.user_word_state import Progress, ReviewStatus
@@ -265,7 +266,7 @@ class VocabularyService:
             source_id=MANUAL_SOURCE.key,
             part_of_speech=clean(part_of_speech),
             cefr_level=level.upper() if level else None,
-            definition=clean(definition),
+            definition=clean_definition(definition) or None,
             language=target.language,
             contexts=tuple(text for text in (clean_context(t) for t in contexts) if text),
         )

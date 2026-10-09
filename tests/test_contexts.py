@@ -113,6 +113,10 @@ def test_the_definition_is_replaced(service: VocabularyService, english) -> None
         word.id, "done on purpose; to think carefully before deciding"
     )
     assert updated.definition == "done on purpose; to think carefully before deciding"
+    numbered = service.set_definition(word.id, " 1. done  on purpose\r\n\n2. to think carefully ")
+    assert numbered.definition == "1. done on purpose\n2. to think carefully"
+    added, _ = service.add_word(english.id, "lap", definition="1. a part of your legs\n2. one trip")
+    assert added.definition == "1. a part of your legs\n2. one trip"
     with pytest.raises(WordError):
         service.set_definition(word.id, "  ")
 

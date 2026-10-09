@@ -1647,7 +1647,10 @@ word, as in a printed dictionary: under *lap*, `(~ up)` is *lap up*.
   semicolons in older definitions (`sense_count`).
 - The study card, the answer panel and PDFs keep the lines; a copied or
   Telegram line puts the senses one after another (`one_line_definition`).
-- LexiTrack English Core, version 3, is written this way and is in
+- Saving, editing and adding a word clean a definition line by line and
+  keep its line breaks (`clean_definition`); cleaning it as one sentence
+  would run the senses into a paragraph.
+- LexiTrack English Core, version 4, is written this way and is in
   `examples/lexitrack_english_core.json`; its source and build tool live in
   the phone's repository (`tool/dataset/`, `tool/build_definitions.py`).
 

@@ -1,6 +1,6 @@
 {
  "format": "lexitrack-dataset",
- "dataset_version": 3,
+ "dataset_version": 4,
  "name": "LexiTrack English Core",
  "language": "en",
  "description": "General English vocabulary from A1 to C2, American spelling, with definitions sense by sense and example sentences: enough for IELTS 7.5, without rare words.",

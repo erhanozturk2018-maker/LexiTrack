@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from ..core.errors import StorageError, WordError
 from ..database.connection import Database
 from ..models.context import clean_context, word_length
+from ..models.definition_text import clean_definition
 from ..models.language import UNDETERMINED
 from ..models.user_word_state import ReviewStatus
 from ..models.word_entry import WordEntry
@@ -314,7 +315,7 @@ class WordRepository:
         replaced, so the new text is the one shown. A word none of whose
         sources gives one gets it on its first source.
         """
-        text = clean_context(definition)
+        text = clean_definition(definition)
         if not text:
             raise WordError("A definition cannot be empty.")
         try:

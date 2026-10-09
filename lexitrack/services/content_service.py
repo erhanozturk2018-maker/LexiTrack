@@ -37,6 +37,7 @@ from typing import Any
 from ..core.errors import InvalidFileError
 from ..database.connection import Database
 from ..models.context import MAX_CONTEXT_LENGTH, clean_context, contains_word, same_context
+from ..models.definition_text import clean_definition
 from ..models.language import is_determined, normalize_language
 from ..normalization.word_normalizer import normalize_word
 from ..repositories import ContextRepository, WordRepository
@@ -292,9 +293,9 @@ class ContentService:
             entry.new_contexts.append(clean)
 
         definition = item.get("definition")
-        if isinstance(definition, str) and clean_context(definition):
-            new = clean_context(definition)
-            if " ".join((word.definition or "").split()) != new:
+        if isinstance(definition, str) and clean_definition(definition):
+            new = clean_definition(definition)
+            if clean_definition(word.definition) != new:
                 entry.definition = new
         elif definition is not None and not isinstance(definition, str):
             entry.warnings.append("“definition” is not text, so it was left out")

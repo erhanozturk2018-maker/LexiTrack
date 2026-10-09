@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from .context import clean_context
+
 _NOTE = re.compile(r"^\s*note\s*:", re.IGNORECASE)
 _NUMBERED = re.compile(r"^\s*\d+\.\s")
 
@@ -44,3 +46,11 @@ def one_line_definition(definition: str) -> str:
     """The definition on one line, for a table row or a copied line: its
     senses one after another ("1. … 2. …"), without notes."""
     return " ".join(line.strip() for line in sense_text(definition).split("\n") if line.strip())
+
+
+def clean_definition(text: str | None) -> str:
+    """A definition as stored: each line cleaned as a context is (spacing
+    made single, ends trimmed), empty lines dropped, the line breaks kept, so
+    numbered senses stay one per line."""
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return "\n".join(clean for clean in (clean_context(line) for line in lines) if clean)

@@ -3,7 +3,12 @@ test/domain/definition_text_test.dart checks the same cases."""
 
 from __future__ import annotations
 
-from lexitrack.models.definition_text import one_line_definition, sense_count, sense_text
+from lexitrack.models.definition_text import (
+    clean_definition,
+    one_line_definition,
+    sense_count,
+    sense_text,
+)
 
 LAP = (
     "1. (noun) the top part of your legs when you are sitting\n"
@@ -37,3 +42,9 @@ def test_one_line_for_a_list_row() -> None:
         "3. (phrasal verb) (~ up) to enjoy something very much"
     )
     assert one_line_definition("a farm building") == "a farm building"
+
+
+def test_a_definition_is_cleaned_line_by_line_and_keeps_its_line_breaks() -> None:
+    assert clean_definition("  1.  one\r\n\n 2. two  \rNote:  x ") == "1. one\n2. two\nNote: x"
+    assert clean_definition(LAP) == LAP
+    assert clean_definition(None) == ""
