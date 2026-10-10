@@ -266,3 +266,39 @@ class TestSettings:
         relaxed_due = relaxed.review(relaxed_card, Rating.GOOD, clock.now_utc()).card.due_at
         strict_due = strict.review(strict_card, Rating.GOOD, clock.now_utc()).card.due_at
         assert strict_due < relaxed_due
+
+
+class TestLearningDays:
+    """Decision 7: the time since the last answer is counted in learning days."""
+
+    @staticmethod
+    def answer(
+        clock: FrozenClock, scheduler: SrsScheduler, card: SrsCard, rating: Rating, hour: int
+    ) -> SrsCard:
+        """Answer on the day the card is due, at ``hour``."""
+        clock.set(clock.at_hour(hour, clock.local_date(card.due_at)))
+        return scheduler.review(card, rating, clock.now_utc()).card
+
+    def test_an_answer_the_next_morning_counts_as_a_day_later(
+        self, clock: FrozenClock, scheduler: SrsScheduler
+    ) -> None:
+        stabilities = []
+        for hour in (9, 21):
+            clock.set(datetime(2026, 9, 17, 5, 0, tzinfo=UTC))
+            card = self.answer(clock, scheduler, new_card(clock, scheduler), Rating.AGAIN, 21)
+            card = self.answer(clock, scheduler, card, Rating.GOOD, hour)
+            assert card.state is CardState.REVIEW
+            stabilities.append(card.stability)
+        assert stabilities[0] == pytest.approx(stabilities[1])
+
+    def test_good_answers_each_earlier_in_the_day_still_move_the_word_away(
+        self, clock: FrozenClock, scheduler: SrsScheduler
+    ) -> None:
+        card = self.answer(clock, scheduler, new_card(clock, scheduler), Rating.GOOD, 21)
+        card = self.answer(clock, scheduler, card, Rating.AGAIN, 21)
+        gaps = []
+        for hour in (12, 10, 8, 6):
+            card = self.answer(clock, scheduler, card, Rating.GOOD, hour)
+            gaps.append(clock.days_between(clock.now_utc(), card.due_at))
+        assert gaps[0] >= 2, gaps
+        assert gaps == sorted(set(gaps)), gaps

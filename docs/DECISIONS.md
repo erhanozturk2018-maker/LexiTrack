@@ -660,6 +660,14 @@ Snapping keeps the morning count stable through the day and an evening
 session finite. With intervals already quantised to days, fuzzing would only
 move cards between days at random and make the forecast unreproducible.
 
+The time since the last answer is counted in learning days as well. FSRS
+counts whole 24-hour periods, so an answer at 09:00 after one at 21:00 the
+evening before counted as a second answer on the same day: the memory barely
+grew, and a word rated Again came back every day for as long as each day's
+answer came earlier than the last. The engine card's last answer is now
+placed as many whole days before the new one as there are learning days
+between them.
+
 ---
 
 ## 44. The introduction is not a review

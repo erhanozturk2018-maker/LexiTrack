@@ -527,6 +527,8 @@ what the library cannot decide for a once-a-day app:
 
 - learning and relearning steps are one day, not minutes;
 - due times are snapped to the start of a learning day, and never to today;
+- the time since the last answer is counted in learning days, not 24-hour
+  periods;
 - fuzzing is off, so the forecast is reproducible;
 - the library's own state travels as JSON in `srs_cards.fsrs_state` and is
   read nowhere else.

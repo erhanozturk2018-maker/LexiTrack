@@ -1,7 +1,7 @@
 """The scheduler: one rating in, a new schedule out.
 
 This is a thin, deliberate wrapper around the ``fsrs`` library. It exists to
-hold four decisions that the library cannot make for us, and to keep them in
+hold the decisions that the library cannot make for us, and to keep them in
 one place instead of scattered through the services:
 
 1. **Steps are days, not minutes.** The library's defaults schedule a new card
@@ -35,6 +35,12 @@ one place instead of scattered through the services:
    (21 days by default). Without this the intervals jump past it — 11 days,
    then 46 — and the offer would wait two months instead of five weeks. The
    caller decides when it applies; see ``LearningService``.
+
+7. **The time since the last answer is counted in learning days.** FSRS
+   counts whole 24-hour periods, so a word answered at 21:00 and again at
+   09:00 the next day would count as answered twice on one day: its memory
+   would barely grow and it would come back the next day, again and again,
+   for as long as each day's answer came earlier than the last.
 
 The library's own state travels in ``SrsCard.fsrs_state`` as JSON and is never
 interpreted outside this module. That is what makes a future parameter
@@ -372,13 +378,24 @@ class SrsScheduler:
         """
         if card.fsrs_state:
             try:
-                return FsrsCard.from_dict(json.loads(card.fsrs_state))
+                return self._in_learning_days(FsrsCard.from_dict(json.loads(card.fsrs_state)), now)
             except (ValueError, KeyError, TypeError):
                 # Unreadable state is rebuilt rather than fatal: losing the
                 # interval history costs accuracy, losing the card would cost
                 # the user their word.
                 pass
         return FsrsCard(due=_utc(now))
+
+    def _in_learning_days(self, card: FsrsCard, now: datetime) -> FsrsCard:
+        """The card as FSRS should see it ``now``: its last answer as many
+        whole days ago as there are learning days between them (decision 7).
+        An answer on the same learning day is left as it is."""
+        if card.last_review is None:
+            return card
+        days = self._clock.days_between(card.last_review, _utc(now))
+        if days:
+            card.last_review = _utc(now) - timedelta(days=days)
+        return card
 
     def _elapsed_days(self, card: SrsCard, now: datetime) -> float | None:
         reference = card.last_review_at or card.introduced_at
