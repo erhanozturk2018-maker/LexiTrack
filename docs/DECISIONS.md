@@ -1644,9 +1644,11 @@ which had no Cyrillic.
 
 ## 97. Definitions sense by sense
 
-**Decision.** A definition may list several senses, numbered one per line,
-with the type in brackets when they differ (`1. (noun) …`, `2. (verb) …`),
-and may end with a line `Note: …` (mobile D-30). In it, `~` stands for the
+**Decision.** A definition may list several senses, numbered one per line
+with the type in brackets (`1. (noun) …`, `2. (verb) …`), and may end with
+a line `Note: …` (mobile D-30). LexiTrack English Core writes every word
+this way, a single sense included, and gives each sense exactly one
+example, in sense order. In it, `~` stands for the
 word, as in a printed dictionary: under *lap*, `(~ up)` is *lap up*.
 
 - Questions leave the note out (`models/definition_text.sense_text`): a note
@@ -1658,7 +1660,7 @@ word, as in a printed dictionary: under *lap*, `(~ up)` is *lap up*.
 - Saving, editing and adding a word clean a definition line by line and
   keep its line breaks (`clean_definition`); cleaning it as one sentence
   would run the senses into a paragraph.
-- LexiTrack English Core, version 4, is written this way and is in
+- LexiTrack English Core, version 5, is written this way and is in
   `examples/lexitrack_english_core.json`; its source and build tool live in
   the phone's repository (`tool/dataset/`, `tool/build_definitions.py`).
 

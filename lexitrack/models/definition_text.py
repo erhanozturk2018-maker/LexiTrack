@@ -1,6 +1,7 @@
 """How a definition is laid out (mobile lib/domain/text/definition_text.dart).
 
-One sense is a line of text. Several are numbered, one per line::
+Every sense is numbered on its own line, with its type in brackets, even
+when there is only one::
 
     1. (noun) the top part of your legs when you are sitting
     2. (verb) (of water) to touch something gently with small waves
@@ -44,8 +45,12 @@ def sense_count(definition: str) -> int:
 
 def one_line_definition(definition: str) -> str:
     """The definition on one line, for a table row or a copied line: its
-    senses one after another ("1. … 2. …"), without notes."""
-    return " ".join(line.strip() for line in sense_text(definition).split("\n") if line.strip())
+    senses one after another ("1. … 2. …"), without notes. A single sense
+    loses its "1."."""
+    lines = [line.strip() for line in sense_text(definition).split("\n") if line.strip()]
+    if len(lines) == 1:
+        return re.sub(r"^1\.\s+", "", lines[0])
+    return " ".join(lines)
 
 
 def clean_definition(text: str | None) -> str:

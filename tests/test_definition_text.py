@@ -42,6 +42,7 @@ def test_one_line_for_a_list_row() -> None:
         "3. (phrasal verb) (~ up) to enjoy something very much"
     )
     assert one_line_definition("a farm building") == "a farm building"
+    assert one_line_definition("1. (noun) a farm building") == "(noun) a farm building"
 
 
 def test_a_definition_is_cleaned_line_by_line_and_keeps_its_line_breaks() -> None:
